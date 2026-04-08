@@ -584,6 +584,13 @@ internal static class PivotTableHelper
                     throw new ArgumentException(
                         "pivot name contains invalid control characters");
             }
+            // R11-4: Excel limits pivot table names to 255 characters. Reject
+            // longer names up front rather than letting Excel silently truncate
+            // (or in some cases reject the file on open with a corrupted-doc
+            // warning).
+            if (explicitName.Length > 255)
+                throw new ArgumentException(
+                    "pivot name exceeds 255-character limit");
             // R6-1: user-supplied name must be unique within the workbook.
             // Throw ArgumentException rather than silently allowing the
             // collision (Excel would auto-rename on open, but the on-disk
