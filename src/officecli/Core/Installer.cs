@@ -77,6 +77,15 @@ internal static class Installer
             return false;
         }
 
+        // Skip binary copy when managed by a package manager (Homebrew, etc.)
+        if (src.Contains("/Caskroom/") || src.Contains("/Cellar/"))
+        {
+            if (!quiet)
+                Console.WriteLine("Skipping binary install: managed by Homebrew.");
+            RecordInstalledVersion();
+            return false;
+        }
+
         // Skip if not a self-contained published binary (e.g. running via dotnet run)
         // Self-contained single-file binaries are typically >5MB; framework-dependent builds are <1MB
         var srcInfo = new FileInfo(src);
