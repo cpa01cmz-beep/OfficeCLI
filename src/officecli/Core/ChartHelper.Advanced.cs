@@ -16,11 +16,20 @@ internal static partial class ChartHelper
 
     /// <summary>
     /// Add a reference (target/average) line to a chart by inserting a hidden line series.
-    /// Format: "value" or "value:color" or "value:color:label" or "value:color:label:dash"
-    /// e.g. "50", "75:FF0000", "100:00AA00:Target", "80:0000FF:Average:dash"
+    /// Format (positional, ':'-separated):
+    ///   value
+    ///   value:color
+    ///   value:color:label
+    ///   value:color:width:dash      (4 parts, if parts[2] is numeric and parts[3] is a known dash style)
+    ///   value:color:label:dash      (4 parts, legacy — parts[2] is non-numeric)
+    ///   value:color:width:dash:label (5 parts, canonical — parts[2] may be empty for default width)
+    /// Width is in points (default 1.5pt). Dash style: solid/dot/dash/dashdot/longdash/longdashdot/longdashdotdot.
+    /// e.g. "50", "75:FF0000", "100:00AA00:Target", "80:0000FF:Average:dash",
+    ///      "50:FF0000:2.5:dash", "50:FF0000:2:dash:Target", "50:FF0000::dash:Target"
     /// </summary>
     internal static void AddReferenceLine(C.Chart chart, string spec)
     {
+        const double DefaultWidthPt = 1.5;
         var plotArea = chart.GetFirstChild<C.PlotArea>();
         if (plotArea == null) return;
 
@@ -32,11 +41,57 @@ internal static partial class ChartHelper
             System.Globalization.NumberStyles.Float,
             System.Globalization.CultureInfo.InvariantCulture, out var refValue))
             throw new ArgumentException(
-                $"Invalid referenceLine value '{parts[0]}'. Expected: number or number:color:label:dash (e.g. '50:FF0000:Target:dash').");
+                $"Invalid referenceLine value '{parts[0]}'. Expected: number or number:color:label:dash (e.g. '50:FF0000:Target:dash') or number:color:width:dash (e.g. '50:FF0000:2:dash').");
 
         var color = parts.Length > 1 ? parts[1].Trim() : "FF0000";
-        var label = parts.Length > 2 ? parts[2].Trim() : $"Ref ({refValue})";
-        var dash = parts.Length > 3 ? parts[3].Trim() : "dash";
+        double widthPt = DefaultWidthPt;
+        string label = $"Ref ({refValue.ToString("G", System.Globalization.CultureInfo.InvariantCulture)})";
+        string dash = "dash";
+
+        // Positional parse — see doc comment above. parts[0..1] already consumed.
+        if (parts.Length == 3)
+        {
+            label = parts[2].Trim();
+        }
+        else if (parts.Length == 4)
+        {
+            var p2 = parts[2].Trim();
+            var p3 = parts[3].Trim();
+            // Disambiguate: "50:FF0000:2.5:dash" (width form) vs "50:FF0000:Target:dash" (legacy label form).
+            // Only treat p2 as width if it parses as a number AND p3 is a recognized dash keyword — both
+            // conditions together make the "ergonomic" width interpretation unambiguous.
+            if (double.TryParse(p2, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out var w4)
+                && IsKnownDashStyle(p3))
+            {
+                widthPt = w4;
+                dash = p3;
+            }
+            else
+            {
+                label = p2;
+                dash = p3;
+            }
+        }
+        else if (parts.Length >= 5)
+        {
+            // Canonical 5-part form: value:color:width:dash:label (extra parts after label are joined
+            // back with ':' so labels containing literal colons survive a round-trip).
+            var widthStr = parts[2].Trim();
+            if (widthStr.Length > 0)
+            {
+                if (!double.TryParse(widthStr, System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out widthPt))
+                    throw new ArgumentException(
+                        $"Invalid referenceLine width '{widthStr}'. Expected a number in points (e.g. '1.5'), or empty for default {DefaultWidthPt}pt.");
+            }
+            dash = parts[3].Trim();
+            label = string.Join(':', parts.Skip(4)).Trim();
+        }
+
+        if (widthPt <= 0 || widthPt > 100)
+            throw new ArgumentException(
+                $"Invalid referenceLine width '{widthPt.ToString("G", System.Globalization.CultureInfo.InvariantCulture)}'. Expected a positive number of points, typically 0.25–10.");
 
         // Warn: percent-stacked value axis is 0-1 (displayed 0%-100%). A refValue > 1
         // is almost always a mistake — user likely forgot to convert 50 → 0.5.
@@ -49,23 +104,6 @@ internal static partial class ChartHelper
                 + "on a percent-stacked chart. The value axis is 0-1 (0%-100%); "
                 + $"did you mean {(refValue / 100.0).ToString("G", System.Globalization.CultureInfo.InvariantCulture)}? "
                 + "Excel will auto-scale the axis to fit, compressing the real bars.");
-        }
-
-        // Warn: if spec has 4 parts, parts[2] parses as a number, and parts[3] is a
-        // recognized dash style, the user probably thought the format was
-        // value:color:width:dash (it isn't — there is no width field, line width is
-        // fixed at 1.5pt). Heuristic, not a hard error: a purely numeric label is
-        // legitimate if the user really wanted a number as the series label.
-        if (parts.Length == 4
-            && double.TryParse(parts[2].Trim(),
-                System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out _)
-            && IsKnownDashStyle(parts[3].Trim()))
-        {
-            Console.Error.WriteLine(
-                $"Warning: referenceLine label '{parts[2].Trim()}' looks like a number. "
-                + "Format is value:color:label:dash — there is no width field "
-                + "(line width is fixed at 1.5pt). If you intended a numeric label, this warning can be ignored.");
         }
 
         // Find max data point count from existing series (after removing old ref lines)
@@ -122,9 +160,9 @@ internal static partial class ChartHelper
         refSer.AppendChild(new C.Order { Val = seriesIdx });
         refSer.AppendChild(new C.SeriesText(new C.NumericValue(label)));
 
-        // Style: colored dashed line, no markers
+        // Style: colored dashed line, no markers. Width is pt → EMU (1pt = 12700 EMU).
         var spPr = new C.ChartShapeProperties();
-        var outline = new Drawing.Outline { Width = 19050 }; // 1.5pt
+        var outline = new Drawing.Outline { Width = (int)Math.Round(widthPt * 12700) };
         var sf = new Drawing.SolidFill();
         sf.AppendChild(BuildChartColorElement(color));
         outline.AppendChild(sf);

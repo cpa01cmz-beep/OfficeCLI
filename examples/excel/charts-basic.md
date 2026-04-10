@@ -79,7 +79,9 @@ officecli add data.xlsx /Sheet --type chart \
 
 # 100% stacked bar with reference line and axis lines
 # Note: value axis of a barPercentStacked chart is 0-1 (= 0%-100%), so a 50% line = 0.5
-# referenceLine format: value:color:label:dash (no width field; line is fixed at 1.5pt)
+# referenceLine forms: value | value:color | value:color:label | value:color:width:dash
+#                      | value:color:label:dash | value:color:width:dash:label
+# Width is in points (default 1.5pt). e.g. 0.5:FF0000:2:dash draws a 2pt dashed line.
 officecli add data.xlsx /Sheet --type chart \
   --prop chartType=barPercentStacked \
   --prop referenceLine=0.5:FF0000:Target:dash \

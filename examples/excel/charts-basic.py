@@ -229,9 +229,11 @@ cli(f'add "{FILE}" "/2-Bar Charts" --type chart'
 #
 # Note: on a barPercentStacked chart, the value axis is 0-1 (displayed as 0%-100%),
 # so a 50% reference line must be written as 0.5 — not 50.
-# referenceLine format is value:color:label:dash (no width field; line width is fixed at 1.5pt).
+# referenceLine supports: value | value:color | value:color:label | value:color:width:dash
+# | value:color:label:dash (legacy) | value:color:width:dash:label (canonical).
+# Width is in points; default 1.5pt.
 #
-# Features: barPercentStacked, referenceLine (value:color:label:dash), axisLine, catAxisLine
+# Features: barPercentStacked, referenceLine, axisLine, catAxisLine
 # --------------------------------------------------------------------------
 cli(f'add "{FILE}" "/2-Bar Charts" --type chart'
     f' --prop chartType=barPercentStacked'
