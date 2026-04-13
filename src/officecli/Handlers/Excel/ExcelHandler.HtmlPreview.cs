@@ -1631,7 +1631,8 @@ public partial class ExcelHandler
                 // Context-sensitive m/mm: after h → minute, otherwise → month
                 // Strategy: mark minute 'm' as '\x01' placeholder, then convert remaining m→M
                 var dotnetFmt = NormalizeDateFormatCase(
-                    fmtCode.Replace("AM/PM", "tt").Replace("am/pm", "tt"));
+                    fmtCode.Replace("AM/PM", "tt").Replace("am/pm", "tt")
+                           .Replace("A/P", "t").Replace("a/p", "t"));
                 // Step 1: Replace h:mm and h:m patterns → mark minutes as placeholder
                 dotnetFmt = System.Text.RegularExpressions.Regex.Replace(dotnetFmt, @"([hH]+)([:.])(mm?)", m =>
                     m.Groups[1].Value + m.Groups[2].Value + new string('\x01', m.Groups[3].Value.Length));
@@ -1644,8 +1645,8 @@ public partial class ExcelHandler
                 // Step 3: Restore minute placeholders
                 dotnetFmt = dotnetFmt.Replace("\x01\x01", "mm").Replace("\x01", "m");
                 // Step 4: Other conversions
-                // If AM/PM format (has 'tt'), use h (12h); otherwise use H (24h)
-                if (!dotnetFmt.Contains("tt"))
+                // If AM/PM format (has 'tt' or 't'), use h (12h); otherwise use H (24h)
+                if (!dotnetFmt.Contains('t'))
                     dotnetFmt = dotnetFmt.Replace("hh", "HH").Replace("h", "H");
                 dotnetFmt = dotnetFmt.Replace("dddd", "dddd").Replace("ddd", "ddd").Replace("dd", "dd");
                 return dt.ToString(dotnetFmt, System.Globalization.CultureInfo.InvariantCulture);
