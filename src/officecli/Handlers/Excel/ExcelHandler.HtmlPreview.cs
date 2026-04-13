@@ -1580,6 +1580,10 @@ public partial class ExcelHandler
         else if (cleanFmt.StartsWith('-'))
         { prefix += "-"; cleanFmt = cleanFmt[1..]; }
 
+        // Pure text format (only quoted prefix/suffix, no numeric pattern)
+        if (string.IsNullOrEmpty(cleanFmt.Trim()))
+            return prefix + suffix;
+
         var formatted = ApplyNumberFormatCore(value, cleanFmt.Trim());
         // For single-section formats with currency prefix, negative sign goes before the prefix
         if (value < 0 && prefix.Length > 0 && formatted.StartsWith('-'))
