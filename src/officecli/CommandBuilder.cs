@@ -166,7 +166,11 @@ static partial class CommandBuilder
             Arguments = $"__resident-serve__ \"{filePath}\"",
             UseShellExecute = false,
             CreateNoWindow = true,
-            RedirectStandardOutput = true,
+            // Do NOT redirect stdout: on Windows, RedirectStandardOutput
+            // causes bInheritHandles=TRUE which leaks the outer shell's
+            // pipe handle into the resident, blocking the caller for ~60s
+            // until the resident's idle timeout.  Stderr is still redirected
+            // to capture diagnostics if the resident fails during startup.
             RedirectStandardError = true
         };
 
@@ -185,16 +189,21 @@ static partial class CommandBuilder
         {
             Thread.Sleep(100);
             if (ResidentClient.TryConnect(filePath, out _))
+            {
+                process.Dispose();
                 return true;
+            }
             if (process.HasExited)
             {
                 var stderr = process.StandardError.ReadToEnd();
                 error = $"Resident process exited. {stderr}";
+                process.Dispose();
                 return false;
             }
         }
 
         error = "Resident process started but not responding.";
+        process.Dispose();
         return false;
     }
 
