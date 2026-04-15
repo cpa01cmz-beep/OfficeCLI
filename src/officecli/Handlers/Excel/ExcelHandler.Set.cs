@@ -2169,9 +2169,12 @@ public partial class ExcelHandler
         if (sortKeys.Count == 0) return;
 
         int dataStartRow = sortHeader ? row1 + 1 : row1;
+        // R6-2: a sort that can't reorder anything (empty data region, or a
+        // single data row) is a no-op. Writing sortState in those cases makes
+        // Excel render a bogus sort indicator on a range that was never sorted.
+        // Skip the metadata entirely rather than lying about having sorted.
         if (dataStartRow > row2)
         {
-            WriteSortState(ws, col1, row1, col2, row2, sortKeys);
             return;
         }
 
@@ -2180,7 +2183,6 @@ public partial class ExcelHandler
             .ToList();
         if (rowsInRange.Count <= 1)
         {
-            WriteSortState(ws, col1, row1, col2, row2, sortKeys);
             return;
         }
 
