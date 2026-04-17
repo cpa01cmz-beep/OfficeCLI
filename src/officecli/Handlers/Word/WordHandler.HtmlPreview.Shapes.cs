@@ -260,9 +260,26 @@ public partial class WordHandler
                             isRight = offsetEmu > halfPageEmu;
                         }
                     }
+                    // #7b: use the anchor's distT/distB/distL/distR for the
+                    // float margin instead of a hardcoded 8px. The emu→pt
+                    // conversion keeps spacing in line with what Word paints.
+                    var distT = (long)(anchor.DistanceFromTop?.Value ?? 0) / 12700.0;
+                    var distB = (long)(anchor.DistanceFromBottom?.Value ?? 0) / 12700.0;
+                    var distL = (long)(anchor.DistanceFromLeft?.Value ?? 0) / 12700.0;
+                    var distR = (long)(anchor.DistanceFromRight?.Value ?? 0) / 12700.0;
+                    // Floor the "inside" margin (right for float:left, left for
+                    // float:right) so text always has breathing room.
+                    if (isRight)
+                    {
+                        if (distL < 6) distL = 6;
+                    }
+                    else
+                    {
+                        if (distR < 6) distR = 6;
+                    }
                     floatCss = isRight
-                        ? "float:right;margin:0 0 8px 8px"
-                        : "float:left;margin:0 8px 8px 0";
+                        ? $"float:right;margin:{distT:0.#}pt {distR:0.#}pt {distB:0.#}pt {distL:0.#}pt"
+                        : $"float:left;margin:{distT:0.#}pt {distR:0.#}pt {distB:0.#}pt {distL:0.#}pt";
 
                     // Anchored at top of margin — emit marker for relocation to page start
                     var vPos = anchor.GetFirstChild<DW.VerticalPosition>();

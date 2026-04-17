@@ -39,18 +39,47 @@ public partial class WordHandler
         var tableStyles = new List<string>();
         if (tblpPr != null)
         {
-            // Float the table; determine alignment from horzAnchor/tblpX
+            // #2: Float the table with approximate positioning. Horizontal
+            // anchor + tblpX/tblpY translated into float + margin. Coverage
+            // is ~40% of Word's 2D flow (horzAnchor=margin + vertAnchor=text);
+            // vertAnchor=page/margin would need absolute positioning which
+            // doesn't interact with text flow.
             var hAnchor = tblpPr.HorizontalAnchor?.InnerText;
+            var vAnchor = tblpPr.VerticalAnchor?.InnerText;
             var tblpX = tblpPr.TablePositionX?.Value ?? 0;
-            var floatDir = (hAnchor == "page" && tblpX > 5000) ? "right" : "left";
+            var tblpY = tblpPr.TablePositionY?.Value ?? 0;
+            var xAlign = tblpPr.TablePositionXAlignment?.InnerText;
+            var floatDir = xAlign == "right" || (hAnchor == "page" && tblpX > 5000)
+                ? "right"
+                : xAlign == "left" ? "left" : "left";
             tableStyles.Add($"float:{floatDir}");
-            // Margins from text distance
+            // Margins from text distance (dist…FromText).
             var rightDist = tblpPr.RightFromText?.Value ?? 0;
             var bottomDist = tblpPr.BottomFromText?.Value ?? 0;
             var leftDist = tblpPr.LeftFromText?.Value ?? 0;
-            if (rightDist > 0) tableStyles.Add($"margin-right:{rightDist / 20.0:0.#}pt");
+            var topDist = tblpPr.TopFromText?.Value ?? 0;
+            // Fold tblpX into margin-left (or margin-right for float:right)
+            // when the anchor is margin-relative so the column offset shows.
+            var horzShiftPt = hAnchor == "margin" ? tblpX / 20.0 : 0;
+            if (floatDir == "left")
+            {
+                var leftMargin = leftDist / 20.0 + horzShiftPt;
+                if (leftMargin > 0) tableStyles.Add($"margin-left:{leftMargin:0.#}pt");
+                if (rightDist > 0) tableStyles.Add($"margin-right:{rightDist / 20.0:0.#}pt");
+            }
+            else
+            {
+                var rightMargin = rightDist / 20.0 + horzShiftPt;
+                if (rightMargin > 0) tableStyles.Add($"margin-right:{rightMargin:0.#}pt");
+                if (leftDist > 0) tableStyles.Add($"margin-left:{leftDist / 20.0:0.#}pt");
+            }
+            // Vertical offset: only honor vertAnchor=text (default); other
+            // anchors would need absolute positioning, which breaks text
+            // flow and is better left to a future pass.
+            var vertShiftPt = (vAnchor == null || vAnchor == "text") ? tblpY / 20.0 : 0;
+            var topMargin = topDist / 20.0 + vertShiftPt;
+            if (topMargin > 0) tableStyles.Add($"margin-top:{topMargin:0.#}pt");
             if (bottomDist > 0) tableStyles.Add($"margin-bottom:{bottomDist / 20.0:0.#}pt");
-            if (leftDist > 0) tableStyles.Add($"margin-left:{leftDist / 20.0:0.#}pt");
         }
 
         // Table horizontal alignment on page (jc = center/right)
