@@ -592,6 +592,28 @@ public partial class ExcelHandler
                 if (dvProps.TryGetValue("prompt", out var dvPrompt))
                     dv.Prompt = dvPrompt;
 
+                // V6 — errorStyle: stop (default), warning, information.
+                if (dvProps.TryGetValue("errorStyle", out var dvErrStyle))
+                {
+                    dv.ErrorStyle = dvErrStyle.ToLowerInvariant() switch
+                    {
+                        "stop" => DataValidationErrorStyleValues.Stop,
+                        "warning" or "warn" => DataValidationErrorStyleValues.Warning,
+                        "information" or "info" => DataValidationErrorStyleValues.Information,
+                        _ => throw new ArgumentException(
+                            $"Unknown errorStyle: {dvErrStyle}. Use: stop, warning, information")
+                    };
+                }
+
+                // V7 — showDropDown / inCellDropdown. OOXML `showDropDown`
+                // has INVERTED semantics: true = HIDE the in-cell arrow.
+                // Expose it as `inCellDropdown` (user-friendly sense) and
+                // the raw `showDropDown` (OOXML sense).
+                if (dvProps.TryGetValue("inCellDropdown", out var dvInCell))
+                    dv.ShowDropDown = !ParseHelpers.IsTruthy(dvInCell);
+                else if (dvProps.TryGetValue("showDropDown", out var dvShowDd))
+                    dv.ShowDropDown = ParseHelpers.IsTruthy(dvShowDd);
+
                 var wsEl = GetSheet(dvWorksheet);
                 var dvs = wsEl.GetFirstChild<DataValidations>();
                 if (dvs == null)
@@ -716,6 +738,12 @@ public partial class ExcelHandler
                 });
                 dataBar.Append(new DocumentFormat.OpenXml.Spreadsheet.Color { Rgb = normalizedColor });
                 cfRule.Append(dataBar);
+                // CF6 — dataBar `showValue=false` hides the cell's numeric
+                // value under the bar. Defaults to true in OOXML; only emit
+                // the attribute when the user opted out.
+                if (properties.TryGetValue("showValue", out var dbShowVal) && !ParseHelpers.IsTruthy(dbShowVal))
+                    dataBar.ShowValue = false;
+                ApplyStopIfTrue(cfRule, properties);
 
                 var cf = new ConditionalFormatting(cfRule)
                 {
@@ -746,10 +774,14 @@ public partial class ExcelHandler
                 var normalizedMinColor = ParseHelpers.NormalizeArgbColor(minColor);
                 var normalizedMaxColor = ParseHelpers.NormalizeArgbColor(maxColor);
 
+                // CF5 — accept user-supplied midpoint percentile (`midpoint=50`, default 50).
+                var midPointStr = properties.GetValueOrDefault("midpoint")
+                    ?? properties.GetValueOrDefault("midPoint")
+                    ?? "50";
                 var colorScale = new ColorScale();
                 colorScale.Append(new ConditionalFormatValueObject { Type = ConditionalFormatValueObjectValues.Min });
                 if (midColor != null)
-                    colorScale.Append(new ConditionalFormatValueObject { Type = ConditionalFormatValueObjectValues.Percentile, Val = "50" });
+                    colorScale.Append(new ConditionalFormatValueObject { Type = ConditionalFormatValueObjectValues.Percentile, Val = midPointStr });
                 colorScale.Append(new ConditionalFormatValueObject { Type = ConditionalFormatValueObjectValues.Max });
                 colorScale.Append(new DocumentFormat.OpenXml.Spreadsheet.Color { Rgb = normalizedMinColor });
                 if (midColor != null)
@@ -765,6 +797,7 @@ public partial class ExcelHandler
                     Priority = NextCfPriority(GetSheet(csWorksheet))
                 };
                 csRule.Append(colorScale);
+                ApplyStopIfTrue(csRule, properties);
 
                 var csCf = new ConditionalFormatting(csRule)
                 {
@@ -822,6 +855,7 @@ public partial class ExcelHandler
                     Priority = NextCfPriority(GetSheet(isWorksheet))
                 };
                 isRule.Append(iconSet);
+                ApplyStopIfTrue(isRule, properties);
 
                 var isCf = new ConditionalFormatting(isRule)
                 {
@@ -901,6 +935,7 @@ public partial class ExcelHandler
                     FormatId = dxfId
                 };
                 fcfRule.Append(new Formula(fcfFormula));
+                ApplyStopIfTrue(fcfRule, properties);
 
                 var fcfCf = new ConditionalFormatting(fcfRule)
                 {
@@ -1458,7 +1493,14 @@ public partial class ExcelHandler
                 var tableName = SanitizeTableIdentifier(properties.GetValueOrDefault("name", $"Table{tableId}"));
                 var displayName = SanitizeTableIdentifier(properties.GetValueOrDefault("displayName", tableName));
                 var styleName = properties.GetValueOrDefault("style", "TableStyleMedium2");
-                var hasHeader = !properties.TryGetValue("headerRow", out var hrVal) || IsTruthy(hrVal);
+                // T6 — validate style name against the built-in whitelist +
+                // any workbook-level customStyles. Unknown names silently
+                // fell through to Excel which would either ignore or
+                // reject the file; prefer an explicit ArgumentException.
+                ValidateTableStyleName(styleName);
+                // T1 — accept `showHeader=false` alias alongside `headerRow=false`.
+                var hasHeader = !(properties.TryGetValue("headerRow", out var hrVal) && !IsTruthy(hrVal))
+                             && !(properties.TryGetValue("showHeader", out var shVal) && !IsTruthy(shVal));
                 var hasTotalRow = properties.TryGetValue("totalRow", out var trVal) && IsTruthy(trVal);
 
                 var rangeParts = rangeRef.Split(':');
@@ -1535,6 +1577,8 @@ public partial class ExcelHandler
                 };
                 if (hasTotalRow)
                     table.TotalsRowCount = 1;
+                if (!hasHeader)
+                    table.HeaderRowCount = 0;
 
                 table.AppendChild(new AutoFilter { Reference = rangeRef });
 
@@ -1555,13 +1599,21 @@ public partial class ExcelHandler
                     tableColumns.AppendChild(new TableColumn { Id = (uint)(i + 1), Name = colNames[i] });
                 table.AppendChild(tableColumns);
 
+                // T2 — wire the banded rows/columns + first/last column
+                // flags onto the TableStyleInfo. Each accepts `showX` or
+                // its alias; default matches the old hard-coded values so
+                // omitting them is identical to previous behavior.
                 table.AppendChild(new TableStyleInfo
                 {
                     Name = styleName,
-                    ShowFirstColumn = false,
-                    ShowLastColumn = false,
-                    ShowRowStripes = true,
-                    ShowColumnStripes = false
+                    ShowFirstColumn = properties.TryGetValue("showFirstColumn", out var sfc)
+                        ? IsTruthy(sfc) : false,
+                    ShowLastColumn = properties.TryGetValue("showLastColumn", out var slc)
+                        ? IsTruthy(slc) : false,
+                    ShowRowStripes = properties.TryGetValue("showBandedRows", out var sbr)
+                        ? IsTruthy(sbr) : true,
+                    ShowColumnStripes = properties.TryGetValue("showBandedColumns", out var sbc)
+                        ? IsTruthy(sbc) : false
                 });
 
                 // Generate total row content in SheetData when totalRow is enabled
@@ -2453,6 +2505,8 @@ public partial class ExcelHandler
                     default:
                         throw new ArgumentException($"Unsupported CF type: {typeLower}");
                 }
+
+                ApplyStopIfTrue(cfNewRule, properties);
 
                 // Build DXF formatting if fill/font properties are provided
                 var cfNewDxf = new DifferentialFormat();
