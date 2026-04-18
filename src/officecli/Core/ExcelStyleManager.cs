@@ -754,10 +754,16 @@ internal class ExcelStyleManager
             leftStyle = rightStyle = topStyle = bottomStyle = parsed;
         }
 
-        // Apply "color" shorthand
+        // Apply "color" shorthand (border.color) and "all.color" (border.all.color)
+        // Both fan out to all four sides. Per-side colors below can still override.
         if (borderProps.TryGetValue("color", out var allColor))
         {
             var normalized = NormalizeColor(allColor);
+            leftColor = rightColor = topColor = bottomColor = normalized;
+        }
+        if (borderProps.TryGetValue("all.color", out var allColor2))
+        {
+            var normalized = NormalizeColor(allColor2);
             leftColor = rightColor = topColor = bottomColor = normalized;
         }
 
