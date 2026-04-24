@@ -1,0 +1,17 @@
+{
+  "$schema": "../_schema.json",
+  "format": "pptx",
+  "element": "textbox",
+  "parent": "slide",
+  "operations": {
+    "add": true,
+    "set": true,
+    "get": true,
+    "query": true,
+    "remove": true
+  },
+  "paths": {
+    "positional": ["/slide[N]/shape[M]"]
+  },
+  "note": "textbox is an alias for shape — both route to AddShape. See pptx/shape.json for the full property surface. 'textbox' input that includes --prop formula routes to AddEquation instead."
+}
