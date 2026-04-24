@@ -340,8 +340,23 @@ public partial class PowerPointHandler
 
     internal static void ReadBackground(CommonSlideData? cSld, DocumentNode node)
     {
-        var bgPr = cSld?.Background?.BackgroundProperties;
-        if (bgPr == null) return;
+        if (cSld?.Background == null) return;
+
+        var bgPr = cSld.Background.BackgroundProperties;
+        if (bgPr == null)
+        {
+            // Theme-referenced background (p:bgRef). Not settable via our set commands,
+            // but should surface on get so users see that a bg exists.
+            var bgRef = cSld.Background.GetFirstChild<BackgroundStyleReference>();
+            if (bgRef != null)
+            {
+                var color = ReadColorFromElement(bgRef);
+                node.Format["background"] = color != null ? $"ref:{color}" : "ref";
+                if (bgRef.Index?.HasValue == true)
+                    node.Format["background.ref"] = (int)bgRef.Index.Value;
+            }
+            return;
+        }
 
         var solidFill = bgPr.GetFirstChild<Drawing.SolidFill>();
         var gradFill  = bgPr.GetFirstChild<Drawing.GradientFill>();
@@ -354,9 +369,22 @@ public partial class PowerPointHandler
         }
         else if (gradFill != null)
         {
-            var stops = gradFill.GradientStopList?.Elements<Drawing.GradientStop>()
-                .Select(gs => ParseHelpers.FormatHexColor(gs.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value ?? "?"))
-                .ToList();
+            var stopEls = gradFill.GradientStopList?.Elements<Drawing.GradientStop>().ToList();
+            // Emit @pct only when the stop deviates from the uniform default so the common
+            // case round-trips to bare "C1-C2[-Cn]". Scheme colors are handled via
+            // ReadColorFromElement; a hex-only read dropped them as "?".
+            var stops = stopEls?.Select((gs, i) =>
+            {
+                var color = ReadColorFromElement(gs) ?? "?";
+                if (gs.Position?.Value is int pos)
+                {
+                    var n = stopEls.Count;
+                    var expected = n <= 1 ? 0 : (int)((long)i * 100000 / (n - 1));
+                    if (pos != expected)
+                        return $"{color}@{(int)Math.Round(pos / 1000.0)}";
+                }
+                return color;
+            }).ToList();
             if (stops?.Count > 0)
             {
                 var pathGrad = gradFill.GetFirstChild<Drawing.PathGradientFill>();
