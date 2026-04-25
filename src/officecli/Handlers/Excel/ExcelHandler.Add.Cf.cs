@@ -311,7 +311,8 @@ public partial class ExcelHandler
         var fcfWorksheet = FindWorksheet(fcfSheetName)
             ?? throw new ArgumentException($"Sheet not found: {fcfSheetName}");
 
-        var fcfSqref = properties.GetValueOrDefault("sqref") ?? properties.GetValueOrDefault("range", "A1:A10");
+        // CONSISTENCY(cf-sqref): three-level fallback matches dataBar/colorScale branches
+        var fcfSqref = properties.GetValueOrDefault("sqref") ?? properties.GetValueOrDefault("range") ?? properties.GetValueOrDefault("ref", "A1:A10");
         var fcfFormula = properties.GetValueOrDefault("formula")
             ?? throw new ArgumentException("Formula-based conditional formatting requires 'formula' property (e.g. formula=$A1>100)");
 
@@ -383,8 +384,10 @@ public partial class ExcelHandler
         var cisWorksheet = FindWorksheet(cisSheetName)
             ?? throw new ArgumentException($"Sheet not found: {cisSheetName}");
 
+        // CONSISTENCY(cf-sqref): three-level fallback matches dataBar/colorScale branches
         var cisSqref = properties.GetValueOrDefault("sqref")
-            ?? properties.GetValueOrDefault("range", "A1:A10");
+            ?? properties.GetValueOrDefault("range")
+            ?? properties.GetValueOrDefault("ref", "A1:A10");
         var opStr = (properties.GetValueOrDefault("operator") ?? "greaterThan").Trim();
         var opVal = opStr.ToLowerInvariant() switch
         {
