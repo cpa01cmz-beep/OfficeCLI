@@ -406,13 +406,24 @@ public partial class WordHandler
             var rPr = style.StyleRunProperties;
             if (rPr != null)
             {
-                if (rPr.RunFonts?.Ascii?.Value != null) styleNode.Format["font"] = rPr.RunFonts.Ascii.Value;
+                if (rPr.RunFonts != null)
+                {
+                    var rf = rPr.RunFonts;
+                    if (rf.Ascii?.Value != null) styleNode.Format["font.ascii"] = rf.Ascii.Value;
+                    if (rf.EastAsia?.Value != null) styleNode.Format["font.eastAsia"] = rf.EastAsia.Value;
+                    if (rf.HighAnsi?.Value != null) styleNode.Format["font.hAnsi"] = rf.HighAnsi.Value;
+                    if (rf.ComplexScript?.Value != null) styleNode.Format["font.cs"] = rf.ComplexScript.Value;
+                    // Backcompat: keep flat "font" alias = ascii
+                    if (rf.Ascii?.Value != null) styleNode.Format["font"] = rf.Ascii.Value;
+                }
                 if (rPr.FontSize?.Val?.Value != null) styleNode.Format["size"] = $"{int.Parse(rPr.FontSize.Val.Value) / 2.0:0.##}pt";
                 if (rPr.Bold != null) styleNode.Format["bold"] = true;
                 if (rPr.Italic != null) styleNode.Format["italic"] = true;
                 if (rPr.Color?.Val?.Value != null) styleNode.Format["color"] = ParseHelpers.FormatHexColor(rPr.Color.Val.Value);
                 else if (rPr.Color?.ThemeColor?.HasValue == true) styleNode.Format["color"] = rPr.Color.ThemeColor.InnerText;
                 if (rPr.Underline?.Val != null) styleNode.Format["underline"] = rPr.Underline.Val.InnerText;
+                // CONSISTENCY(underline-color): underline.color not yet exposed by paragraph/run Get; backfill there too.
+                if (rPr.Underline?.Color?.Value != null) styleNode.Format["underline.color"] = ParseHelpers.FormatHexColor(rPr.Underline.Color.Value);
                 if (rPr.Strike != null) styleNode.Format["strike"] = true;
             }
 
@@ -421,9 +432,102 @@ public partial class WordHandler
             if (pPr != null)
             {
                 if (pPr.Justification?.Val?.Value != null) styleNode.Format["alignment"] = pPr.Justification.Val.InnerText;
-                if (pPr.SpacingBetweenLines?.Before?.Value != null) styleNode.Format["spaceBefore"] = SpacingConverter.FormatWordSpacing(pPr.SpacingBetweenLines.Before.Value);
-                if (pPr.SpacingBetweenLines?.After?.Value != null) styleNode.Format["spaceAfter"] = SpacingConverter.FormatWordSpacing(pPr.SpacingBetweenLines.After.Value);
-                if (pPr.SpacingBetweenLines?.Line?.Value != null) styleNode.Format["lineSpacing"] = SpacingConverter.FormatWordLineSpacing(pPr.SpacingBetweenLines.Line.Value, pPr.SpacingBetweenLines.LineRule?.InnerText);
+                if (pPr.SpacingBetweenLines != null)
+                {
+                    var sp = pPr.SpacingBetweenLines;
+                    if (sp.Before?.Value != null) styleNode.Format["spaceBefore"] = SpacingConverter.FormatWordSpacing(sp.Before.Value);
+                    if (sp.After?.Value != null) styleNode.Format["spaceAfter"] = SpacingConverter.FormatWordSpacing(sp.After.Value);
+                    if (sp.Line?.Value != null) styleNode.Format["lineSpacing"] = SpacingConverter.FormatWordLineSpacing(sp.Line.Value, sp.LineRule?.InnerText);
+                    // CONSISTENCY(line-rule): lineRule not yet exposed by paragraph Get; backfill there too.
+                    if (sp.LineRule?.HasValue == true) styleNode.Format["lineRule"] = sp.LineRule.InnerText;
+                    // CONSISTENCY(spacing-lines): *Lines variants not yet exposed by paragraph Get.
+                    if (sp.BeforeLines?.Value != null) styleNode.Format["spaceBeforeLines"] = sp.BeforeLines.Value;
+                    if (sp.AfterLines?.Value != null) styleNode.Format["spaceAfterLines"] = sp.AfterLines.Value;
+                }
+
+                if (pPr.Indentation != null)
+                {
+                    var ind = pPr.Indentation;
+                    // Left/Right and Start/End are OOXML aliases; modern Word writes Start/End.
+                    if (ind.FirstLine?.Value != null) styleNode.Format["firstLineIndent"] = ind.FirstLine.Value;
+                    if (ind.Hanging?.Value != null) styleNode.Format["hangingIndent"] = ind.Hanging.Value;
+                    var leftTwips = ind.Left?.Value ?? ind.Start?.Value;
+                    if (leftTwips != null) styleNode.Format["leftIndent"] = leftTwips;
+                    var rightTwips = ind.Right?.Value ?? ind.End?.Value;
+                    if (rightTwips != null) styleNode.Format["rightIndent"] = rightTwips;
+                    // CONSISTENCY(ind-chars): *Chars variants not yet exposed by paragraph Get.
+                    if (ind.FirstLineChars?.Value != null) styleNode.Format["firstLineChars"] = ind.FirstLineChars.Value;
+                    if (ind.HangingChars?.Value != null) styleNode.Format["hangingChars"] = ind.HangingChars.Value;
+                    var leftChars = ind.LeftChars?.Value ?? ind.StartCharacters?.Value;
+                    if (leftChars != null) styleNode.Format["leftChars"] = leftChars;
+                    var rightChars = ind.RightChars?.Value ?? ind.EndCharacters?.Value;
+                    if (rightChars != null) styleNode.Format["rightChars"] = rightChars;
+                }
+
+                // CONSISTENCY(outline-lvl): outlineLvl not yet exposed by paragraph Get.
+                if (pPr.OutlineLevel?.Val?.Value != null) styleNode.Format["outlineLvl"] = (int)pPr.OutlineLevel.Val.Value;
+
+                if (pPr.KeepNext != null) styleNode.Format["keepNext"] = true;
+                if (pPr.KeepLines != null) styleNode.Format["keepLines"] = true;
+                if (pPr.PageBreakBefore != null) styleNode.Format["pageBreakBefore"] = true;
+                // CONSISTENCY(contextual-spacing): not yet exposed by paragraph Get.
+                if (pPr.ContextualSpacing != null) styleNode.Format["contextualSpacing"] = true;
+
+                // Shading — paragraph Get convention: "shd" key, hex if clear+fill only, else "val;fill;color".
+                if (pPr.Shading != null)
+                {
+                    var shdVal = pPr.Shading.Val?.InnerText ?? "";
+                    var shdFill = pPr.Shading.Fill?.Value;
+                    var shdColor = pPr.Shading.Color?.Value;
+                    if (string.Equals(shdVal, "clear", StringComparison.OrdinalIgnoreCase)
+                        && !string.IsNullOrEmpty(shdFill)
+                        && string.IsNullOrEmpty(shdColor))
+                    {
+                        styleNode.Format["shd"] = ParseHelpers.FormatHexColor(shdFill);
+                    }
+                    else
+                    {
+                        var shdParts = new List<string>();
+                        if (!string.IsNullOrEmpty(shdVal)) shdParts.Add(shdVal);
+                        if (!string.IsNullOrEmpty(shdFill)) shdParts.Add(ParseHelpers.FormatHexColor(shdFill));
+                        if (!string.IsNullOrEmpty(shdColor)) shdParts.Add(ParseHelpers.FormatHexColor(shdColor));
+                        styleNode.Format["shd"] = string.Join(";", shdParts);
+                    }
+                }
+
+                var pBdr = pPr.ParagraphBorders;
+                if (pBdr != null)
+                {
+                    ReadBorder(pBdr.TopBorder, "pbdr.top", styleNode);
+                    ReadBorder(pBdr.BottomBorder, "pbdr.bottom", styleNode);
+                    ReadBorder(pBdr.LeftBorder, "pbdr.left", styleNode);
+                    ReadBorder(pBdr.RightBorder, "pbdr.right", styleNode);
+                    ReadBorder(pBdr.BetweenBorder, "pbdr.between", styleNode);
+                    ReadBorder(pBdr.BarBorder, "pbdr.bar", styleNode);
+                }
+
+                var numProps = pPr.NumberingProperties;
+                if (numProps?.NumberingId?.Val?.Value != null)
+                {
+                    styleNode.Format["numId"] = numProps.NumberingId.Val.Value.ToString();
+                    if (numProps.NumberingLevelReference?.Val?.Value != null)
+                        styleNode.Format["numLevel"] = numProps.NumberingLevelReference.Val.Value.ToString();
+                }
+
+                // CONSISTENCY(tabs): tabs[] not yet exposed by paragraph Get.
+                if (pPr.Tabs != null)
+                {
+                    var tabList = new List<Dictionary<string, object?>>();
+                    foreach (var tab in pPr.Tabs.Elements<TabStop>())
+                    {
+                        var t = new Dictionary<string, object?>();
+                        if (tab.Position?.Value != null) t["pos"] = tab.Position.Value;
+                        if (tab.Val?.HasValue == true) t["val"] = tab.Val.InnerText;
+                        if (tab.Leader?.HasValue == true) t["leader"] = tab.Leader.InnerText;
+                        if (t.Count > 0) tabList.Add(t);
+                    }
+                    if (tabList.Count > 0) styleNode.Format["tabs"] = tabList;
+                }
             }
             return styleNode;
         }
