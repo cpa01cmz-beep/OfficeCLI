@@ -1340,11 +1340,23 @@ internal static partial class ChartHelper
                         "displayrsquared" => "disprsqr",
                         var s => s
                     };
-                    foreach (var ser in plotArea2.Descendants<OpenXmlCompositeElement>().Where(e => e.LocalName == "ser"))
+                    // fuzz-TL01/TL02: validate value before fan-out so invalid
+                    // input fails fast even when no series carries a trendline
+                    // (otherwise the loop body never runs and bad input is
+                    // silently accepted).
+                    ValidateTrendlineOptionValue(subKey, value, key);
+                    var trendlineTargets = plotArea2.Descendants<OpenXmlCompositeElement>()
+                        .Where(e => e.LocalName == "ser")
+                        .SelectMany(s => s.Elements<C.Trendline>())
+                        .ToList();
+                    if (trendlineTargets.Count == 0)
                     {
-                        foreach (var tl in ser.Elements<C.Trendline>())
-                            ApplyTrendlineOptions(tl, subKey, value);
+                        throw new InvalidOperationException(
+                            $"{key}: chart has no trendlines to update. " +
+                            "Add a trendline first via `series{N}.trendline=linear` (or similar).");
                     }
+                    foreach (var tl in trendlineTargets)
+                        ApplyTrendlineOptions(tl, subKey, value);
                     break;
                 }
 
@@ -2433,21 +2445,72 @@ internal static partial class ChartHelper
             if (!_layoutPrefixes.Contains(prefix.ToLowerInvariant())) continue;
             var raw = properties[key];
             if (string.IsNullOrWhiteSpace(raw)) { properties.Remove(key); continue; }
-            // value: "x:0.1,y:0.5,w:0.2,h:0.4" — comma-separated k:v pairs.
-            foreach (var part in raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            // value: "x:0.1,y:0.5,w:0.2,h:0.4" — comma-separated k:v pairs,
+            // or positional CSV "0.1,0.2,0.3,0.4" (exactly 4 → x,y,w,h).
+            // CONSISTENCY(layout-csv): bt-2/fuzz-LL01 — positional CSV is the
+            // user-friendly form; reject ambiguous arities so silent-success
+            // bugs cannot recur.
+            var parts = raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var hasColon = parts.Any(p => p.Contains(':'));
+            if (!hasColon)
             {
-                var colonIdx = part.IndexOf(':');
-                if (colonIdx <= 0) continue;
-                var dim = part[..colonIdx].Trim().ToLowerInvariant();
-                var val = part[(colonIdx + 1)..].Trim();
-                if (dim is "x" or "y" or "w" or "h")
+                if (parts.Length != 4)
+                    throw new ArgumentException(
+                        $"{key}: positional CSV layout requires exactly 4 values (x,y,w,h); got {parts.Length}. " +
+                        $"Use named form '{key}=x:N,y:N,w:N,h:N' for partial layouts.");
+                var dims = new[] { "x", "y", "w", "h" };
+                for (int i = 0; i < 4; i++)
                 {
-                    var expandedKey = $"{prefix}.{dim}";
+                    var expandedKey = $"{prefix}.{dims[i]}";
                     if (!properties.ContainsKey(expandedKey))
-                        properties[expandedKey] = val;
+                        properties[expandedKey] = parts[i];
+                }
+            }
+            else
+            {
+                foreach (var part in parts)
+                {
+                    var colonIdx = part.IndexOf(':');
+                    if (colonIdx <= 0) continue;
+                    var dim = part[..colonIdx].Trim().ToLowerInvariant();
+                    var val = part[(colonIdx + 1)..].Trim();
+                    if (dim is "x" or "y" or "w" or "h")
+                    {
+                        var expandedKey = $"{prefix}.{dim}";
+                        if (!properties.ContainsKey(expandedKey))
+                            properties[expandedKey] = val;
+                    }
                 }
             }
             properties.Remove(key);
+        }
+    }
+
+    // fuzz-TL01/TL02: parse-validate a trendline.* sub-property value the same
+    // way ApplyTrendlineOptions would, but without mutating any element. Used
+    // by the chart-level fan-out so unrecognized values are rejected even when
+    // the chart has no trendline to apply them to.
+    private static void ValidateTrendlineOptionValue(string subKey, string value, string fullKey)
+    {
+        switch (subKey)
+        {
+            case "name" or "label":
+                break; // any string is valid
+            case "forward" or "forecastforward"
+                or "backward" or "forecastbackward"
+                or "intercept":
+                ParseHelpers.SafeParseDouble(value, fullKey);
+                break;
+            case "order" or "period":
+                ParseHelpers.SafeParseInt(value, fullKey);
+                break;
+            case "disprsqr" or "rsquared" or "r2" or "displayrsquared"
+                or "dispeq" or "equation" or "displayequation":
+                var v = (value ?? "").Trim().ToLowerInvariant();
+                if (v is not ("true" or "false" or "1" or "0" or "yes" or "no" or "on" or "off"))
+                    throw new ArgumentException(
+                        $"{fullKey}: expected boolean (true/false/1/0/yes/no/on/off), got '{value}'.");
+                break;
         }
     }
 }
