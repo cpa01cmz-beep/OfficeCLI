@@ -561,6 +561,131 @@ public partial class WordHandler
                     unsupported.Add(key);
                     break;
                 }
+                case "rotation" or "rotate":
+                {
+                    // Picture rotation: write to a:xfrm/@rot under the inline drawing's pic:spPr.
+                    // CONSISTENCY(picture-set-props): mirrors PPTX picture set vocabulary
+                    // (PowerPointHandler.Set.Media.cs).
+                    var drawingRot = run.GetFirstChild<Drawing>();
+                    var spPrPicRot = drawingRot?.Descendants<DocumentFormat.OpenXml.Drawing.Pictures.ShapeProperties>().FirstOrDefault();
+                    if (spPrPicRot != null)
+                    {
+                        var xfrmRot = spPrPicRot.Transform2D ?? spPrPicRot.AppendChild(new A.Transform2D());
+                        xfrmRot.Rotation = (int)(ParseHelpers.SafeParseDouble(value, "rotation") * 60000);
+                    }
+                    else unsupported.Add(key);
+                    break;
+                }
+                case "crop" or "cropleft" or "cropright" or "croptop" or "cropbottom":
+                {
+                    static string StripPct(string s)
+                    {
+                        var t = s.Trim();
+                        return t.EndsWith("%", StringComparison.Ordinal) ? t[..^1].Trim() : t;
+                    }
+                    var drawingCrop = run.GetFirstChild<Drawing>();
+                    var blipFillCrop = drawingCrop?.Descendants<DocumentFormat.OpenXml.Drawing.Pictures.BlipFill>().FirstOrDefault();
+                    if (blipFillCrop == null) { unsupported.Add(key); break; }
+                    var srcRectCrop = blipFillCrop.GetFirstChild<A.SourceRectangle>();
+                    if (srcRectCrop == null)
+                    {
+                        srcRectCrop = new A.SourceRectangle();
+                        // CONSISTENCY(ooxml-element-order): srcRect precedes the fill-mode element.
+                        var fillModeCrop = (OpenXmlElement?)blipFillCrop.GetFirstChild<A.Stretch>()
+                            ?? blipFillCrop.GetFirstChild<A.Tile>();
+                        if (fillModeCrop != null)
+                            blipFillCrop.InsertBefore(srcRectCrop, fillModeCrop);
+                        else
+                            blipFillCrop.AppendChild(srcRectCrop);
+                    }
+                    if (key.Equals("crop", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var partsCrop = value.Split(',');
+                        if (partsCrop.Length == 4)
+                        {
+                            var cv = new double[4];
+                            for (int ci = 0; ci < 4; ci++)
+                            {
+                                cv[ci] = ParseHelpers.SafeParseDouble(StripPct(partsCrop[ci]), "crop");
+                                if (cv[ci] < 0 || cv[ci] > 100)
+                                    throw new ArgumentException($"Invalid 'crop' value: '{partsCrop[ci].Trim()}'. Crop percentage must be between 0 and 100.");
+                            }
+                            srcRectCrop.Left = (int)(cv[0] * 1000);
+                            srcRectCrop.Top = (int)(cv[1] * 1000);
+                            srcRectCrop.Right = (int)(cv[2] * 1000);
+                            srcRectCrop.Bottom = (int)(cv[3] * 1000);
+                        }
+                        else if (partsCrop.Length == 1)
+                        {
+                            if (!double.TryParse(StripPct(value), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var cv1)
+                                || cv1 < 0 || cv1 > 100)
+                                throw new ArgumentException($"Invalid 'crop' value: '{value}'. Expected percentage 0-100.");
+                            var pctAll = (int)(cv1 * 1000);
+                            srcRectCrop.Left = pctAll; srcRectCrop.Top = pctAll;
+                            srcRectCrop.Right = pctAll; srcRectCrop.Bottom = pctAll;
+                        }
+                        else
+                        {
+                            throw new ArgumentException($"Invalid 'crop' value: '{value}'. Expected 1 or 4 comma-separated percentages.");
+                        }
+                    }
+                    else
+                    {
+                        if (!double.TryParse(StripPct(value), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var cs1)
+                            || cs1 < 0 || cs1 > 100)
+                            throw new ArgumentException($"Invalid '{key}' value: '{value}'. Expected percentage 0-100.");
+                        var pctSide = (int)(cs1 * 1000);
+                        switch (key.ToLowerInvariant())
+                        {
+                            case "cropleft": srcRectCrop.Left = pctSide; break;
+                            case "croptop": srcRectCrop.Top = pctSide; break;
+                            case "cropright": srcRectCrop.Right = pctSide; break;
+                            case "cropbottom": srcRectCrop.Bottom = pctSide; break;
+                        }
+                    }
+                    int Lc = srcRectCrop.Left?.Value ?? 0;
+                    int Tc = srcRectCrop.Top?.Value ?? 0;
+                    int Rc = srcRectCrop.Right?.Value ?? 0;
+                    int Bc = srcRectCrop.Bottom?.Value ?? 0;
+                    if (Lc == 0 && Tc == 0 && Rc == 0 && Bc == 0)
+                        srcRectCrop.Remove();
+                    break;
+                }
+                case "brightness" or "contrast":
+                {
+                    // Brightness/contrast live in a:lumMod/a:lumOff (luminance modulation
+                    // / offset) or a:contrast (effects) on the picture's blip — applied
+                    // via a:blip/a:lumMod and a:blip/a:lumOff. Brightness ∈ [-100, 100]
+                    // maps to lumOff (positive lightens, negative darkens). Contrast
+                    // ∈ [-100, 100] maps to lumMod (>100% boosts contrast, <100% reduces).
+                    // For maximum compatibility we encode both via the standard
+                    // a:lumMod / a:lumOff pair, matching how PPTX renders these values.
+                    var drawingBC = run.GetFirstChild<Drawing>();
+                    var blipBC = drawingBC?.Descendants<A.Blip>().FirstOrDefault();
+                    if (blipBC == null) { unsupported.Add(key); break; }
+                    if (!double.TryParse(value, System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out var bcVal)
+                        || bcVal < -100 || bcVal > 100)
+                        throw new ArgumentException($"Invalid '{key}' value: '{value}'. Expected number in [-100, 100].");
+
+                    // Read existing lumMod/lumOff so brightness and contrast compose.
+                    var existingLumMod = blipBC.Elements<A.LuminanceModulation>().FirstOrDefault();
+                    var existingLumOff = blipBC.Elements<A.LuminanceOffset>().FirstOrDefault();
+                    int curLumModPct = existingLumMod?.Val?.Value is int vm ? vm : 100000;
+                    int curLumOffPct = existingLumOff?.Val?.Value is int vo ? vo : 0;
+
+                    if (key.Equals("brightness", StringComparison.OrdinalIgnoreCase))
+                        curLumOffPct = (int)(bcVal * 1000); // -100..100 → -100000..100000
+                    else
+                        curLumModPct = 100000 + (int)(bcVal * 1000); // 0..200 → 0..200000
+
+                    existingLumMod?.Remove();
+                    existingLumOff?.Remove();
+                    // Schema order: lumMod precedes lumOff inside a:blip.
+                    blipBC.AppendChild(new A.LuminanceModulation { Val = curLumModPct });
+                    blipBC.AppendChild(new A.LuminanceOffset { Val = curLumOffPct });
+                    break;
+                }
                 default:
                     // OLE runs use a slim prop vocabulary (src, progId,
                     // width, height, alt) that doesn't overlap the rich
