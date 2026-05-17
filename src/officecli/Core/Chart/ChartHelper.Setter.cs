@@ -1241,7 +1241,15 @@ internal static partial class ChartHelper
                         var du = new C.DisplayUnits();
                         du.AppendChild(new C.BuiltInUnit { Val = builtInVal });
                         du.AppendChild(new C.DisplayUnitsLabel());
-                        valAx.AppendChild(du);
+                        // CONSISTENCY(chart/valAx-schema-order): dispUnits is the
+                        // last optional in CT_ValAx (before extLst). AppendChild
+                        // is safe only when nothing later already exists; if a
+                        // following setter pre-emitted nothing, fine — but if a
+                        // later minorUnit Set lands, the helper looks for
+                        // dispUnits as the InsertBefore anchor. Route this Set
+                        // through the helper to guarantee a stable anchor and
+                        // make the order independent of Set sequencing.
+                        InsertValAxChildInOrder(valAx, du);
                     }
                     break;
                 }
