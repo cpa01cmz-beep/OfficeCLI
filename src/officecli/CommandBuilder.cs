@@ -364,6 +364,13 @@ static partial class CommandBuilder
     }
 
 
+    // ContainsNullByte — defensive guard for batch input. OOXML / xml-1.0
+    // forbids U+0000 in any element or attribute content; an unfiltered NUL
+    // reaches the SDK's xml writer at save time and throws an XmlException
+    // that aborts the in-flight session and corrupts the resident's view.
+    // Keep this as a tiny string check so it can run on every batch item.
+    private static bool ContainsNullByte(string? s) => s != null && s.IndexOf('\0') >= 0;
+
     internal static int SafeRun(Func<int> action, bool json = false)
     {
         if (!OfficeCli.Core.CliLogger.Enabled)
@@ -434,6 +441,32 @@ static partial class CommandBuilder
     {
         var format = json ? OfficeCli.Core.OutputFormat.Json : OfficeCli.Core.OutputFormat.Text;
         var props = item.Props ?? new Dictionary<string, string>();
+
+        // Reject null bytes (U+0000) anywhere in caller-controlled strings —
+        // path, selector, text, and prop values. OOXML xml writers throw
+        // System.Xml.XmlException ("'.', hexadecimal value 0x00, is an
+        // invalid character.") deep inside the SDK's Save path, AFTER prior
+        // batch items have already mutated the document. The exception
+        // bubbles up past the handler's Save and leaves the resident in a
+        // state where the next close throws again — silently losing every
+        // successful mutation in the same session. Reject at the boundary
+        // with a stable code so the batch driver records ONE failed step
+        // and keeps the rest of the document intact.
+        if (ContainsNullByte(item.Path))
+            throw new CliException($"path contains a NUL byte (\\u0000), which is invalid in OOXML.")
+                { Code = "invalid_input" };
+        if (ContainsNullByte(item.Selector))
+            throw new CliException($"selector contains a NUL byte (\\u0000), which is invalid in OOXML.")
+                { Code = "invalid_input" };
+        if (ContainsNullByte(item.Text))
+            throw new CliException($"text contains a NUL byte (\\u0000), which is invalid in OOXML.")
+                { Code = "invalid_input" };
+        foreach (var (pk, pv) in props)
+        {
+            if (ContainsNullByte(pk) || ContainsNullByte(pv))
+                throw new CliException($"prop '{pk}' contains a NUL byte (\\u0000), which is invalid in OOXML.")
+                    { Code = "invalid_input" };
+        }
 
         switch (item.Command.ToLowerInvariant())
         {
