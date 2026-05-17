@@ -557,6 +557,13 @@ public partial class PowerPointHandler
             // package.GetParts() Uri gives a reader-faithful gap report
             // without relying on the SDK's tolerant enumeration.
             var brokenRelIds = new Dictionary<string, string>(StringComparer.Ordinal);
+            // R8-2: also flag rIds the slide XML references that the rels
+            // file doesn't declare at all. The original scan covered
+            // declared-but-dangling rels (Target points to a missing part),
+            // but a slide carrying r:embed="rId99" with no matching
+            // <Relationship Id="rId99"> in the rels XML produced a silent
+            // ArgumentException at render time instead of a stable issue.
+            var declaredRelIds = new HashSet<string>(StringComparer.Ordinal);
             try
             {
 #pragma warning disable OOXML0001
@@ -590,6 +597,7 @@ public partial class PowerPointHandler
                         var id = (string?)relEl.Attribute("Id");
                         var target = (string?)relEl.Attribute("Target");
                         if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(target)) continue;
+                        declaredRelIds.Add(id);
                         Uri resolved;
                         try
                         {
@@ -606,30 +614,62 @@ public partial class PowerPointHandler
             catch { /* probe is best-effort; never break view issues */ }
 
             const string relNs = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
-            var slideXml = GetSlide(slidePart);
-            var reportedRids = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var el in slideXml.Descendants())
+            // R8-2: walk the raw slide XML, not the SDK's parsed Slide. The
+            // SDK silently drops elements whose rels don't resolve (e.g. a
+            // <p:pic> with r:embed pointing at an undeclared rId), so the
+            // SDK-loaded view shows nothing to flag. Reading the part stream
+            // exposes every r:embed/r:link/r:id the file actually carries.
+            var rawRefs = new List<(string ElemName, string AttrLocal, string RId)>();
+            try
             {
-                foreach (var attr in el.GetAttributes())
+                using var slideStream = slidePart.GetStream(System.IO.FileMode.Open, System.IO.FileAccess.Read);
+                var slideDoc = System.Xml.Linq.XDocument.Load(slideStream);
+                System.Xml.Linq.XNamespace rNs = relNs;
+                foreach (var el in slideDoc.Descendants())
                 {
-                    if (attr.NamespaceUri != relNs) continue;
-                    if (attr.LocalName != "id" && attr.LocalName != "embed" && attr.LocalName != "link") continue;
-                    var rId = attr.Value;
-                    if (string.IsNullOrEmpty(rId)) continue;
-                    if (!brokenRelIds.TryGetValue(rId, out var missingTarget)) continue;
-                    if (!reportedRids.Add(rId)) continue;
-                    issues.Add(new DocumentIssue
+                    foreach (var name in new[] { "id", "embed", "link" })
                     {
-                        Id = $"R{++issueNum}",
-                        Type = IssueType.Structure,
-                        Subtype = Core.IssueSubtypes.BrokenPartRef,
-                        Severity = IssueSeverity.Error,
-                        Path = $"/slide[{slideNum}]",
-                        Message = $"Slide rel '{rId}' on <{el.LocalName}> targets missing part '/{missingTarget}'",
-                        Context = $"<{el.LocalName} r:{attr.LocalName}=\"{rId}\">",
-                        Suggestion = "Restore the missing target part, or remove the dangling relationship and the referencing element."
-                    });
+                        var a = el.Attribute(rNs + name);
+                        if (a == null || string.IsNullOrEmpty(a.Value)) continue;
+                        rawRefs.Add((el.Name.LocalName, name, a.Value));
+                    }
                 }
+            }
+            catch { /* probe is best-effort */ }
+
+            var reportedRids = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var (elemName, attrLocal, rId) in rawRefs)
+            {
+                if (string.IsNullOrEmpty(rId)) continue;
+                string message;
+                string suggestion;
+                if (brokenRelIds.TryGetValue(rId, out var missingTarget))
+                {
+                    message = $"Slide rel '{rId}' on <{elemName}> targets missing part '/{missingTarget}'";
+                    suggestion = "Restore the missing target part, or remove the dangling relationship and the referencing element.";
+                }
+                else if (!declaredRelIds.Contains(rId))
+                {
+                    // R8-2: rId referenced by slide XML but not declared in
+                    // the rels file at all. Distinct diagnostic so users can
+                    // tell "I need to add the rel" apart from "I need to
+                    // restore the part".
+                    message = $"Slide rel '{rId}' on <{elemName}> is referenced but not declared in the slide rels";
+                    suggestion = $"Add a matching <Relationship Id=\"{rId}\"> to the slide's rels file, or drop the referencing element.";
+                }
+                else continue;
+                if (!reportedRids.Add(rId)) continue;
+                issues.Add(new DocumentIssue
+                {
+                    Id = $"R{++issueNum}",
+                    Type = IssueType.Structure,
+                    Subtype = Core.IssueSubtypes.BrokenPartRef,
+                    Severity = IssueSeverity.Error,
+                    Path = $"/slide[{slideNum}]",
+                    Message = message,
+                    Context = $"<{elemName} r:{attrLocal}=\"{rId}\">",
+                    Suggestion = suggestion
+                });
             }
 
             var shapes = shapeTree.Elements<Shape>().ToList();
