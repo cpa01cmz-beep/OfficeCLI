@@ -132,10 +132,18 @@ public static partial class PptxBatchEmitter
         // ShapeToNode tags placeholder shapes as plain "textbox"/"title". To
         // emit them as `add placeholder` we cross-reference each shape's cNvPr
         // id with the slide's Query("placeholder") result.
+        // Only index placeholders defined on the slide itself. Query also
+        // returns layout-inherited placeholders (Format["inheritedFrom"]
+        // = "layout") whose ph index/id can collide with auto-assigned
+        // textbox cNvPr ids on the slide (python-pptx starts at 2, layout
+        // ftr/dt/sldNum live at id 2..4) — without this filter, the second
+        // textbox would be misclassified as `ftr` and crash placeholder
+        // type parsing, or silently disappear in dump.
         var placeholderById = new Dictionary<string, DocumentNode>(StringComparer.Ordinal);
         foreach (var ph in ppt.Query("placeholder"))
         {
             if (!ph.Path.StartsWith(slidePath + "/", StringComparison.Ordinal)) continue;
+            if (ph.Format.TryGetValue("inheritedFrom", out var inh) && inh as string == "layout") continue;
             if (ph.Format.TryGetValue("id", out var phId) && phId != null)
                 placeholderById[phId.ToString()!] = ph;
         }
