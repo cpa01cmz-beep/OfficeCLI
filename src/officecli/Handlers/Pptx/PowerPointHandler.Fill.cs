@@ -47,7 +47,7 @@ public partial class PowerPointHandler
     {
         if (solidFill == null) return null;
         var rgbEl = solidFill.GetFirstChild<Drawing.RgbColorModelHex>();
-        if (rgbEl?.Val?.Value != null) return FormatHexWithAlpha(rgbEl);
+        if (rgbEl?.Val?.Value != null) return AppendColorTransforms(FormatHexWithAlpha(rgbEl), rgbEl);
         var schemeEl = solidFill.GetFirstChild<Drawing.SchemeColor>();
         if (schemeEl != null)
         {
@@ -61,9 +61,40 @@ public partial class PowerPointHandler
                 ? schemeVal.InnerText
                 : schemeEl.GetAttribute("val", "").Value;
             if (!string.IsNullOrEmpty(raw))
-                return ParseHelpers.NormalizeSchemeColorName(raw) ?? raw;
+            {
+                var name = ParseHelpers.NormalizeSchemeColorName(raw) ?? raw;
+                return AppendColorTransforms(name, schemeEl);
+            }
         }
         return null;
+    }
+
+    // R8-4: encode a:lumMod / a:lumOff / a:shade / a:tint / a:satMod / a:satOff /
+    // a:hueMod / a:hueOff color transforms as a chained "+name<intPercent>"
+    // suffix on the canonical color string so they survive Get → Add/Set
+    // round-trip. Pre-R8 these children were silently stripped: a slide's
+    // accent1 with lumMod=50000 came back as bare "accent1", and a re-applied
+    // round-trip lost the tint.
+    private static readonly string[] ColorTransformLocalNames =
+        { "lumMod", "lumOff", "shade", "tint", "satMod", "satOff", "hueMod", "hueOff", "alpha" };
+
+    internal static string AppendColorTransforms(string baseColor, OpenXmlElement colorEl)
+    {
+        var sb = new System.Text.StringBuilder(baseColor);
+        foreach (var child in colorEl.Elements())
+        {
+            var ln = child.LocalName;
+            if (Array.IndexOf(ColorTransformLocalNames, ln) < 0) continue;
+            if (ln == "alpha") continue; // alpha already encoded into RRGGBBAA hex form
+            var v = child.GetAttribute("val", "").Value;
+            if (string.IsNullOrEmpty(v)) continue;
+            // Convert OOXML ST_PositivePercentage (0..100000) → human percent.
+            if (int.TryParse(v, out var n))
+                sb.Append('+').Append(ln).Append(n / 1000);
+            else
+                sb.Append('+').Append(ln).Append(v);
+        }
+        return sb.ToString();
     }
 
     /// <summary>
@@ -73,7 +104,7 @@ public partial class PowerPointHandler
     {
         if (parent == null) return null;
         var rgbEl = parent.GetFirstChild<Drawing.RgbColorModelHex>();
-        if (rgbEl?.Val?.Value != null) return FormatHexWithAlpha(rgbEl);
+        if (rgbEl?.Val?.Value != null) return AppendColorTransforms(FormatHexWithAlpha(rgbEl), rgbEl);
         var schemeEl = parent.GetFirstChild<Drawing.SchemeColor>();
         // CONSISTENCY(scheme-color-roundtrip): emit canonical long names
         // (dark1/light1/hyperlink/…) so OOXML internal short forms
@@ -92,7 +123,10 @@ public partial class PowerPointHandler
                 ? schemeVal.InnerText
                 : schemeEl.GetAttribute("val", "").Value;
             if (!string.IsNullOrEmpty(raw))
-                return ParseHelpers.NormalizeSchemeColorName(raw) ?? raw;
+            {
+                var name = ParseHelpers.NormalizeSchemeColorName(raw) ?? raw;
+                return AppendColorTransforms(name, schemeEl);
+            }
         }
         return null;
     }
