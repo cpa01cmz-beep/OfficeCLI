@@ -504,7 +504,7 @@ internal static partial class ChartHelper
             case "explosion" or "explode":
                 ser.RemoveAllChildren<C.Explosion>();
                 if (uint.TryParse(value, out var expVal) && expVal > 0)
-                    ser.AppendChild(new C.Explosion { Val = expVal });
+                    InsertSeriesChildInOrder(ser, new C.Explosion { Val = expVal });
                 return true;
 
             case "linewidth":
@@ -885,6 +885,8 @@ internal static partial class ChartHelper
         string[] insertBeforeNames = child.LocalName switch
         {
             "invertIfNegative" => ["pictureOptions", "dPt", "dLbls", "trendline", "errBars", "cat", "val", "xVal", "yVal", "bubbleSize", "bubble3D", "shape", "smooth", "extLst"],
+            // CT_PieSer / CT_DoughnutSer: idx, order, tx?, spPr?, explosion?, dPt*, dLbls?, cat?, val?
+            "explosion" => ["dPt", "dLbls", "cat", "val", "extLst"],
             "dLbls" => ["trendline", "errBars", "cat", "val", "xVal", "yVal", "bubbleSize", "bubble3D", "smooth", "extLst"],
             "trendline" => ["errBars", "cat", "val", "xVal", "yVal", "bubbleSize", "bubble3D", "smooth", "extLst"],
             "errBars" => ["cat", "val", "xVal", "yVal", "bubbleSize", "bubble3D", "smooth", "extLst"],
