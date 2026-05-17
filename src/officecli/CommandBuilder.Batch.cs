@@ -56,7 +56,11 @@ static partial class CommandBuilder
             if (inlineCommands != null && inputFile != null)
                 throw new ArgumentException(
                     "batch: --commands and --input are mutually exclusive. Pick one source.");
-            if ((inlineCommands != null || inputFile != null) && stdinHasInput
+            // '--input -' explicitly opts INTO stdin — don't emit the
+            // "stdin will be ignored" warning in that case, since stdin
+            // is exactly what will be read.
+            var inputIsStdinAlias = inputFile != null && inputFile.Name == "-";
+            if ((inlineCommands != null || (inputFile != null && !inputIsStdinAlias)) && stdinHasInput
                 && Environment.GetEnvironmentVariable("OFFICECLI_BATCH_ALLOW_STDIN_REDIRECT") == null)
             {
                 Console.Error.WriteLine(
@@ -70,11 +74,25 @@ static partial class CommandBuilder
             }
             else if (inputFile != null)
             {
-                if (!inputFile.Exists)
+                // Accept the conventional Unix '-' alias for stdin so
+                // pipelines like `cat ops.json | officecli batch foo.pptx --input -`
+                // don't have to drop --input entirely. Matches the implicit
+                // "no --input ⇒ read stdin" branch below; using --input -
+                // makes the intent explicit instead of relying on the
+                // absent-flag default. (TargetMode/Exists checks are
+                // skipped on purpose — '-' is not a path.)
+                if (inputFile.Name == "-")
                 {
-                    throw new FileNotFoundException($"Input file not found: {inputFile.FullName}");
+                    jsonText = Console.In.ReadToEnd();
                 }
-                jsonText = File.ReadAllText(inputFile.FullName);
+                else
+                {
+                    if (!inputFile.Exists)
+                    {
+                        throw new FileNotFoundException($"Input file not found: {inputFile.FullName}");
+                    }
+                    jsonText = File.ReadAllText(inputFile.FullName);
+                }
             }
             else
             {
