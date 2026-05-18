@@ -255,6 +255,21 @@ public static partial class PptxBatchEmitter
         // than cNvPr `@id=N`. Add accepts caller-supplied id but emit chooses
         // not to use it — id collisions with layout-inherited placeholders
         // would otherwise break replay (animations/video deck cascade).
+        //
+        // CONSISTENCY(unified-shape-counter): placeholders are <p:sp> siblings
+        // of plain shapes in the OOXML shape tree, so ResolveShape counts them
+        // together. AddPlaceholder also appends a <p:sp> and returns
+        // `/slide[N]/shape[<count>]` (Add.Misc.cs). The emitter must therefore
+        // share a SINGLE positional counter across textbox/title/shape/equation
+        // /placeholder and emit replay paths as `/slide[N]/shape[K]` for ALL
+        // of them — otherwise a placeholder dispatched first leaves the
+        // shape counter at 1, and the next textbox emits `set
+        // /slide[N]/shape[1]/...` which on replay clobbers the placeholder.
+        // Previously the emitter kept separate `shape`/`placeholder` counters
+        // and emitted `/slide[N]/placeholder[K]` for placeholders, but the
+        // replay paths for paragraph/run inside that placeholder still used
+        // the same `/slide[N]/shape[K]` form — see EmitTextBody — so every
+        // shape after a placeholder collided.
         var ord = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         foreach (var child in fullSlide.Children)
         {
@@ -263,8 +278,8 @@ public static partial class PptxBatchEmitter
                 && child.Format.TryGetValue("id", out var cid) && cid != null
                 && placeholderById.TryGetValue(cid.ToString()!, out var phNode))
             {
-                ord["placeholder"] = ord.GetValueOrDefault("placeholder", 0) + 1;
-                EmitPlaceholder(ppt, phNode, slidePath, $"{slidePath}/placeholder[{ord["placeholder"]}]", items, ctx);
+                ord["shape"] = ord.GetValueOrDefault("shape", 0) + 1;
+                EmitPlaceholder(ppt, phNode, slidePath, $"{slidePath}/shape[{ord["shape"]}]", items, ctx);
                 continue;
             }
             switch (child.Type)
@@ -277,8 +292,8 @@ public static partial class PptxBatchEmitter
                     EmitShape(ppt, child, slidePath, $"{slidePath}/shape[{ord["shape"]}]", items, ctx);
                     break;
                 case "placeholder":
-                    ord["placeholder"] = ord.GetValueOrDefault("placeholder", 0) + 1;
-                    EmitPlaceholder(ppt, child, slidePath, $"{slidePath}/placeholder[{ord["placeholder"]}]", items, ctx);
+                    ord["shape"] = ord.GetValueOrDefault("shape", 0) + 1;
+                    EmitPlaceholder(ppt, child, slidePath, $"{slidePath}/shape[{ord["shape"]}]", items, ctx);
                     break;
                 case "connector":
                     ord["connector"] = ord.GetValueOrDefault("connector", 0) + 1;

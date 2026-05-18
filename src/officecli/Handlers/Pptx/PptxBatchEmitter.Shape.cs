@@ -193,8 +193,10 @@ public static partial class PptxBatchEmitter
                     EmitGroup(ppt, child, replayPath, $"{replayPath}/group[{ord["group"]}]", items, ctx);
                     break;
                 case "placeholder":
-                    ord["placeholder"] = ord.GetValueOrDefault("placeholder", 0) + 1;
-                    EmitPlaceholder(ppt, child, replayPath, $"{replayPath}/placeholder[{ord["placeholder"]}]", items, ctx);
+                    // CONSISTENCY(unified-shape-counter): placeholders and
+                    // plain shapes share <p:sp> sibling positions.
+                    ord["shape"] = ord.GetValueOrDefault("shape", 0) + 1;
+                    EmitPlaceholder(ppt, child, replayPath, $"{replayPath}/shape[{ord["shape"]}]", items, ctx);
                     break;
                 default:
                     ctx.Unsupported.Add(new UnsupportedWarning(
