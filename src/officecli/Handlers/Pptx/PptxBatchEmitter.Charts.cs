@@ -57,6 +57,53 @@ public static partial class PptxBatchEmitter
                 seriesParts.Add($"{name}:{vals}");
             }
         }
+
+        // Waterfall round-trip: BuildWaterfallChart encodes the user's delta
+        // input into 3 stacked-bar series (Base/Increase/Decrease) with
+        // cumulative values. Re-feeding those 3 series on replay doubles the
+        // running total — Builder would re-encode the already-encoded data.
+        // Reverse the encoding here: each category's delta is `inc[i]` if
+        // inc[i] != 0 else `-dec[i]`; emit a single series under the chart's
+        // own name (or "Series 1") so AddChart's waterfall path takes over.
+        // Per-category names are recovered from `categories=`.
+        if (props.TryGetValue("chartType", out var ctype)
+            && ctype.Equals("waterfall", StringComparison.OrdinalIgnoreCase)
+            && fullChart.Children != null)
+        {
+            var byName = new Dictionary<string, double[]>(StringComparer.OrdinalIgnoreCase);
+            foreach (var s in fullChart.Children)
+            {
+                if (s.Type != "series") continue;
+                if (!s.Format.TryGetValue("name", out var nObj)) continue;
+                if (!s.Format.TryGetValue("values", out var vObj)) continue;
+                var nm = nObj?.ToString() ?? "";
+                var vs = (vObj?.ToString() ?? "")
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(t => double.TryParse(t.Trim(),
+                        System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        out var d) ? d : 0.0)
+                    .ToArray();
+                byName[nm] = vs;
+            }
+            if (byName.TryGetValue("Increase", out var inc)
+                && byName.TryGetValue("Decrease", out var dec)
+                && inc.Length == dec.Length
+                && inc.Length > 0)
+            {
+                var deltas = new double[inc.Length];
+                for (int i = 0; i < inc.Length; i++)
+                    deltas[i] = inc[i] != 0 ? inc[i] : -dec[i];
+                var deltaStr = string.Join(",",
+                    deltas.Select(d => d.ToString("G",
+                        System.Globalization.CultureInfo.InvariantCulture)));
+                seriesParts = new List<string> { $"Waterfall:{deltaStr}" };
+                // Strip per-series color/style props that referred to the
+                // encoded triplet — Builder re-applies increase/decrease/
+                // total colors from explicit chart-level keys.
+            }
+        }
+
         if (seriesParts.Count > 0)
             props["data"] = string.Join(";", seriesParts);
 

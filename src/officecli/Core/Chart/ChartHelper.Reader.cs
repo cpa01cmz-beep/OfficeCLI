@@ -33,6 +33,38 @@ internal static partial class ChartHelper
         var chartType = DetectChartType(plotArea);
         if (chartType != null) node.Format["chartType"] = chartType;
 
+        // Waterfall: surface increase/decrease/totalColor at chart level so
+        // dump→replay preserves the bar colors. Without these the encoded
+        // triplet (Base/Increase/Decrease) is collapsed back to deltas by
+        // the emitter and Builder falls back to the default 4472C4 / FF0000
+        // palette, dropping the user's customisation.
+        if (chartType == "waterfall"
+            && plotArea.GetFirstChild<C.BarChart>() is C.BarChart wfBar)
+        {
+            var wfSeries = wfBar.Elements<C.BarChartSeries>().ToList();
+            // Increase = series[1], Decrease = series[2] (Builder convention).
+            if (wfSeries.Count >= 3)
+            {
+                var incFill = wfSeries[1].GetFirstChild<C.ChartShapeProperties>()
+                    ?.GetFirstChild<Drawing.SolidFill>();
+                var incClr = incFill != null ? ReadColorFromFill(incFill) : null;
+                if (incClr != null) node.Format["increaseColor"] = incClr;
+
+                var decFill = wfSeries[2].GetFirstChild<C.ChartShapeProperties>()
+                    ?.GetFirstChild<Drawing.SolidFill>();
+                var decClr = decFill != null ? ReadColorFromFill(decFill) : null;
+                if (decClr != null) node.Format["decreaseColor"] = decClr;
+
+                // Total bar = last DataPoint override on Increase series.
+                var dpts = wfSeries[1].Elements<C.DataPoint>().ToList();
+                var lastDpt = dpts.LastOrDefault();
+                var totFill = lastDpt?.GetFirstChild<C.ChartShapeProperties>()
+                    ?.GetFirstChild<Drawing.SolidFill>();
+                var totClr = totFill != null ? ReadColorFromFill(totFill) : null;
+                if (totClr != null) node.Format["totalColor"] = totClr;
+            }
+        }
+
         // R24 — for combo charts surface the per-series type list (and the
         // split point if it cleanly partitions into a primary block + tail)
         // so dump→replay can reconstruct mixed-type charts. Without this,
