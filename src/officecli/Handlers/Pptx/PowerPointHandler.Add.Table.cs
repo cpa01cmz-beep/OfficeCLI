@@ -178,6 +178,7 @@ public partial class PowerPointHandler
                         var cell = new Drawing.TableCell();
                         var cellText = tableData != null && r < tableData.Length && c < tableData[r].Length
                             ? tableData[r][c] : (properties.TryGetValue($"r{r + 1}c{c + 1}", out var rc) ? rc : "");
+                        XmlTextValidator.ValidateOrThrow(cellText, $"r{r + 1}c{c + 1}");
                         var cellPara = new Drawing.Paragraph();
                         if (!string.IsNullOrEmpty(cellText))
                             cellPara.Append(new Drawing.Run(
@@ -396,6 +397,7 @@ public partial class PowerPointHandler
                 {
                     var newTblCell = new Drawing.TableCell();
                     var cellText = properties.TryGetValue($"c{c + 1}", out var ct) ? ct : "";
+                    XmlTextValidator.ValidateOrThrow(cellText, $"c{c + 1}");
                     var bodyProps = new Drawing.BodyProperties();
                     var listStyle = new Drawing.ListStyle();
                     var cellPara = new Drawing.Paragraph();
@@ -472,6 +474,7 @@ public partial class PowerPointHandler
 
                 // Cell text from property
                 var cellText = properties.GetValueOrDefault("text", "");
+                XmlTextValidator.ValidateOrThrow(cellText, "text");
 
                 // For each row, insert a new cell at the same column index
                 foreach (var row in colTable.Elements<Drawing.TableRow>())
@@ -545,9 +548,12 @@ public partial class PowerPointHandler
                 var cListStyle = new Drawing.ListStyle();
                 var cPara = new Drawing.Paragraph();
                 if (properties.TryGetValue("text", out var cText) && !string.IsNullOrEmpty(cText))
+                {
+                    XmlTextValidator.ValidateOrThrow(cText, "text");
                     cPara.Append(new Drawing.Run(
                         new Drawing.RunProperties { Language = "en-US" },
                         new Drawing.Text { Text = cText }));
+                }
                 else
                     cPara.Append(new Drawing.EndParagraphRunProperties { Language = "en-US" });
                 newCell.Append(new Drawing.TextBody(cBodyProps, cListStyle, cPara));

@@ -719,6 +719,7 @@ public partial class PowerPointHandler
         );
         if (properties.TryGetValue("text", out var phText) && phText.Length > 0)
         {
+            XmlTextValidator.ValidateOrThrow(phText, "text");
             // Accept both literal backslash-n (typical shell escape) and real LF.
             var lines = phText.Replace("\\n", "\n").Split('\n');
             foreach (var line in lines)

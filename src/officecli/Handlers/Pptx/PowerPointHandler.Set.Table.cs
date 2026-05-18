@@ -74,6 +74,7 @@ public partial class PowerPointHandler
                 }
                 case "text":
                 {
+                    XmlTextValidator.ValidateOrThrow(value, "text");
                     // Two behaviors based on presence of tab:
                     //  - No tab: broadcast the same text to all cells in the row
                     //  - Tab-delimited: distribute tokens across cells by position

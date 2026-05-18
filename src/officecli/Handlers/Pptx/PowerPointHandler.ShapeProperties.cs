@@ -205,7 +205,7 @@ public partial class PowerPointHandler
                     if (runs.Count == 1 && textLines.Length == 1 && !textLines[0].Contains('\t'))
                     {
                         // Single run, single line, no tabs: just replace text
-                        runs[0].Text = BuildDrawingText(textLines[0]);
+                        runs[0].Text = new Drawing.Text { Text = textLines[0] };
                     }
                     else
                     {
@@ -230,7 +230,7 @@ public partial class PowerPointHandler
                                     var r = new Drawing.Run();
                                     if (runProps != null)
                                         r.RunProperties = runProps.CloneNode(true) as Drawing.RunProperties;
-                                    r.Text = BuildDrawingText(seg);
+                                    r.Text = new Drawing.Text { Text = seg };
                                     return r;
                                 });
                                 textBody.Append(newPara);

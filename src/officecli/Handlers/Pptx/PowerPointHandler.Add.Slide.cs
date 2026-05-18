@@ -48,6 +48,7 @@ public partial class PowerPointHandler
                 uint nextShapeId = 2;
                 if (properties.TryGetValue("title", out var titleText))
                 {
+                    XmlTextValidator.ValidateOrThrow(titleText, "title");
                     var titleShape = CreateTextShape(nextShapeId++, "Title", titleText, true);
                     newSlidePart.Slide.CommonSlideData!.ShapeTree!.AppendChild(titleShape);
                 }
@@ -55,6 +56,7 @@ public partial class PowerPointHandler
                 // Add content text if provided
                 if (properties.TryGetValue("text", out var contentText))
                 {
+                    XmlTextValidator.ValidateOrThrow(contentText, "text");
                     var textShape = CreateTextShape(nextShapeId++, "Content", contentText, false);
                     newSlidePart.Slide.CommonSlideData!.ShapeTree!.AppendChild(textShape);
                 }

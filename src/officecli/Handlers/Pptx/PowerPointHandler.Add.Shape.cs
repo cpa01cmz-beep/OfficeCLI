@@ -97,6 +97,7 @@ public partial class PowerPointHandler
                 }
 
                 var text = properties.GetValueOrDefault("text", "");
+                XmlTextValidator.ValidateOrThrow(text, "text");
                 var shapeId = AcquireShapeId(shapeTree, properties);
                 var shapeName = properties.GetValueOrDefault("name", $"TextBox {shapeTree.Elements<Shape>().Count() + 1}");
 

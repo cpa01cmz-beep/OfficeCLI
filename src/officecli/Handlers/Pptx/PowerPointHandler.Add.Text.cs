@@ -1,6 +1,7 @@
 // Copyright 2025 OfficeCLI (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
+using System.Text;
 using System.Text.RegularExpressions;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
@@ -129,7 +130,10 @@ public partial class PowerPointHandler
                     throw new ArgumentException($"Slide {notesSlideIdx} not found (total: {notesSlideParts.Count})");
                 var notesSlidePart = EnsureNotesSlidePart(notesSlideParts[notesSlideIdx - 1]);
                 if (properties.TryGetValue("text", out var notesText))
+                {
+                    XmlTextValidator.ValidateOrThrow(notesText, "text");
                     SetNotesText(notesSlidePart, notesText);
+                }
                 // Reading direction (Arabic / Hebrew speaker notes). Mirrors
                 // the AddShape direction handling — must run after SetNotesText
                 // so the paragraphs it creates pick up rtl=1.
@@ -254,6 +258,7 @@ public partial class PowerPointHandler
 
                 // Create initial run with text and run-level properties
                 var paraText = properties.GetValueOrDefault("text", "");
+                XmlTextValidator.ValidateOrThrow(paraText, "text");
                 var newRun = new Drawing.Run();
                 var rProps = new Drawing.RunProperties { Language = "en-US" };
                 if (properties.TryGetValue("lang", out var pLang) && !string.IsNullOrEmpty(pLang))
@@ -417,6 +422,7 @@ public partial class PowerPointHandler
                 }
 
                 var runText = properties.GetValueOrDefault("text", "");
+                XmlTextValidator.ValidateOrThrow(runText, "text");
                 var newRun = new Drawing.Run();
                 var rProps = new Drawing.RunProperties { Language = "en-US" };
                 if (properties.TryGetValue("lang", out var rLang) && !string.IsNullOrEmpty(rLang))

@@ -80,6 +80,7 @@ public partial class PowerPointHandler
         var slidePart = slideParts[slideIdx - 1];
 
         var text = properties.GetValueOrDefault("text") ?? properties.GetValueOrDefault("comment") ?? "";
+        XmlTextValidator.ValidateOrThrow(text, "text");
         var author = properties.GetValueOrDefault("author", "OfficeCli");
         var initials = properties.GetValueOrDefault("initials", DeriveInitials(author));
 
@@ -283,6 +284,7 @@ public partial class PowerPointHandler
                 case "text":
                 case "comment":
                 {
+                    XmlTextValidator.ValidateOrThrow(value, key);
                     var t = comment.GetFirstChild<DocumentFormat.OpenXml.Presentation.Text>();
                     if (t == null)
                     {

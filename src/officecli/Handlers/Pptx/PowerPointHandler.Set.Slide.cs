@@ -45,7 +45,10 @@ public partial class PowerPointHandler
         foreach (var (key, value) in properties)
         {
             if (key.Equals("text", StringComparison.OrdinalIgnoreCase))
+            {
+                XmlTextValidator.ValidateOrThrow(value, "text");
                 SetNotesText(notesPart, value);
+            }
             else if (key.Equals("direction", StringComparison.OrdinalIgnoreCase)
                   || key.Equals("dir", StringComparison.OrdinalIgnoreCase)
                   || key.Equals("rtl", StringComparison.OrdinalIgnoreCase))
@@ -339,6 +342,7 @@ public partial class PowerPointHandler
                     break;
                 case "notes":
                 {
+                    XmlTextValidator.ValidateOrThrow(value, "notes");
                     var notesPart = EnsureNotesSlidePart(slidePart2);
                     SetNotesText(notesPart, value);
                     break;
