@@ -757,7 +757,39 @@ public partial class PowerPointHandler
         GetSlide(phSlidePart).Save();
 
         var shapeCount = phShapeTree.Elements<Shape>().Count();
-        return $"/slide[{phSlideIdx}]/shape[{shapeCount}]";
+        var phPath = $"/slide[{phSlideIdx}]/shape[{shapeCount}]";
+
+        // CONSISTENCY(placeholder-prop-passthrough): AddPlaceholder previously
+        // consumed only phType/phIndex/name/id/zorder/text and silently
+        // dropped every other caller-supplied prop. That broke
+        // dump→batch→replay for any placeholder whose source carried explicit
+        // x/y/width/height/fill/font/color/line/... (i.e. every placeholder
+        // overriding its layout slot). On replay the batch reported success
+        // but Get returned layout defaults. Forward the leftover props through
+        // Set so the same code path Add uses for plain shapes applies.
+        var consumed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "phType", "phtype", "type",
+            "phIndex", "phindex", "idx",
+            "name", "id",
+            "zorder", "z-order", "order",
+            "text",
+            // isTitle is a discriminator on Get but a no-op here: phType already
+            // determines title-ness. Drop without forwarding so Set doesn't see
+            // an unknown key.
+            "isTitle", "istitle",
+            // geometry on a placeholder is implicit (rect) — AddPlaceholder
+            // already injected a PresetGeometry where needed. Forwarding would
+            // be a no-op at best, an unsupported_property warning at worst.
+            "geometry",
+        };
+        var passthrough = properties
+            .Where(kv => !consumed.Contains(kv.Key))
+            .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
+        if (passthrough.Count > 0)
+            Set(phPath, passthrough);
+
+        return phPath;
     }
 
 
