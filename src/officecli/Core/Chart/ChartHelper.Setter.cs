@@ -258,12 +258,16 @@ internal static partial class ChartHelper
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
                     if (plotArea2 == null) { unsupported.Add(key); break; }
 
-                    // dLblPos is NOT supported by doughnut, area, radar, or stock charts — skip entirely
+                    // dLblPos is NOT supported by doughnut, area, radar, or stock charts —
+                    // CT_DLbls for these chart groups omits dLblPos. Report unsupported so
+                    // the caller learns the request didn't land instead of seeing a silent
+                    // success ("Updated labelPos=...") with no on-disk change.
                     if (plotArea2.GetFirstChild<C.DoughnutChart>() != null
                         || plotArea2.GetFirstChild<C.AreaChart>() != null
                         || plotArea2.GetFirstChild<C.Area3DChart>() != null
                         || plotArea2.GetFirstChild<C.RadarChart>() != null
-                        || plotArea2.GetFirstChild<C.StockChart>() != null) break;
+                        || plotArea2.GetFirstChild<C.StockChart>() != null)
+                    { unsupported.Add(key); break; }
 
                     // Combo charts (bar+line in same plot area) have incompatible dLblPos
                     // value sets — bar supports inEnd/inBase/outEnd but not t/b/l/r, while
