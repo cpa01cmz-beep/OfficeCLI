@@ -609,33 +609,15 @@ public partial class PowerPointHandler
                     properties["lineDash"] = compoundLineDash;
                 }
 
-                // Default visibility outline: when caller picks a geometry via
-                // shape=/preset=/geometry= and specifies no fill AND no line,
-                // PowerPoint's "Insert Shape" UI gives a thin dark outline so the geometry
-                // is visible. Without it, presets like ellipse/rect render as invisible
-                // (no stroke + no fill) — confirmed in real PowerPoint and HTML/SVG previews.
-                // Skip when the caller did NOT pick a geometry (we default to rect for
-                // text-only shapes; those are textbox-flavored and should stay borderless,
-                // matching PowerPoint's Insert Text Box UI).
-                var callerPickedGeometry = properties.ContainsKey("preset")
-                    || properties.ContainsKey("geometry")
-                    || properties.ContainsKey("shape");
-                if (callerPickedGeometry
-                    && newShape.ShapeProperties != null
-                    && newShape.ShapeProperties.GetFirstChild<Drawing.Outline>() == null
-                    && newShape.ShapeProperties.GetFirstChild<Drawing.SolidFill>() == null
-                    && newShape.ShapeProperties.GetFirstChild<Drawing.GradientFill>() == null
-                    && newShape.ShapeProperties.GetFirstChild<Drawing.PatternFill>() == null
-                    && newShape.ShapeProperties.GetFirstChild<Drawing.BlipFill>() == null
-                    && newShape.ShapeProperties.GetFirstChild<Drawing.NoFill>() == null
-                    && newShape.ShapeProperties.GetFirstChild<Drawing.PresetGeometry>() != null)
-                {
-                    // 0.75pt = 9525 EMU (1pt = 12700 EMU). #595959 matches PowerPoint UI default.
-                    var defaultOutline = new Drawing.Outline { Width = 9525 };
-                    defaultOutline.AppendChild(new Drawing.SolidFill(
-                        new Drawing.RgbColorModelHex { Val = "595959" }));
-                    newShape.ShapeProperties.AppendChild(defaultOutline);
-                }
+                // Outline policy: "user didn't ask = we don't write". Earlier the
+                // handler auto-injected a 0.75pt #595959 outline whenever the caller
+                // picked a geometry and gave no fill+line, mimicking PowerPoint's
+                // "Insert Shape" UI default. That phantom border survived through
+                // dump→replay: NodeBuilder reported lineColor=595959, the batch
+                // emitter forwarded it, and every round-trip grew a darker border on
+                // a shape the user never asked to outline. The visibility regression
+                // (presets render with no stroke) is the lesser harm; defer the
+                // default-outline UX to a caller-driven `line=default`/UI layer.
 
                 // List style (bullet/numbered)
                 if (properties.TryGetValue("list", out var listVal) || properties.TryGetValue("liststyle", out listVal))
