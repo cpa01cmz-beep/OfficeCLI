@@ -558,6 +558,40 @@ public partial class PowerPointHandler
         return null;
     }
 
+    // Strict variant used by Set to surface unknown preset names as an
+    // unsupported_property error instead of silently degrading to Rectangle.
+    // ParsePresetShape's last-resort degrade exists so a single bad preset
+    // never takes a whole shape add (and its positional refs) down on import,
+    // but Set is a single-property mutation — silently rewriting the user's
+    // geometry to a rectangle is a worse outcome than telling them the name
+    // wasn't recognised.
+    internal static bool TryParsePresetShape(string name, out Drawing.ShapeTypeValues value)
+    {
+        try
+        {
+            var explicitHit = ParsePresetShape(name);
+            // ParsePresetShape returns Rectangle for unknown names — to
+            // distinguish a real "rect" input from the degraded fallback,
+            // also check the explicit alias list / reflection path.
+            var lower = name.ToLowerInvariant();
+            if (lower is "rect" or "rectangle") { value = explicitHit; return true; }
+            if (ResolveShapeTypeByReflection(name) != null) { value = explicitHit; return true; }
+            // Heuristic: if ParsePresetShape gave us anything other than the
+            // Rectangle fallback, it matched a hand-rolled alias. (Rectangle
+            // is the only fallback target, so any non-Rectangle return is a
+            // real hit; a Rectangle return without "rect"/"rectangle" input
+            // is the silent degrade we want to reject.)
+            if (explicitHit != Drawing.ShapeTypeValues.Rectangle) { value = explicitHit; return true; }
+            value = explicitHit;
+            return false;
+        }
+        catch
+        {
+            value = Drawing.ShapeTypeValues.Rectangle;
+            return false;
+        }
+    }
+
     // BUG-FIX(B8): canonical names mirror OOXML LineEndValues so that the
     // value passed to Add/Set round-trips through Get. The previous mapping
     // had 'arrow' → Triangle (input) but Get emitted the OOXML name 'arrow'

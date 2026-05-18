@@ -566,16 +566,27 @@ public partial class PowerPointHandler
                     // Check if value is a preset shape name (no spaces, no commas, simple identifier)
                     if (!value.Contains(' ') && !value.Contains(',') && !value.Contains('M'))
                     {
-                        // Treat as preset shape name
+                        // Treat as preset shape name. Use the strict variant so
+                        // an unrecognised name surfaces as unsupported_property
+                        // instead of silently rewriting the geometry to a
+                        // rectangle (the Add-side fallback's intent — keep a
+                        // batch import alive on one bad preset — is wrong for a
+                        // single-property Set: the caller asked for a specific
+                        // shape and deserves to know the name didn't match).
+                        if (!TryParsePresetShape(value, out var preset))
+                        {
+                            unsupported.Add($"{key}={value} (unknown preset shape name)");
+                            break;
+                        }
                         spPr.RemoveAllChildren<Drawing.CustomGeometry>();
                         var existingGeom = spPr.GetFirstChild<Drawing.PresetGeometry>();
                         if (existingGeom != null)
-                            existingGeom.Preset = ParsePresetShape(value);
+                            existingGeom.Preset = preset;
                         else
                             {
                             var newGeom = EnsurePresetGeometry(spPr);
                             newGeom.AppendChild(new Drawing.AdjustValueList());
-                            newGeom.Preset = ParsePresetShape(value);
+                            newGeom.Preset = preset;
                         }
                     }
                     else
