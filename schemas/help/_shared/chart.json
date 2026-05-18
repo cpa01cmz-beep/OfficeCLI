@@ -562,7 +562,7 @@
       "add": true,
       "set": true,
       "get": true,
-      "description": "pie/doughnut slice explosion 0..400 (percent of radius); 0 removes.",
+      "description": "pie/doughnut slice explosion 0..100 (percent of radius); 0 removes.",
       "examples": [
         "--prop explosion=10"
       ],
