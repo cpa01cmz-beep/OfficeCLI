@@ -20,6 +20,29 @@ public partial class PowerPointHandler
     private static readonly HashSet<string> _animClassValues =
         new(StringComparer.OrdinalIgnoreCase) { "entrance", "exit", "emphasis", "motion" };
 
+    // PowerPoint 2013+ "Exciting" / "Dynamic Content" transitions stored as
+    // <p15:prstTrans prst="..."/>. CLI key is the lowerCamelCase OOXML token;
+    // value is what gets written to the @prst attribute. Lookup is
+    // OrdinalIgnoreCase so `transition=PageCurlDouble` and `pagecurldouble`
+    // both reach the same code path.
+    private static readonly Dictionary<string, string> _p15PrstTokens =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["box"] = "box",
+            ["fallOver"] = "fallOver",
+            ["drape"] = "drape",
+            ["curtains"] = "curtains",
+            ["wind"] = "wind",
+            ["prestige"] = "prestige",
+            ["fracture"] = "fracture",
+            ["crush"] = "crush",
+            ["peelOff"] = "peelOff",
+            ["pageCurlDouble"] = "pageCurlDouble",
+            ["pageCurlSingle"] = "pageCurlSingle",
+            ["airplane"] = "airplane",
+            ["origami"] = "origami",
+        };
+
     internal static void ValidateAnimationClass(string? cls)
     {
         if (string.IsNullOrEmpty(cls)) return;
@@ -214,6 +237,31 @@ public partial class PowerPointHandler
             durationMs = null;
         }
 
+        // PowerPoint 2013+ "Exciting" gallery: <p15:prstTrans prst="..."/> inside
+        // mc:AlternateContent. CLI token == OOXML prst (lowerCamelCase). Schema
+        // also accepts invX / invY booleans that flip the visual direction —
+        // surfaced as the `-in` (default) / `-out` modifier. Intercepted before
+        // the typed switch because none of these elements is modeled by the SDK.
+        if (_p15PrstTokens.TryGetValue(typeName, out var prstValue))
+        {
+            var p15Ns = "http://schemas.microsoft.com/office/powerpoint/2012/main";
+            var elem = new OpenXmlUnknownElement("p15", "prstTrans", p15Ns);
+            elem.SetAttribute(new OpenXmlAttribute("", "prst", null!, prstValue));
+            var dir = direction?.ToLowerInvariant();
+            if (dir is "out")
+            {
+                elem.SetAttribute(new OpenXmlAttribute("", "invX", null!, "1"));
+                elem.SetAttribute(new OpenXmlAttribute("", "invY", null!, "1"));
+            }
+            else if (dir is not (null or "in"))
+            {
+                throw new ArgumentException(
+                    $"Transition '{typeName}' only accepts -in or -out (got '-{direction}').");
+            }
+            InsertTransitionWithMcWrapper(slide, elem, "p15", p15Ns, speed, durationMs);
+            return;
+        }
+
         var trans = new Transition();
         if (speed.HasValue) trans.Speed = speed.Value;
         if (durationMs != null) trans.Duration = durationMs;
@@ -235,12 +283,6 @@ public partial class PowerPointHandler
             "pull" or "uncover" => new PullTransition { Direction = ParseSlideDirStr(direction ?? "right") },
             "wheel" => new WheelTransition { Spokes = new UInt32Value(wheelSpokes) },
             "zoom" => new ZoomTransition { Direction = ParseInOutDir(direction ?? "in") },
-            // Box is NOT a <p:transition> child in OOXML — the basic ns
-            // schema's allowed-children list (circle/diamond/.../zoom/...)
-            // omits it. PowerPoint 2013+ stores Box via the p15 PresetTransition
-            // element (<p15:prstTrans prst="box"/>) inside mc:AlternateContent.
-            // Handled specially below, after the switch.
-            "box" => null,
             "split" => BuildSplitTransition(direction),
             "blinds" or "venetian" => new BlindsTransition { Direction = ParseOrientation(direction ?? "horizontal") },
             "checker" or "checkerboard" => new CheckerTransition { Direction = ParseOrientation(direction ?? "horizontal") },
@@ -266,7 +308,7 @@ public partial class PowerPointHandler
             "pan" => new DocumentFormat.OpenXml.Office2010.PowerPoint.PanTransition { Direction = ParseSlideDir(direction ?? "left") },
             "reveal" => new DocumentFormat.OpenXml.Office2010.PowerPoint.RevealTransition { Direction = ParseLeftRightDir(direction ?? "left") },
             "morph" => null, // handled specially below
-            _ => throw new ArgumentException($"Invalid transition type: '{typeName}'. Valid values: fade, cut, dissolve, circle, diamond, newsflash, plus, random, wedge, wipe, push, cover, pull, wheel, zoom, split, blinds, checker, comb, bars, strips, flash, honeycomb, vortex, switch, flip, ripple, glitter, prism, doors, window, shred, ferris, flythrough, warp, gallery, conveyor, pan, reveal, morph, none.")
+            _ => throw new ArgumentException($"Invalid transition type: '{typeName}'. Valid values: fade, cut, dissolve, circle, diamond, newsflash, plus, random, wedge, wipe, push, cover, pull, wheel, zoom, split, blinds, checker, comb, bars, strips, flash, honeycomb, vortex, switch, flip, ripple, glitter, prism, doors, window, shred, ferris, flythrough, warp, gallery, conveyor, pan, reveal, morph, box, fallOver, drape, curtains, wind, prestige, fracture, crush, peelOff, pageCurlDouble, pageCurlSingle, airplane, origami, none.")
         };
 
         // Morph transition: requires mc:AlternateContent wrapper with p159 namespace
@@ -285,32 +327,6 @@ public partial class PowerPointHandler
             morphElem.SetAttribute(new OpenXmlAttribute("", "option", null!, morphOption));
 
             InsertTransitionWithMcWrapper(slide, morphElem, "p159", p159Ns, speed, durationMs);
-            return;
-        }
-
-        // Box transition (PowerPoint 2013+): stored as <p15:prstTrans prst="box">
-        // inside mc:AlternateContent — there's no <p:box> in the basic-ns schema.
-        // The OOXML schema also defines invX / invY booleans on prstTrans which
-        // PowerPoint's UI surfaces as the in / out variants.
-        if (typeName == "box")
-        {
-            var p15Ns = "http://schemas.microsoft.com/office/powerpoint/2012/main";
-            var boxElem = new OpenXmlUnknownElement("p15", "prstTrans", p15Ns);
-            boxElem.SetAttribute(new OpenXmlAttribute("", "prst", null!, "box"));
-            // direction maps to invX/invY: box-in keeps the defaults (false),
-            // box-out flips both. Other tokens are rejected — see whitelist.
-            var dir = direction?.ToLowerInvariant();
-            if (dir is "out")
-            {
-                boxElem.SetAttribute(new OpenXmlAttribute("", "invX", null!, "1"));
-                boxElem.SetAttribute(new OpenXmlAttribute("", "invY", null!, "1"));
-            }
-            else if (dir is not (null or "in"))
-            {
-                throw new ArgumentException(
-                    $"Box transition only accepts -in or -out (got '-{direction}').");
-            }
-            InsertTransitionWithMcWrapper(slide, boxElem, "p15", p15Ns, speed, durationMs);
             return;
         }
 
@@ -1813,11 +1829,15 @@ public partial class PowerPointHandler
                 var prstMatch = System.Text.RegularExpressions.Regex.Match(p15Attrs, @"prst=""(\w+)""");
                 if (prstMatch.Success)
                 {
-                    var prst = prstMatch.Groups[1].Value.ToLowerInvariant();
+                    // Preserve the OOXML lowerCamelCase token (pageCurlDouble,
+                    // fallOver, etc.) on readback — the CLI accepts case-insensitive
+                    // input but Get's canonical form matches the spec spelling.
+                    var prst = prstMatch.Groups[1].Value;
                     var invX = System.Text.RegularExpressions.Regex.IsMatch(p15Attrs, @"invX=""(1|true)""");
                     var invY = System.Text.RegularExpressions.Regex.IsMatch(p15Attrs, @"invY=""(1|true)""");
-                    // box-out = invX + invY both set; default (no invs) reads as box (== box-in).
-                    var canonical = prst == "box" && invX && invY ? "box-out" : prst;
+                    // Both invs set = the -out variant. Default (no invs) reads
+                    // as bare token (== -in implicit).
+                    var canonical = invX && invY ? $"{prst}-out" : prst;
                     node.Format["transition"] = canonical;
 
                     var transInMc = System.Text.RegularExpressions.Regex.Match(
