@@ -60,7 +60,7 @@
       "add": false,
       "set": true,
       "get": true,
-      "description": "error bar value type (cust, fixedVal, stdDev, stdErr, percentage); pass 'none' to clear. Silently ignored on series types that don't support error bars.",
+      "description": "error bar value type (fixed, percent, stddev, stderr); accepted aliases: fixedValue, percentage/pct, standardDeviation, standardError. Pass 'none' to clear. Silently ignored on series types that don't support error bars.",
       "readback": "OOXML errValType token",
       "enforcement": "lenient"
     },

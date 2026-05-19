@@ -547,11 +547,11 @@
       "add": true,
       "set": true,
       "get": false,
-      "description": "error bars on each series. Format: 'type:value' where type ∈ fixedVal, percentage, stdDev, stdErr, custom. 'none' removes.",
+      "description": "error bars on each series. Format: 'type:value' where type ∈ fixed (alias: fixedValue), percent (alias: percentage, pct), stddev (alias: standardDeviation), stderr (alias: standardError). 'none' removes.",
       "examples": [
-        "--prop errbars=fixedVal:5",
+        "--prop errbars=fixed:5",
         "--prop errbars=none",
-        "--prop errbars=percentage:10"
+        "--prop errbars=percent:10"
       ]
     },
     "explosion": {
