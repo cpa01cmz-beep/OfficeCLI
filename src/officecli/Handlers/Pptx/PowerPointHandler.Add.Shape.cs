@@ -687,6 +687,7 @@ public partial class PowerPointHandler
                       "baseline", "superscript", "subscript",
                       "textwarp", "wordart", "autofit",
                       "lineopacity", "line.opacity",
+                      "linegradient", "line.gradient",
                       // previously dropped silently — route through Set
                       // so OOXML attributes actually get emitted.
                       "linecap", "lineCap", "line.cap",

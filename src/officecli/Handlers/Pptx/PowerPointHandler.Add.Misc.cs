@@ -183,7 +183,14 @@ public partial class PowerPointHandler
 
                 // Line style
                 var cxnOutline = new Drawing.Outline { Width = 12700 }; // 1pt default
-                if (properties.TryGetValue("lineColor", out var cxnColor2) || properties.TryGetValue("linecolor", out cxnColor2)
+                // line.gradient parity with Set side — accept gradient outline at Add time
+                // so dump→replay round-trips. Gradient fill wins over solid color.
+                if (properties.TryGetValue("line.gradient", out var cxnLineGrad)
+                    || properties.TryGetValue("linegradient", out cxnLineGrad))
+                {
+                    cxnOutline.AppendChild(BuildGradientFill(cxnLineGrad));
+                }
+                else if (properties.TryGetValue("lineColor", out var cxnColor2) || properties.TryGetValue("linecolor", out cxnColor2)
                     || properties.TryGetValue("line", out cxnColor2) || properties.TryGetValue("color", out cxnColor2)
                     || properties.TryGetValue("line.color", out cxnColor2))
                     cxnOutline.AppendChild(BuildSolidFill(cxnColor2));
