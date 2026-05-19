@@ -609,6 +609,7 @@ internal static partial class ChartHelper
         "explosion", "explode",
         "linewidth", "linedash", "dash",
         "shadow", "outline",
+        "outlinecolor", "outlinewidth", "outlinedash",
         "alpha", "transparency",
     };
 
