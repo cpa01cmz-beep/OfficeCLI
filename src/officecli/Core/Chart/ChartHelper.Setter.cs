@@ -988,6 +988,11 @@ internal static partial class ChartHelper
                         var spPr = GetOrCreateSeriesShapeProperties(ser);
                         spPr.RemoveAllChildren<Drawing.SolidFill>();
                         spPr.RemoveAllChildren<Drawing.GradientFill>();
+                        // BUG-R33-B3: areafill=none kept appending a fresh
+                        // a:noFill on every call, ending up with duplicates
+                        // that PowerPoint rejects. Sweep the existing NoFill
+                        // before prepending the new fill element.
+                        spPr.RemoveAllChildren<Drawing.NoFill>();
                         spPr.PrependChild(BuildFillElement(value));
                     }
                     break;
