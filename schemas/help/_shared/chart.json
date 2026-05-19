@@ -751,10 +751,34 @@
       "add": true,
       "set": true,
       "get": false,
-      "description": "data label text font. Format: 'size:color:fontname' (any segment optional).",
+      "description": "data label text font. Format: 'size:color:fontname' (any segment optional). Readback is split into labelFont.size / labelFont.color / labelFont.bold / labelFont.name (one key per slot) so dump→replay can rebuild the compound spec without parsing.",
       "examples": [
         "--prop labelfont=9:333333:Calibri"
       ]
+    },
+    "labelFont.size": {
+      "type": "number",
+      "get": true,
+      "description": "data label font size in points. Readback of the size slot inside labelfont= (BuildLabelTextProperties' DefaultRunProperties.FontSize).",
+      "examples": []
+    },
+    "labelFont.color": {
+      "type": "string",
+      "get": true,
+      "description": "data label font color (hex, e.g. #FF0000). Readback of the color slot inside labelfont=.",
+      "examples": []
+    },
+    "labelFont.bold": {
+      "type": "bool",
+      "get": true,
+      "description": "data label font bold flag. Emitted only when true.",
+      "examples": []
+    },
+    "labelFont.name": {
+      "type": "string",
+      "get": true,
+      "description": "data label font typeface (latin). Readback of the fontname slot inside labelfont=.",
+      "examples": []
     },
     "labeloffset": {
       "type": "number",

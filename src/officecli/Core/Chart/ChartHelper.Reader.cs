@@ -617,6 +617,34 @@ internal static partial class ChartHelper
             if (separator != null) node.Format["dataLabels.separator"] = separator;
             var dlNumFmt = dataLabels.GetFirstChild<C.NumberingFormat>()?.FormatCode?.Value;
             if (dlNumFmt != null) node.Format["dataLabels.numFmt"] = dlNumFmt;
+
+            // labelFont readback (R35-F3): BuildLabelTextProperties writes
+            // <c:txPr><a:p><a:pPr><a:defRPr sz="..." b="..."><a:solidFill>
+            // <a:srgbClr val="..."/></a:solidFill><a:latin typeface="..."/>
+            // </a:defRPr></a:pPr></a:p></c:txPr>. Surface size / color / font
+            // as dotted keys so dump→replay can rebuild the same spec via
+            // labelFont=size:color:fontname.
+            var dlDefRp = dataLabels.GetFirstChild<C.TextProperties>()
+                ?.GetFirstChild<Drawing.Paragraph>()
+                ?.GetFirstChild<Drawing.ParagraphProperties>()
+                ?.GetFirstChild<Drawing.DefaultRunProperties>();
+            if (dlDefRp != null)
+            {
+                if (dlDefRp.FontSize?.HasValue == true)
+                    node.Format["labelFont.size"] = (dlDefRp.FontSize.Value / 100).ToString();
+                if (dlDefRp.Bold?.HasValue == true && dlDefRp.Bold.Value)
+                    node.Format["labelFont.bold"] = "true";
+                var dlLabelFill = dlDefRp.GetFirstChild<Drawing.SolidFill>();
+                if (dlLabelFill != null)
+                {
+                    var dlLabelColor = ReadColorFromFill(dlLabelFill);
+                    if (dlLabelColor != null)
+                        node.Format["labelFont.color"] = dlLabelColor;
+                }
+                var dlLatin = dlDefRp.GetFirstChild<Drawing.LatinFont>()?.Typeface?.Value;
+                if (!string.IsNullOrEmpty(dlLatin))
+                    node.Format["labelFont.name"] = dlLatin;
+            }
         }
 
         var seriesCount = CountSeries(plotArea);
