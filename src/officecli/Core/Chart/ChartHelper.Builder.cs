@@ -536,9 +536,12 @@ internal static partial class ChartHelper
         "errbars", "errorbars", "series.shadow", "seriesshadow",
         "series.outline", "seriesoutline",
         "bubblescale", "shownegbubbles", "sizerepresents",
-        "gapdepth", "shape", "barshape",
+        "gapdepth", "shape", "barshape", "shape3d",
         "droplines", "hilowlines", "updownbars", "serlines", "serieslines",
         "axisorientation", "axisreverse", "logbase", "logscale", "yaxisscale",
+        // CONSISTENCY(cat-axis-type): swap CategoryAxis for DateAxis when
+        // catAxisType=date so time-series categories render with date scaling.
+        "cataxistype", "categoryaxistype",
         "dispunits", "displayunits", "labeloffset", "ticklabelskip", "tickskip",
         "axisposition", "axispos", "crosses", "crossesat", "crossbetween",
         "plotvisonly", "plotvisibleonly", "autotitledeleted",
@@ -1213,7 +1216,18 @@ internal static partial class ChartHelper
     internal static Drawing.DefaultRunProperties BuildDefaultRunPropertiesFromCompoundSpec(string spec)
     {
         var parts = spec.Split(':');
-        var fontSize = parts.Length > 0 && int.TryParse(parts[0], out var fs) ? fs * 100 : 1000;
+        // CONSISTENCY(pt-suffix): accept the unit-qualified form (`18pt`,
+        // `10.5pt`) on input — without this, `int.TryParse("18pt")` failed
+        // and silently defaulted to 1000 (10pt), so `axisFont=18pt:…` ignored
+        // the size. Mirrors the root CLAUDE.md "Font size input is lenient:
+        // accepts `14`, `14pt`, `10.5pt`" rule.
+        var sizeStr = parts.Length > 0
+            ? (parts[0].EndsWith("pt", System.StringComparison.OrdinalIgnoreCase) ? parts[0][..^2] : parts[0])
+            : "";
+        var fontSize = sizeStr.Length > 0 && double.TryParse(sizeStr,
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var fs)
+            ? (int)System.Math.Round(fs * 100) : 1000;
         var color = parts.Length > 1 ? parts[1] : null;
         var fontName = parts.Length > 2 ? parts[2] : null;
 

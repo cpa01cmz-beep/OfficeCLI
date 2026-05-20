@@ -312,6 +312,23 @@ internal static partial class ChartHelper
         var overlapEl = barChart?.GetFirstChild<C.Overlap>();
         if (overlapEl?.Val?.HasValue == true) node.Format["overlap"] = overlapEl.Val.Value.ToString();
 
+        // CONSISTENCY(bar3d-shape): emit barShape so Set/Add shape=cone|cylinder|...
+        // round-trips through Get. Lives on <c:bar3DChart><c:shape>.
+        var bar3dForShape = plotArea.GetFirstChild<C.Bar3DChart>();
+        var bar3dShape = bar3dForShape?.GetFirstChild<C.Shape>();
+        if (bar3dShape?.Val?.HasValue == true)
+        {
+            var v = bar3dShape.Val.Value;
+            string? barShapeStr = null;
+            if (v == C.ShapeValues.Box) barShapeStr = "box";
+            else if (v == C.ShapeValues.Cone) barShapeStr = "cone";
+            else if (v == C.ShapeValues.ConeToMax) barShapeStr = "coneToMax";
+            else if (v == C.ShapeValues.Cylinder) barShapeStr = "cylinder";
+            else if (v == C.ShapeValues.Pyramid) barShapeStr = "pyramid";
+            else if (v == C.ShapeValues.PyramidToMaximum) barShapeStr = "pyramidToMax";
+            if (barShapeStr != null) node.Format["barShape"] = barShapeStr;
+        }
+
         // Legend font (TextProperties on Legend element)
         if (legend != null)
         {
@@ -401,6 +418,12 @@ internal static partial class ChartHelper
         var catAxis = plotArea.GetFirstChild<C.CategoryAxis>();
         var catAxisTitle = catAxis?.GetFirstChild<C.Title>()?.Descendants<Drawing.Text>().FirstOrDefault()?.Text;
         if (catAxisTitle != null) node.Format["catTitle"] = catAxisTitle;
+
+        // CONSISTENCY(cat-axis-type): emit the category-axis kind so Add/Set
+        // can round-trip `catAxisType=date|category`. Default omitted when
+        // a plain CategoryAxis is in use (matches the OOXML default).
+        if (plotArea.GetFirstChild<C.DateAxis>() != null)
+            node.Format["catAxisType"] = "date";
 
         // Axis scale
         var scaling = valAxis?.GetFirstChild<C.Scaling>();
@@ -844,6 +867,13 @@ internal static partial class ChartHelper
                     if (dispRSqr?.HasValue == true && dispRSqr.Value) seriesNode.Format["trendline.dispRSqr"] = "true";
                     var dispEq = firstTl.GetFirstChild<C.DisplayEquation>()?.Val;
                     if (dispEq?.HasValue == true && dispEq.Value) seriesNode.Format["trendline.dispEq"] = "true";
+                    // CONSISTENCY(trendline-name-readback): the Setter writes
+                    // a <c:trendlineLbl> with rich-text holding the user's
+                    // name. Pull the text content back for Get parity.
+                    var tlLblText = firstTl.GetFirstChild<C.TrendlineLabel>()
+                        ?.Descendants<Drawing.Text>().FirstOrDefault()?.Text;
+                    if (!string.IsNullOrEmpty(tlLblText))
+                        seriesNode.Format["trendline.name"] = tlLblText;
                 }
                 // Error bars — emit as a "type:value" spec mirroring the
                 // BuildErrorBars input form so dump→replay re-creates the
