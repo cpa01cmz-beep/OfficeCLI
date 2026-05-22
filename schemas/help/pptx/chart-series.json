@@ -21,5 +21,17 @@
   "extends": [
     "_shared/chart-series",
     "_shared/chart-series.pptx-xlsx"
-  ]
+  ],
+  "properties": {
+    "categories": {
+      "type": "string",
+      "description": "per-series category override; range reference only. pptx override: not supported on per-series Set (handler rejects categories on /chart[N]/series[N] paths). Set categories at chart level via `categories=...` instead.",
+      "add": true,
+      "set": false,
+      "get": true,
+      "examples": ["--prop series1.categories=\"Sheet1!$A$2:$A$5\""],
+      "readback": "range reference string",
+      "enforcement": "report"
+    }
+  }
 }
