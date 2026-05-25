@@ -1399,11 +1399,11 @@ public partial class WordHandler
             var pPrChange = pProps?.GetFirstChild<ParagraphPropertiesChange>();
             if (pPrChange != null)
             {
-                node.Format["trackChange"] = "format";
+                node.Format["revision"] = "format";
                 if (!string.IsNullOrEmpty(pPrChange.Author?.Value))
-                    node.Format["trackChange.author"] = pPrChange.Author!.Value!;
+                    node.Format["revision.author"] = pPrChange.Author!.Value!;
                 if (pPrChange.Date?.Value is DateTime pDate)
-                    node.Format["trackChange.date"] = pDate.ToString("o");
+                    node.Format["revision.date"] = pDate.ToString("o");
             }
             // paraMarkIns: `<w:pPr><w:rPr><w:ins .../></w:rPr></w:pPr>` records
             // that the paragraph mark itself was inserted as a tracked change —
@@ -2089,22 +2089,22 @@ public partial class WordHandler
                     var insAnc = unkRun.Ancestors<InsertedRun>().FirstOrDefault();
                     if (insAnc != null)
                     {
-                        synthNode.Format["trackChange"] = "ins";
+                        synthNode.Format["revision"] = "ins";
                         if (!string.IsNullOrEmpty(insAnc.Author?.Value))
-                            synthNode.Format["trackChange.author"] = insAnc.Author!.Value!;
+                            synthNode.Format["revision.author"] = insAnc.Author!.Value!;
                         if (insAnc.Date?.Value is DateTime insAncDate)
-                            synthNode.Format["trackChange.date"] = insAncDate.ToString("o");
+                            synthNode.Format["revision.date"] = insAncDate.ToString("o");
                     }
                     else
                     {
                         var delAnc = unkRun.Ancestors<DeletedRun>().FirstOrDefault();
                         if (delAnc != null)
                         {
-                            synthNode.Format["trackChange"] = "del";
+                            synthNode.Format["revision"] = "del";
                             if (!string.IsNullOrEmpty(delAnc.Author?.Value))
-                                synthNode.Format["trackChange.author"] = delAnc.Author!.Value!;
+                                synthNode.Format["revision.author"] = delAnc.Author!.Value!;
                             if (delAnc.Date?.Value is DateTime delAncDate)
-                                synthNode.Format["trackChange.date"] = delAncDate.ToString("o");
+                                synthNode.Format["revision.date"] = delAncDate.ToString("o");
                         }
                     }
                     node.Children.Add(synthNode);
@@ -2241,22 +2241,22 @@ public partial class WordHandler
             var insAncestor = run.Ancestors<InsertedRun>().FirstOrDefault();
             if (insAncestor != null)
             {
-                node.Format["trackChange"] = "ins";
+                node.Format["revision"] = "ins";
                 if (!string.IsNullOrEmpty(insAncestor.Author?.Value))
-                    node.Format["trackChange.author"] = insAncestor.Author!.Value!;
+                    node.Format["revision.author"] = insAncestor.Author!.Value!;
                 if (insAncestor.Date?.Value is DateTime insDate)
-                    node.Format["trackChange.date"] = insDate.ToString("o");
+                    node.Format["revision.date"] = insDate.ToString("o");
             }
             else
             {
                 var delAncestor = run.Ancestors<DeletedRun>().FirstOrDefault();
                 if (delAncestor != null)
                 {
-                    node.Format["trackChange"] = "del";
+                    node.Format["revision"] = "del";
                     if (!string.IsNullOrEmpty(delAncestor.Author?.Value))
-                        node.Format["trackChange.author"] = delAncestor.Author!.Value!;
+                        node.Format["revision.author"] = delAncestor.Author!.Value!;
                     if (delAncestor.Date?.Value is DateTime delDate)
-                        node.Format["trackChange.date"] = delDate.ToString("o");
+                        node.Format["revision.date"] = delDate.ToString("o");
                 }
                 else
                 {
@@ -2267,11 +2267,11 @@ public partial class WordHandler
                     var rPrChange = run.RunProperties?.GetFirstChild<RunPropertiesChange>();
                     if (rPrChange != null)
                     {
-                        node.Format["trackChange"] = "format";
+                        node.Format["revision"] = "format";
                         if (!string.IsNullOrEmpty(rPrChange.Author?.Value))
-                            node.Format["trackChange.author"] = rPrChange.Author!.Value!;
+                            node.Format["revision.author"] = rPrChange.Author!.Value!;
                         if (rPrChange.Date?.Value is DateTime rDate)
-                            node.Format["trackChange.date"] = rDate.ToString("o");
+                            node.Format["revision.date"] = rDate.ToString("o");
                     }
                 }
             }

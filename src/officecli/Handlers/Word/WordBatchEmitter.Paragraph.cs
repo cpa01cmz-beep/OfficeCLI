@@ -49,19 +49,19 @@ public static partial class WordBatchEmitter
         // visually obvious in Word's revision UI).
         if (props.Remove("paraMarkIns.author", out var pmiAuthor))
         {
-            props["trackChange.author"] = pmiAuthor;
-            // Strip trackChange=format / trackChange.date from a sibling
-            // pPrChange so the bare-trackChange path on AddParagraph fires
-            // instead of the pPrChange path. pPrChange round-trip on
-            // paragraphs that are ALSO newly inserted is a corner case we
-            // accept losing for now (rare in practice; pPrChange semantics
-            // overlap with paraMarkIns on a fresh paragraph anyway).
-            props.Remove("trackChange");
+            props["revision.author"] = pmiAuthor;
+            // Strip revision=format / revision.date from a sibling pPrChange
+            // so the bare-revision path on AddParagraph fires instead of the
+            // pPrChange path. pPrChange round-trip on paragraphs that are
+            // ALSO newly inserted is a corner case we accept losing for now
+            // (rare in practice; pPrChange semantics overlap with paraMarkIns
+            // on a fresh paragraph anyway).
+            props.Remove("revision");
         }
         if (props.Remove("paraMarkIns.date", out var pmiDate))
         {
-            if (!props.ContainsKey("trackChange.date"))
-                props["trackChange.date"] = pmiDate;
+            if (!props.ContainsKey("revision.date"))
+                props["revision.date"] = pmiDate;
         }
         // BUG-DUMP26-01: numId/numLevel that came from style inheritance
         // (ResolveNumPrFromStyle, no direct w:numPr on the paragraph) must
@@ -492,7 +492,7 @@ public static partial class WordBatchEmitter
             || r.Format.ContainsKey("ligatures")
             || r.Format.ContainsKey("numForm")
             || r.Format.ContainsKey("numSpacing")
-            || r.Format.ContainsKey("trackChange")
+            || r.Format.ContainsKey("revision")
             || r.Format.ContainsKey("sym")) return false;
         // BUG-FIELD-COLLAPSE: a synthetic field run carries `instruction=…` —
         // collapse would lose the field chain on replay.

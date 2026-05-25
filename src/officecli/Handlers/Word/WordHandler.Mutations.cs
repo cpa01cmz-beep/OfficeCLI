@@ -791,7 +791,7 @@ public partial class WordHandler
     {
         foreach (var k in properties.Keys)
         {
-            if (k.StartsWith("trackChange.", StringComparison.OrdinalIgnoreCase))
+            if (k.StartsWith("revision.", StringComparison.OrdinalIgnoreCase))
                 return true;
         }
         return false;
@@ -820,9 +820,9 @@ public partial class WordHandler
 
         // Pull trackChange.* sub-props. Author defaults to "OfficeCLI",
         // date defaults to UtcNow, id auto-allocated when omitted.
-        properties.TryGetValue("trackChange.author", out var tcAuthor);
-        properties.TryGetValue("trackChange.date", out var tcDateRaw);
-        properties.TryGetValue("trackChange.id", out var tcExplicitId);
+        properties.TryGetValue("revision.author", out var tcAuthor);
+        properties.TryGetValue("revision.date", out var tcDateRaw);
+        properties.TryGetValue("revision.id", out var tcExplicitId);
         if (string.IsNullOrEmpty(tcAuthor)) tcAuthor = "OfficeCLI";
         DateTime tcDate = DateTime.UtcNow;
         if (!string.IsNullOrEmpty(tcDateRaw) && DateTime.TryParse(tcDateRaw, out var parsedDate))
@@ -932,10 +932,8 @@ public partial class WordHandler
             throw new ArgumentException($"Table index {tableIdx} out of range");
         var table = tables[tableIdx - 1];
 
-        properties.TryGetValue("trackChange.author", out var aRaw);
-        if (aRaw == null) properties.TryGetValue("trackchange.author", out aRaw);
-        properties.TryGetValue("trackChange.date", out var dRaw);
-        if (dRaw == null) properties.TryGetValue("trackchange.date", out dRaw);
+        properties.TryGetValue("revision.author", out var aRaw);
+        properties.TryGetValue("revision.date", out var dRaw);
         var author = string.IsNullOrEmpty(aRaw) ? "OfficeCLI" : aRaw!;
         DateTime date = !string.IsNullOrEmpty(dRaw) && DateTime.TryParse(dRaw, out var d) ? d : DateTime.UtcNow;
 
@@ -1122,7 +1120,7 @@ public partial class WordHandler
         foreach (var key in props.Keys)
         {
             var k = key.ToLowerInvariant();
-            if (k == "trackchange.author" || k == "trackchange.date" || k == "trackchange.id")
+            if (k == "revision.author" || k == "revision.date" || k == "revision.id")
                 return true;
         }
         return false;
@@ -1182,9 +1180,9 @@ public partial class WordHandler
         foreach (var kv in properties)
         {
             var k = kv.Key.ToLowerInvariant();
-            if (k == "trackchange.author") tcAuthor = kv.Value;
-            else if (k == "trackchange.date") tcDate = kv.Value;
-            else if (k == "trackchange.id") tcId = kv.Value;
+            if (k == "revision.author") tcAuthor = kv.Value;
+            else if (k == "revision.date") tcDate = kv.Value;
+            else if (k == "revision.id") tcId = kv.Value;
         }
         if (string.IsNullOrEmpty(tcAuthor)) tcAuthor = "OfficeCLI";
         DateTime tcDt = DateTime.UtcNow;
@@ -1715,6 +1713,76 @@ public partial class WordHandler
             if (trIns != null) { trIns.Remove(); count++; }
         }
 
+        // Accept w:tcPrChange (P5: high-level set + trackChange on table cell)
+        foreach (var tcPrChange in body.Descendants<TableCellPropertiesChange>().ToList())
+        {
+            tcPrChange.Remove();
+            count++;
+        }
+
+        // Accept w:trPrChange (P5: high-level set + trackChange on table row;
+        // distinct from the row-level <w:ins/> marker handled above which lives
+        // inside trPr directly — *Change carries the previous trPr snapshot).
+        foreach (var trPrChange in body.Descendants<TableRowPropertiesChange>().ToList())
+        {
+            trPrChange.Remove();
+            count++;
+        }
+
+        // Accept paragraph-mark deletion markers (P4: remove paragraph +
+        // trackChange writes <w:del/> into pPr/rPr to mark the ¶ as deleted).
+        // Word UX: accepting a ¶ del merges this paragraph with the NEXT one
+        // (because removing ¶ joins paragraphs). When this paragraph's content
+        // was also wrapped in <w:del> (the dual-marker form P4 emits), the
+        // content has already been removed above by the DeletedRun loop, so
+        // accepting the ¶ del here simply makes the empty paragraph disappear
+        // by merging into the next.
+        foreach (var pMark in body.Descendants<ParagraphMarkRunProperties>().ToList())
+        {
+            var paraDel = pMark.GetFirstChild<Deleted>();
+            if (paraDel == null) continue;
+            var thisPara = pMark.Ancestors<Paragraph>().FirstOrDefault();
+            if (thisPara == null) continue;
+            var nextPara = thisPara.NextSibling<Paragraph>();
+            paraDel.Remove();
+            count++;
+            // Merge: append this paragraph's runs (and any remaining inline
+            // content) to the next paragraph, then remove this empty paragraph.
+            // If there is no next paragraph (this was the last in body/cell),
+            // just drop the ¶ del marker — the empty paragraph stays so the
+            // container isn't left without any paragraph (OOXML requires at
+            // least one for body / cell).
+            if (nextPara != null)
+            {
+                // Move all run-level children (Run, hyperlink, etc) — anything
+                // that isn't ParagraphProperties — to the FRONT of nextPara,
+                // preserving order. nextPara may itself start with pPr; insert
+                // after that.
+                var movable = thisPara.ChildElements
+                    .Where(c => c is not ParagraphProperties)
+                    .ToList();
+                var nextPPr = nextPara.GetFirstChild<ParagraphProperties>();
+                OpenXmlElement insertAfter = nextPPr ?? (OpenXmlElement?)null!;
+                foreach (var ch in movable)
+                {
+                    ch.Remove();
+                    if (insertAfter == null) nextPara.PrependChild(ch);
+                    else { insertAfter.InsertAfterSelf(ch); insertAfter = ch; }
+                }
+                thisPara.Remove();
+            }
+        }
+
+        // Accept paragraph-mark insertion markers (¶ ins inside pPr/rPr — would
+        // be emitted by a future "add paragraph + trackChange" high-level form;
+        // currently produced manually or by Word). Accept = the paragraph stays,
+        // just drop the marker.
+        foreach (var pMark in body.Descendants<ParagraphMarkRunProperties>().ToList())
+        {
+            var paraIns = pMark.GetFirstChild<Inserted>();
+            if (paraIns != null) { paraIns.Remove(); count++; }
+        }
+
         // Accept w:moveTo / w:moveFrom
         foreach (var moveFrom in body.Descendants<MoveFromRun>().ToList())
         {
@@ -1904,6 +1972,84 @@ public partial class WordHandler
                 tblPrChange.Remove();
             }
             count++;
+        }
+
+        // Reject w:tcPrChange — restore original table cell properties (P5)
+        foreach (var tcPrChange in body.Descendants<TableCellPropertiesChange>().ToList())
+        {
+            var tcPr = tcPrChange.Parent as TableCellProperties;
+            if (tcPr != null)
+            {
+                var originalProps = tcPrChange.GetFirstChild<PreviousTableCellProperties>();
+                if (originalProps != null)
+                {
+                    var tc = tcPr.Parent;
+                    if (tc != null)
+                    {
+                        var newTcPr = new TableCellProperties();
+                        foreach (var child in originalProps.ChildElements.ToList())
+                            newTcPr.AppendChild(child.CloneNode(true));
+                        tc.ReplaceChild(newTcPr, tcPr);
+                    }
+                }
+                else tcPrChange.Remove();
+            }
+            else tcPrChange.Remove();
+            count++;
+        }
+
+        // Reject w:trPrChange — restore original table row properties (P5)
+        foreach (var trPrChange in body.Descendants<TableRowPropertiesChange>().ToList())
+        {
+            var trPr = trPrChange.Parent as TableRowProperties;
+            if (trPr != null)
+            {
+                var originalProps = trPrChange.GetFirstChild<PreviousTableRowProperties>();
+                if (originalProps != null)
+                {
+                    var tr = trPr.Parent;
+                    if (tr != null)
+                    {
+                        var newTrPr = new TableRowProperties();
+                        foreach (var child in originalProps.ChildElements.ToList())
+                            newTrPr.AppendChild(child.CloneNode(true));
+                        tr.ReplaceChild(newTrPr, trPr);
+                    }
+                }
+                else trPrChange.Remove();
+            }
+            else trPrChange.Remove();
+            count++;
+        }
+
+        // Reject paragraph-mark deletion (P4: ¶ del inside pPr/rPr).
+        // Reject means: undelete the paragraph mark. Just drop the marker; the
+        // paragraph stays as a normal paragraph break. The companion content
+        // <w:del> wrappers are independently unwrapped by the DeletedRun loop
+        // above, restoring the original text.
+        foreach (var pMark in body.Descendants<ParagraphMarkRunProperties>().ToList())
+        {
+            var paraDel = pMark.GetFirstChild<Deleted>();
+            if (paraDel != null) { paraDel.Remove(); count++; }
+            var paraIns = pMark.GetFirstChild<Inserted>();
+            if (paraIns != null)
+            {
+                // Reject ¶ ins: the paragraph break itself was inserted →
+                // unbreak. Merge this paragraph into the previous one.
+                paraIns.Remove();
+                count++;
+                var thisPara = pMark.Ancestors<Paragraph>().FirstOrDefault();
+                var prevPara = thisPara?.PreviousSibling<Paragraph>();
+                if (thisPara != null && prevPara != null)
+                {
+                    foreach (var ch in thisPara.ChildElements.Where(c => c is not ParagraphProperties).ToList())
+                    {
+                        ch.Remove();
+                        prevPara.AppendChild(ch);
+                    }
+                    thisPara.Remove();
+                }
+            }
         }
 
         // Reject w:moveTo — remove (discard the move target)

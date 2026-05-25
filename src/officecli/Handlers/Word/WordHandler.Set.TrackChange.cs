@@ -86,9 +86,9 @@ public partial class WordHandler
         foreach (var (k, v) in properties)
         {
             var lk = k.ToLowerInvariant();
-            if (lk == "trackchange.author") tcAuthor = v;
-            else if (lk == "trackchange.date") tcDate = v;
-            else if (lk == "trackchange.id") tcId = v;
+            if (lk == "revision.author") tcAuthor = v;
+            else if (lk == "revision.date") tcDate = v;
+            else if (lk == "revision.id") tcId = v;
         }
         // Defaults per Phase-2 spec.
         var author = string.IsNullOrEmpty(tcAuthor) ? "OfficeCLI" : tcAuthor!;
@@ -102,7 +102,7 @@ public partial class WordHandler
         foreach (var (k, v) in properties)
         {
             var lk = k.ToLowerInvariant();
-            if (lk == "trackchange" || lk.StartsWith("trackchange.", StringComparison.Ordinal))
+            if (lk == "revision" || lk.StartsWith("revision.", StringComparison.Ordinal))
                 continue;
             stripped[k] = v;
         }
@@ -331,7 +331,7 @@ public partial class WordHandler
         foreach (var k in properties.Keys)
         {
             var lk = k.ToLowerInvariant();
-            if (lk == "trackchange" || lk.StartsWith("trackchange.", StringComparison.Ordinal))
+            if (lk == "revision" || lk.StartsWith("revision.", StringComparison.Ordinal))
                 return true;
         }
         return false;

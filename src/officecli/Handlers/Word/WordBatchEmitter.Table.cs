@@ -373,13 +373,13 @@ public static partial class WordBatchEmitter
         if (string.IsNullOrEmpty(author)) return;
         var props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["trackChange.author"] = author!,
+            ["revision.author"] = author!,
         };
         if (format.TryGetValue($"{prefix}.date", out var dateObj) && dateObj != null)
         {
             var date = dateObj.ToString();
             if (!string.IsNullOrEmpty(date))
-                props["trackChange.date"] = date!;
+                props["revision.date"] = date!;
         }
         items.Add(new BatchItem
         {

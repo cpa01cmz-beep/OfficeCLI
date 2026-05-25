@@ -1802,8 +1802,7 @@ public partial class WordHandler
                 or "toc" or "tableofcontents"
                 or "style" or "styles"
                 or "watermark"
-                or "revision" or "change" or "trackchange"
-                or "trackedchange" or "trackedchanges"
+                or "revision"
                 or "media"
                 or "hyperlink"
                 or "section"
@@ -2110,8 +2109,7 @@ public partial class WordHandler
 
         // Handle revision / track changes query
         bool isRevisionSelector = parsed.ChildSelector == null &&
-            (parsed.Element is "revision" or "change" or "trackchange"
-                or "trackedchange" or "trackedchanges");
+            (parsed.Element is "revision");
         if (isRevisionSelector)
         {
             int revIdx = 0;
@@ -2128,9 +2126,9 @@ public partial class WordHandler
                     Type = "revision",
                     Text = text
                 };
-                node.Format["revisionType"] = "insertion";
-                if (ins.Author?.Value != null) node.Format["author"] = ins.Author.Value;
-                if (ins.Date?.Value != null) node.Format["date"] = ins.Date.Value.ToString("o");
+                node.Format["revision.type"] = "insertion";
+                if (ins.Author?.Value != null) node.Format["revision.author"] = ins.Author.Value;
+                if (ins.Date?.Value != null) node.Format["revision.date"] = ins.Date.Value.ToString("o");
                 results.Add(node);
             }
             // w:del (DeletedRun)
@@ -2146,9 +2144,9 @@ public partial class WordHandler
                     Type = "revision",
                     Text = text
                 };
-                node.Format["revisionType"] = "deletion";
-                if (del.Author?.Value != null) node.Format["author"] = del.Author.Value;
-                if (del.Date?.Value != null) node.Format["date"] = del.Date.Value.ToString("o");
+                node.Format["revision.type"] = "deletion";
+                if (del.Author?.Value != null) node.Format["revision.author"] = del.Author.Value;
+                if (del.Date?.Value != null) node.Format["revision.date"] = del.Date.Value.ToString("o");
                 results.Add(node);
             }
             // w:rPrChange (RunPropertiesChange)
@@ -2166,9 +2164,9 @@ public partial class WordHandler
                     Type = "revision",
                     Text = text
                 };
-                node.Format["revisionType"] = "formatChange";
-                if (rPrChange.Author?.Value != null) node.Format["author"] = rPrChange.Author.Value;
-                if (rPrChange.Date?.Value != null) node.Format["date"] = rPrChange.Date.Value.ToString("o");
+                node.Format["revision.type"] = "formatChange";
+                if (rPrChange.Author?.Value != null) node.Format["revision.author"] = rPrChange.Author.Value;
+                if (rPrChange.Date?.Value != null) node.Format["revision.date"] = rPrChange.Date.Value.ToString("o");
                 results.Add(node);
             }
             // w:pPrChange (ParagraphPropertiesChange)
@@ -2185,9 +2183,9 @@ public partial class WordHandler
                     Type = "revision",
                     Text = text
                 };
-                node.Format["revisionType"] = "paragraphChange";
-                if (pPrChange.Author?.Value != null) node.Format["author"] = pPrChange.Author.Value;
-                if (pPrChange.Date?.Value != null) node.Format["date"] = pPrChange.Date.Value.ToString("o");
+                node.Format["revision.type"] = "paragraphChange";
+                if (pPrChange.Author?.Value != null) node.Format["revision.author"] = pPrChange.Author.Value;
+                if (pPrChange.Date?.Value != null) node.Format["revision.date"] = pPrChange.Date.Value.ToString("o");
                 results.Add(node);
             }
             return results;

@@ -550,8 +550,7 @@ public partial class WordHandler
     {
         foreach (var k in properties.Keys)
         {
-            if (k.StartsWith("trackChange.", StringComparison.OrdinalIgnoreCase)
-                || k.StartsWith("trackchange.", StringComparison.OrdinalIgnoreCase))
+            if (k.StartsWith("revision.", StringComparison.OrdinalIgnoreCase))
                 return true;
         }
         return false;
@@ -683,12 +682,9 @@ public partial class WordHandler
         if (HasRowTrackChangeProps(properties))
         {
             string? rowTcAuthor = null, rowTcDate = null, rowTcId = null;
-            properties.TryGetValue("trackChange.author", out rowTcAuthor);
-            if (rowTcAuthor == null) properties.TryGetValue("trackchange.author", out rowTcAuthor);
-            properties.TryGetValue("trackChange.date", out rowTcDate);
-            if (rowTcDate == null) properties.TryGetValue("trackchange.date", out rowTcDate);
-            properties.TryGetValue("trackChange.id", out rowTcId);
-            if (rowTcId == null) properties.TryGetValue("trackchange.id", out rowTcId);
+            properties.TryGetValue("revision.author", out rowTcAuthor);
+            properties.TryGetValue("revision.date", out rowTcDate);
+            properties.TryGetValue("revision.id", out rowTcId);
 
             newRowProps ??= newRow.PrependChild(new TableRowProperties());
             var marker = new Inserted
@@ -702,8 +698,7 @@ public partial class WordHandler
 
             // Remove trackChange.* from unsupported list (consumed).
             LastAddUnsupportedProps.RemoveAll(k =>
-                k.StartsWith("trackChange.", StringComparison.OrdinalIgnoreCase)
-                || k.StartsWith("trackchange.", StringComparison.OrdinalIgnoreCase));
+                k.StartsWith("revision.", StringComparison.OrdinalIgnoreCase));
         }
 
         if (index.HasValue)
@@ -785,11 +780,9 @@ public partial class WordHandler
         DateTime colTcDate = DateTime.UtcNow;
         if (colHasTc)
         {
-            properties.TryGetValue("trackChange.author", out var aRaw);
-            if (aRaw == null) properties.TryGetValue("trackchange.author", out aRaw);
+            properties.TryGetValue("revision.author", out var aRaw);
             if (!string.IsNullOrEmpty(aRaw)) colTcAuthor = aRaw;
-            properties.TryGetValue("trackChange.date", out var dRaw);
-            if (dRaw == null) properties.TryGetValue("trackchange.date", out dRaw);
+            properties.TryGetValue("revision.date", out var dRaw);
             if (!string.IsNullOrEmpty(dRaw) && DateTime.TryParse(dRaw, out var parsed))
                 colTcDate = parsed;
         }
@@ -822,8 +815,7 @@ public partial class WordHandler
 
         if (colHasTc)
             LastAddUnsupportedProps.RemoveAll(k =>
-                k.StartsWith("trackChange.", StringComparison.OrdinalIgnoreCase)
-                || k.StartsWith("trackchange.", StringComparison.OrdinalIgnoreCase));
+                k.StartsWith("revision.", StringComparison.OrdinalIgnoreCase));
 
         var newColIdx = grid.Elements<GridColumn>().ToList().IndexOf(newGridCol) + 1;
         return $"{parentPath}/col[{newColIdx}]";
@@ -1092,12 +1084,9 @@ public partial class WordHandler
         if (HasRowTrackChangeProps(properties))  // reuse the row helper
         {
             string? cTcAuthor = null, cTcDate = null, cTcId = null;
-            properties.TryGetValue("trackChange.author", out cTcAuthor);
-            if (cTcAuthor == null) properties.TryGetValue("trackchange.author", out cTcAuthor);
-            properties.TryGetValue("trackChange.date", out cTcDate);
-            if (cTcDate == null) properties.TryGetValue("trackchange.date", out cTcDate);
-            properties.TryGetValue("trackChange.id", out cTcId);
-            if (cTcId == null) properties.TryGetValue("trackchange.id", out cTcId);
+            properties.TryGetValue("revision.author", out cTcAuthor);
+            properties.TryGetValue("revision.date", out cTcDate);
+            properties.TryGetValue("revision.id", out cTcId);
 
             var tcPr = newCell.GetFirstChild<TableCellProperties>()
                       ?? newCell.PrependChild(new TableCellProperties());
@@ -1109,8 +1098,7 @@ public partial class WordHandler
                 Id = !string.IsNullOrEmpty(cTcId) ? cTcId : GenerateRevisionId(),
             });
             LastAddUnsupportedProps.RemoveAll(k =>
-                k.StartsWith("trackChange.", StringComparison.OrdinalIgnoreCase)
-                || k.StartsWith("trackchange.", StringComparison.OrdinalIgnoreCase));
+                k.StartsWith("revision.", StringComparison.OrdinalIgnoreCase));
         }
 
         if (index.HasValue)
