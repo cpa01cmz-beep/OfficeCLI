@@ -197,7 +197,19 @@ internal static partial class ChartHelper
             node.Format["legend"] = "none";
         }
 
-        var dataLabels = plotArea.Descendants<C.DataLabels>().FirstOrDefault();
+        // Chart-level dLbls lives as a direct child of the chart-group element
+        // (c:barChart, c:lineChart, ...). Using Descendants pulled the first
+        // series-level <c:dLbls> instead when it appeared earlier in XML order,
+        // causing chart-level labelFont readback to mirror series 1's font.
+        var dataLabels = plotArea.ChildElements
+            .OfType<OpenXmlCompositeElement>()
+            .Where(e => e is C.BarChart || e is C.LineChart || e is C.PieChart
+                || e is C.AreaChart || e is C.Area3DChart || e is C.ScatterChart
+                || e is C.DoughnutChart || e is C.Bar3DChart || e is C.Line3DChart
+                || e is C.Pie3DChart || e is C.OfPieChart || e is C.BubbleChart
+                || e is C.RadarChart || e is C.StockChart)
+            .Select(g => g.GetFirstChild<C.DataLabels>())
+            .FirstOrDefault(d => d != null);
         if (dataLabels != null)
         {
             var parts = new List<string>();
