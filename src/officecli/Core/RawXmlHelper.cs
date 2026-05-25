@@ -250,7 +250,81 @@ internal static class RawXmlHelper
         // and merge the prefixes into the root's mc:Ignorable (de-duplicated).
         EnsureMcIgnorableForChoiceRequires(xDoc);
 
+        // Schema-order known well-known containers whose children land in a
+        // fixed sequence. Raw-set callers (notably the pptx dump replay for
+        // exotic transition/timing) emit an `append` on the parent without
+        // knowing the replay-time sibling state — a later-emitted
+        // `<p:transition>` would otherwise sit AFTER an earlier semantically
+        // added `<p:timing>`, which strict consumers reject. The reorder is
+        // a no-op when children are already in spec order, so existing
+        // raw-set callers stay byte-stable.
+        EnforceKnownSchemaOrder(xDoc);
+
         return (xDoc, affected);
+    }
+
+    // Map (parent-namespace, parent-localName) → ordered list of expected
+    // child local names. Only well-known containers whose children are
+    // affected by raw-set `append` callers; expand as new dump-replay paths
+    // surface drift. Children whose localName is not in the list are kept in
+    // their existing relative position at the tail.
+    private static readonly Dictionary<(string ns, string name), string[]> SchemaOrderMap =
+        new()
+        {
+            // p:sld — ECMA-376 CT_Slide
+            [("http://schemas.openxmlformats.org/presentationml/2006/main", "sld")] =
+                new[] { "cSld", "clrMapOvr", "transition", "timing", "extLst" },
+            // p:sldLayout — CT_SlideLayout
+            [("http://schemas.openxmlformats.org/presentationml/2006/main", "sldLayout")] =
+                new[] { "cSld", "clrMapOvr", "transition", "timing", "hf", "extLst" },
+            // p:sldMaster — CT_SlideMaster
+            [("http://schemas.openxmlformats.org/presentationml/2006/main", "sldMaster")] =
+                new[] { "cSld", "clrMap", "sldLayoutIdLst", "transition", "timing", "hf", "txStyles", "extLst" },
+        };
+
+    private static void EnforceKnownSchemaOrder(XDocument xDoc)
+    {
+        if (xDoc.Root == null) return;
+        // Apply to the document root and any nested matches (cheap walk).
+        foreach (var el in xDoc.Descendants().Prepend(xDoc.Root))
+        {
+            if (!SchemaOrderMap.TryGetValue((el.Name.NamespaceName, el.Name.LocalName), out var order))
+                continue;
+            var children = el.Elements().ToList();
+            // Order index for known names; unknown children sort last in
+            // their current order (preserves source order for unknowns —
+            // mc:AlternateContent wrappers carrying transition/timing live
+            // under a different localName so they fall here, but they
+            // were already placed by the caller).
+            int IndexOf(XElement c)
+            {
+                // mc:AlternateContent that wraps a transition or timing
+                // should sort to the slot of the wrapped element.
+                if (c.Name.LocalName == "AlternateContent" &&
+                    c.Name.NamespaceName == McNs.NamespaceName)
+                {
+                    foreach (var nested in c.Descendants())
+                    {
+                        var idx = Array.IndexOf(order, nested.Name.LocalName);
+                        if (idx >= 0) return idx;
+                    }
+                }
+                var i = Array.IndexOf(order, c.Name.LocalName);
+                return i >= 0 ? i : order.Length;
+            }
+            // Stable sort by schema order, preserving source order within ties.
+            var indexed = children.Select((c, i) => (child: c, slot: IndexOf(c), origIdx: i))
+                .OrderBy(t => t.slot).ThenBy(t => t.origIdx).ToList();
+            // Skip work if already in order.
+            bool needsReorder = false;
+            for (int i = 0; i < children.Count; i++)
+            {
+                if (!ReferenceEquals(children[i], indexed[i].child)) { needsReorder = true; break; }
+            }
+            if (!needsReorder) continue;
+            foreach (var c in children) c.Remove();
+            foreach (var t in indexed) el.Add(t.child);
+        }
     }
 
     private static readonly XNamespace McNs =
