@@ -966,6 +966,7 @@ public static partial class WordBatchEmitter
             var txbxNode = word.Get(textboxPath);
             var children = txbxNode.Children ?? new List<DocumentNode>();
             int innerPIdx = 0;
+            int innerTblIdx = 0;
             bool firstParaSeen = false;
             foreach (var child in children)
             {
@@ -981,6 +982,19 @@ public static partial class WordBatchEmitter
                     EmitParagraph(word, sourceParaPath, textboxPath, innerPIdx, items,
                                   autoPresent: !firstParaSeen, ctx);
                     firstParaSeen = true;
+                }
+                else if (child.Type == "table" || child.Type == "tbl")
+                {
+                    // BUG-D1-TXBX-TABLE: tables nested INSIDE a textbox were
+                    // silently dropped on dump — the children loop only
+                    // recognised paragraph types. Reuse EmitTable with the
+                    // textbox path as containerPath so the resulting
+                    // `add table` rows target /body/textbox[N]/tbl[K]
+                    // (AddTable already accepts a TextBoxContent parent).
+                    innerTblIdx++;
+                    var sourceTblPath = $"{textboxPath}/tbl[{innerTblIdx}]";
+                    EmitTable(word, sourceTblPath, innerTblIdx, items, ctx,
+                              parentTablePath: null, containerPath: textboxPath);
                 }
             }
         }

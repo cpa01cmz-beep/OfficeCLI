@@ -1179,6 +1179,17 @@ public partial class WordHandler
             // returned path round-trips cleanly and matches Query's canonical form.
             // Style is exempt — /styles/<id> uses the user-supplied styleId/Name as the key.
             var canonName = (next is Style) ? seg.Name : next.LocalName;
+            // BUG-D1-TXBX-PATH: the textbox / shape segments resolve to
+            // wps:wsp + w:txbxContent OOXML elements whose LocalName is
+            // "wsp" / "txbxContent" — neither is navigable as a path
+            // segment (the navigable name is the user-facing "textbox" /
+            // "shape" form handled at the children-selector switch above).
+            // Preserve the user-supplied segment name so resolvedPath stays
+            // re-navigable; without this, descendant Get calls on children
+            // like /<host>/textbox[N]/tbl[K]/tr[J] fail with
+            // "No txbxContent found at /body".
+            if (canonName == "txbxContent" || canonName == "wsp")
+                canonName = seg.Name.ToLowerInvariant();
             if (next is Paragraph navPara && !string.IsNullOrEmpty(navPara.ParagraphId?.Value))
             {
                 parentPath += "/" + canonName + $"[@paraId={navPara.ParagraphId.Value}]";
