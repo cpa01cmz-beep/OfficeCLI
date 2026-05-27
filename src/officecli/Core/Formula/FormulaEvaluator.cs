@@ -922,7 +922,12 @@ internal partial class FormulaEvaluator
     /// </summary>
     private FormulaResult? ResolveSheetCellResult(string sheetCellRef)
     {
-        if (_depth > 20) return FormulaResult.Number(0); // depth guard
+        // Depth guard: over the cap, surface a visible #NUM! (propagates up the
+        // chain) rather than Number(0), which leaked as a silent wrong value
+        // (e.g. a 25-sheet chain reporting 22 instead of erroring). Matches the
+        // same-sheet ResolveCellResult guard — depth exceeded → visible error,
+        // never a silent numeric lie.
+        if (_depth > 20) return FormulaResult.Error("#NUM!"); // depth guard
 
         var bangIdx = sheetCellRef.IndexOf('!');
         if (bangIdx < 0) return FormulaResult.Number(0);
