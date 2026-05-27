@@ -1492,7 +1492,7 @@ public class ResidentServer : IDisposable
         var (results, warnings) = AttributeFilter.ApplyWithWarnings(_handler.Query(selector), filters);
         var textFilter = req.GetArgOrNull("find");
         if (!string.IsNullOrEmpty(textFilter))
-            results = results.Where(n => n.Text != null && n.Text.Contains(textFilter, StringComparison.OrdinalIgnoreCase)).ToList();
+            results = results.Where(n => n.Text != null && AttributeFilter.MatchesTextFilter(n.Text, textFilter)).ToList();
         // CONSISTENCY(query-json-children): hydrate Children from Get(path, depth=1)
         // for JSON output so consumers see the same shape as `get --json`. Mirrors
         // the post-processing in CommandBuilder.GetQuery.cs.

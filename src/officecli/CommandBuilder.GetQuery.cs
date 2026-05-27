@@ -202,7 +202,7 @@ static partial class CommandBuilder
             }
             var (results, warnings) = OfficeCli.Core.AttributeFilter.ApplyWithWarnings(handler.Query(selector), filters);
             if (!string.IsNullOrEmpty(textFilter))
-                results = results.Where(n => n.Text != null && n.Text.Contains(textFilter, StringComparison.OrdinalIgnoreCase)).ToList();
+                results = results.Where(n => n.Text != null && OfficeCli.Core.AttributeFilter.MatchesTextFilter(n.Text, textFilter)).ToList();
             if (json)
             {
                 // CONSISTENCY(query-json-children): Query returns nodes with empty

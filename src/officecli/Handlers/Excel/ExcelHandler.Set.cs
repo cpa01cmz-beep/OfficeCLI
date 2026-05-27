@@ -46,8 +46,15 @@ public partial class ExcelHandler
         // Excel only supports find+replace — reject find without replace early (before path dispatch)
         if (properties.ContainsKey("find") && !properties.ContainsKey("replace"))
             throw new ArgumentException("Excel only supports 'find' with 'replace'. Use 'find' + 'replace' for text replacement. find+format (without replace) is not supported in Excel.");
-        if (properties.ContainsKey("regex") && properties.ContainsKey("find"))
-            throw new ArgumentException("Excel find+replace does not support regex. Remove 'regex' property.");
+        // CONSISTENCY(find-regex): Excel find/replace now honours the `r"..."`
+        // raw-string regex prefix (see ApplyFindReplace), matching docx/pptx.
+        // The legacy `regex=true` flag is normalized to the r"..." form so both
+        // spellings work, mirroring the WordHandler.Set.cs find path.
+        if (properties.TryGetValue("regex", out var xlRegexFlag)
+            && ParseHelpers.IsTruthySafe(xlRegexFlag)
+            && properties.TryGetValue("find", out var xlFindRaw)
+            && !xlFindRaw.StartsWith("r\"") && !xlFindRaw.StartsWith("r'"))
+            properties["find"] = $"r\"{xlFindRaw}\"";
 
         // Handle root path "/" — document properties
         if (path == "/")

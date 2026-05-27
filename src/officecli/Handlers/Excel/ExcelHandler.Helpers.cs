@@ -3854,10 +3854,9 @@ public partial class ExcelHandler
                 {
                     // Handle simple text items
                     var textEl = si.GetFirstChild<Text>();
-                    if (textEl?.Text != null && textEl.Text.Contains(find, StringComparison.Ordinal))
+                    if (textEl?.Text != null)
                     {
-                        int count = CountOccurrences(textEl.Text, find);
-                        textEl.Text = textEl.Text.Replace(find, replace, StringComparison.Ordinal);
+                        textEl.Text = ApplyFindReplace(textEl.Text, find, replace, out int count);
                         totalCount += count;
                     }
 
@@ -3865,10 +3864,9 @@ public partial class ExcelHandler
                     foreach (var run in si.Elements<Run>())
                     {
                         var runText = run.GetFirstChild<Text>();
-                        if (runText?.Text != null && runText.Text.Contains(find, StringComparison.Ordinal))
+                        if (runText?.Text != null)
                         {
-                            int count = CountOccurrences(runText.Text, find);
-                            runText.Text = runText.Text.Replace(find, replace, StringComparison.Ordinal);
+                            runText.Text = ApplyFindReplace(runText.Text, find, replace, out int count);
                             totalCount += count;
                         }
                     }
@@ -3896,20 +3894,18 @@ public partial class ExcelHandler
                     if (inlineStr != null)
                     {
                         var t = inlineStr.GetFirstChild<Text>();
-                        if (t?.Text != null && t.Text.Contains(find, StringComparison.Ordinal))
+                        if (t?.Text != null)
                         {
-                            int count = CountOccurrences(t.Text, find);
-                            t.Text = t.Text.Replace(find, replace, StringComparison.Ordinal);
+                            t.Text = ApplyFindReplace(t.Text, find, replace, out int count);
                             totalCount += count;
                         }
                         // Rich text runs inside inline string
                         foreach (var run in inlineStr.Elements<Run>())
                         {
                             var runText = run.GetFirstChild<Text>();
-                            if (runText?.Text != null && runText.Text.Contains(find, StringComparison.Ordinal))
+                            if (runText?.Text != null)
                             {
-                                int count = CountOccurrences(runText.Text, find);
-                                runText.Text = runText.Text.Replace(find, replace, StringComparison.Ordinal);
+                                runText.Text = ApplyFindReplace(runText.Text, find, replace, out int count);
                                 totalCount += count;
                             }
                         }
@@ -3940,19 +3936,17 @@ public partial class ExcelHandler
                             {
                                 var si = items[sstIdx];
                                 var siText = si.GetFirstChild<Text>();
-                                if (siText?.Text != null && siText.Text.Contains(find, StringComparison.Ordinal))
+                                if (siText?.Text != null)
                                 {
-                                    int count = CountOccurrences(siText.Text, find);
-                                    siText.Text = siText.Text.Replace(find, replace, StringComparison.Ordinal);
+                                    siText.Text = ApplyFindReplace(siText.Text, find, replace, out int count);
                                     totalCount += count;
                                 }
                                 foreach (var run in si.Elements<Run>())
                                 {
                                     var runText = run.GetFirstChild<Text>();
-                                    if (runText?.Text != null && runText.Text.Contains(find, StringComparison.Ordinal))
+                                    if (runText?.Text != null)
                                     {
-                                        int count = CountOccurrences(runText.Text, find);
-                                        runText.Text = runText.Text.Replace(find, replace, StringComparison.Ordinal);
+                                        runText.Text = ApplyFindReplace(runText.Text, find, replace, out int count);
                                         totalCount += count;
                                     }
                                 }
@@ -3979,6 +3973,45 @@ public partial class ExcelHandler
             idx += find.Length;
         }
         return count;
+    }
+
+    /// <summary>
+    /// CONSISTENCY(find-regex): apply one find/replace to a text fragment,
+    /// honouring the `r"..."` raw-string regex prefix the same way docx/pptx
+    /// Set and the query `~=` operator do (shared parser
+    /// AttributeFilter.TryParseRegexPrefix). r-prefixed → Regex.Replace
+    /// (capture groups like $1 expand); plain literal → ordinal Contains/Replace.
+    /// Returns the rewritten text and sets <paramref name="count"/> to the
+    /// number of matches; returns the input unchanged with count 0 on no match.
+    /// A malformed regex falls back to literal handling (never throws here).
+    /// </summary>
+    private static string ApplyFindReplace(string text, string find, string replace, out int count)
+    {
+        count = 0;
+        if (AttributeFilter.TryParseRegexPrefix(find, out var pattern))
+        {
+            try
+            {
+                // CONSISTENCY(find-regex-timeout): mirror the 5s catastrophic-
+                // backtracking guard Word/Pptx find use (WordHandler.Helpers.cs:20,
+                // PowerPointHandler.Helpers.cs:18) so a pathological xlsx pattern
+                // can't hang the process.
+                var rx = new System.Text.RegularExpressions.Regex(
+                    pattern, System.Text.RegularExpressions.RegexOptions.None, TimeSpan.FromSeconds(5));
+                count = rx.Matches(text).Count;
+                return count > 0 ? rx.Replace(text, replace) : text;
+            }
+            catch (System.ArgumentException)
+            {
+                // Malformed regex — fall through to literal handling.
+            }
+        }
+        if (text.Contains(find, StringComparison.Ordinal))
+        {
+            count = CountOccurrences(text, find);
+            return text.Replace(find, replace, StringComparison.Ordinal);
+        }
+        return text;
     }
 
     /// <summary>

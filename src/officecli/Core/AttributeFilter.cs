@@ -259,6 +259,56 @@ internal static class AttributeFilter
         return true;
     }
 
+    /// <summary>
+    /// CONSISTENCY(find-regex): shared text-match used by both the `~=` Contains
+    /// operator and the CLI `--find` post-filter. Mirrors Word/Pptx Set's
+    /// `r"..."` / `r'...'` regex prefix — without it, `--find r"Bullet"`
+    /// literally looked for the string `r"Bullet"` (quotes included) and always
+    /// returned 0. A plain (non-prefixed) value still does a case-insensitive
+    /// contains; a malformed regex falls back to literal contains.
+    /// </summary>
+    public static bool MatchesTextFilter(string text, string find)
+    {
+        if (TryParseRegexPrefix(find, out var pattern))
+        {
+            try
+            {
+                return Regex.IsMatch(text, pattern, RegexOptions.IgnoreCase);
+            }
+            catch (System.ArgumentException)
+            {
+                // Malformed regex — fall through to literal contains so the
+                // user still gets usable behavior, never an opaque exception.
+            }
+        }
+        return text.Contains(find, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// CONSISTENCY(find-regex): canonical parser for the `r"..."` / `r'...'`
+    /// raw-string regex prefix shared by every find vocabulary (query `~=`,
+    /// CLI `--find`, Word/Pptx/Excel Set find/replace). Returns true and the
+    /// inner pattern when <paramref name="find"/> is r-prefixed; false for a
+    /// plain literal. Centralizing the parse here keeps one source of truth —
+    /// do not re-implement the prefix scan anywhere else.
+    /// </summary>
+    public static bool TryParseRegexPrefix(string find, out string pattern)
+    {
+        pattern = "";
+        if (find.Length >= 3 && find[0] == 'r'
+            && (find[1] == '"' || find[1] == '\''))
+        {
+            var quote = find[1];
+            var endIdx = find.LastIndexOf(quote);
+            if (endIdx > 1)
+            {
+                pattern = find[2..endIdx];
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static bool MatchOne(DocumentNode node, Condition cond)
     {
         // Resolve actual value from node
@@ -298,32 +348,7 @@ internal static class AttributeFilter
 
             case FilterOp.Contains:
                 if (!hasKey) return false;
-                // CONSISTENCY(find-regex): mirror Word/Pptx Set's `r"..."` /
-                // `r'...'` regex prefix on the find vocabulary. Without this,
-                // `query run[text~=r"Bold"]` literally looked for the string
-                // `r"Bold"` (with quotes) and always returned 0. Plain
-                // `~=value` still does a case-insensitive contains.
-                if (cond.Value.Length >= 3 && cond.Value[0] == 'r'
-                    && (cond.Value[1] == '"' || cond.Value[1] == '\''))
-                {
-                    var quote = cond.Value[1];
-                    var endIdx = cond.Value.LastIndexOf(quote);
-                    if (endIdx > 1)
-                    {
-                        var pattern = cond.Value[2..endIdx];
-                        try
-                        {
-                            return Regex.IsMatch(actualStr, pattern, RegexOptions.IgnoreCase);
-                        }
-                        catch (System.ArgumentException)
-                        {
-                            // Malformed regex — fall through to literal contains
-                            // so the user still gets a usable behavior, never an
-                            // opaque selector exception from deep in the query path.
-                        }
-                    }
-                }
-                return actualStr.Contains(cond.Value, StringComparison.OrdinalIgnoreCase);
+                return MatchesTextFilter(actualStr, cond.Value);
 
             case FilterOp.GreaterOrEqual:
                 if (!hasKey) return false;
