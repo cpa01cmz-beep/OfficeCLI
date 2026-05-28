@@ -357,27 +357,33 @@ public partial class ExcelHandler
                 $"Property 'formula2' is required when operator='{dv.Operator.InnerText}'; supply both bounds (formula1=lower, formula2=upper).");
         }
 
-        // Build case-insensitive lookup for validation properties
-        var dvProps = new Dictionary<string, string>(properties, StringComparer.OrdinalIgnoreCase);
-
-        dv.AllowBlank = !dvProps.TryGetValue("allowBlank", out var dvAllowBlank)
+        // CONSISTENCY(tracking-rebind): previously we copied `properties`
+        // into a fresh OrdinalIgnoreCase dictionary, but the copy constructor
+        // walks IEnumerable<KVP> via the source's GetEnumerator, which on
+        // TrackingPropertyDictionary marks EVERY input key as consumed —
+        // including genuinely unknown ones like errorMessage=. That silently
+        // hid unsupported_property warnings (R44 major-1). Read each known
+        // key directly off `properties` (its custom comparer is already
+        // OrdinalIgnoreCase and fires tracking only on actual TryGetValue
+        // hits). Mirrors the AutoFilter pattern below.
+        dv.AllowBlank = !properties.TryGetValue("allowBlank", out var dvAllowBlank)
             || IsTruthy(dvAllowBlank);
-        dv.ShowErrorMessage = !dvProps.TryGetValue("showError", out var dvShowError)
+        dv.ShowErrorMessage = !properties.TryGetValue("showError", out var dvShowError)
             || IsTruthy(dvShowError);
-        dv.ShowInputMessage = !dvProps.TryGetValue("showInput", out var dvShowInput)
+        dv.ShowInputMessage = !properties.TryGetValue("showInput", out var dvShowInput)
             || IsTruthy(dvShowInput);
 
-        if (dvProps.TryGetValue("errorTitle", out var dvErrorTitle))
+        if (properties.TryGetValue("errorTitle", out var dvErrorTitle))
             dv.ErrorTitle = dvErrorTitle;
-        if (dvProps.TryGetValue("error", out var dvError))
+        if (properties.TryGetValue("error", out var dvError))
             dv.Error = dvError;
-        if (dvProps.TryGetValue("promptTitle", out var dvPromptTitle))
+        if (properties.TryGetValue("promptTitle", out var dvPromptTitle))
             dv.PromptTitle = dvPromptTitle;
-        if (dvProps.TryGetValue("prompt", out var dvPrompt))
+        if (properties.TryGetValue("prompt", out var dvPrompt))
             dv.Prompt = dvPrompt;
 
         // V6 — errorStyle: stop (default), warning, information.
-        if (dvProps.TryGetValue("errorStyle", out var dvErrStyle))
+        if (properties.TryGetValue("errorStyle", out var dvErrStyle))
         {
             dv.ErrorStyle = dvErrStyle.ToLowerInvariant() switch
             {
@@ -393,9 +399,9 @@ public partial class ExcelHandler
         // has INVERTED semantics: true = HIDE the in-cell arrow.
         // Expose it as `inCellDropdown` (user-friendly sense) and
         // the raw `showDropDown` (OOXML sense).
-        if (dvProps.TryGetValue("inCellDropdown", out var dvInCell))
+        if (properties.TryGetValue("inCellDropdown", out var dvInCell))
             dv.ShowDropDown = !ParseHelpers.IsTruthy(dvInCell);
-        else if (dvProps.TryGetValue("showDropDown", out var dvShowDd))
+        else if (properties.TryGetValue("showDropDown", out var dvShowDd))
             dv.ShowDropDown = ParseHelpers.IsTruthy(dvShowDd);
 
         var wsEl = GetSheet(dvWorksheet);
