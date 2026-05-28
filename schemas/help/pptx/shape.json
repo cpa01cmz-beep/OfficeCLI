@@ -693,7 +693,7 @@
         "--prop bevel=circle-6",
         "--prop bevel=angle-8-4"
       ],
-      "readback": "'preset' alone, or 'preset-widthPt-heightPt' when non-default sizing was written. Surfaces when sp3d.bevelT is present.",
+      "readback": "'preset' alone when width=height=6pt (OOXML default — 'circle-6' reads back as 'circle'), 'preset-N' when width=height=N (symmetric, e.g. 'circle-4'), or 'preset-widthPt-heightPt' when width≠height. Surfaces when sp3d.bevelT is present.",
       "enforcement": "report"
     },
     "bevelBottom": {
@@ -701,11 +701,12 @@
       "add": true,
       "set": true,
       "get": true,
-      "description": "3-D bottom bevel descriptor (sp3d.bevelB). Same grammar as 'bevel'.",
+      "description": "3-D bottom bevel descriptor (sp3d.bevelB). Same grammar as 'bevel'. Single-size shorthand 'preset-N' sets width=height=N.",
       "examples": [
+        "--prop bevelBottom=circle-4",
         "--prop bevelBottom=circle-4-4"
       ],
-      "readback": "'preset' alone, or 'preset-widthPt-heightPt'.",
+      "readback": "'preset' alone when default size (6pt), 'preset-N' when width=height=N (symmetric), or 'preset-widthPt-heightPt' when width≠height.",
       "enforcement": "report"
     },
     "depth": {

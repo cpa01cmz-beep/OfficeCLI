@@ -612,9 +612,10 @@ public partial class PowerPointHandler
     {
         // OOXML default for both w and h is 76200 EMU = 6 pt. When the stored
         // values match those defaults, emit the preset alone so round-trips of
-        // unsized bevel input (e.g. "circle") don't gain a "-6-6" tail. Schema
-        // documents this contract: "'preset' alone, or 'preset-widthPt-heightPt'
-        // when non-default sizing was written."
+        // unsized bevel input (e.g. "circle") don't gain a "-6-6" tail.
+        // CONSISTENCY(bevel-symmetric): when w==h (single-size shorthand was used),
+        // emit "preset-N" rather than "preset-N-N" so the readback mirrors the input
+        // form and stays round-trippable (parser sets h=w when height omitted).
         var preset = bevel.Preset?.HasValue == true ? (bevel.Preset.InnerText ?? "circle") : "circle";
         var hasW = bevel.Width?.HasValue == true;
         var hasH = bevel.Height?.HasValue == true;
@@ -623,6 +624,7 @@ public partial class PowerPointHandler
         if (wEmu == 76200L && hEmu == 76200L) return preset;
         var w = $"{wEmu / 12700.0:0.##}";
         var h = $"{hEmu / 12700.0:0.##}";
-        return $"{preset}-{w}-{h}";
+        // Emit single value when symmetric — "circle-4" not "circle-4-4".
+        return wEmu == hEmu ? $"{preset}-{w}" : $"{preset}-{w}-{h}";
     }
 }
