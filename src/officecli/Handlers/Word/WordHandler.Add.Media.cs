@@ -304,8 +304,12 @@ public partial class WordHandler
         // other from the image's native pixel aspect ratio. When neither is
         // supplied, width defaults to 6 inches and height follows the aspect
         // ratio (or a 4 inch fallback when the image header cannot be read).
-        bool hasWidth = properties.TryGetValue("width", out var widthStr);
-        bool hasHeight = properties.TryGetValue("height", out var heightStr);
+        // CONSISTENCY(picture-size-alias): accept "w"/"h" as short aliases for
+        // "width"/"height" — mirrors pptx shape and xlsx picture behavior.
+        bool hasWidth = properties.TryGetValue("width", out var widthStr)
+            || properties.TryGetValue("w", out widthStr);
+        bool hasHeight = properties.TryGetValue("height", out var heightStr)
+            || properties.TryGetValue("h", out heightStr);
         long cxEmu = hasWidth ? ParseEmu(widthStr!) : 5486400;  // 6 inches fallback
         long cyEmu = hasHeight ? ParseEmu(heightStr!) : 3657600; // 4 inches fallback
 
