@@ -498,6 +498,20 @@ public static partial class WordBatchEmitter
                         });
                     }
                     break;
+                case "altChunk":
+                    // <w:altChunk r:id="…"/> embeds an alternate-format payload
+                    // (HTML, RTF, plain text, …) by relationship into the body.
+                    // The payload part itself surfaces in EmitAuxiliaryPartsScan
+                    // as an `auxiliaryPart` warning, but the body element that
+                    // references it would otherwise drop silently — emit a
+                    // dedicated warning so the loss is visible in the
+                    // dump-warning bundle without the user having to correlate
+                    // the aux-part path back to a missing body reference.
+                    ctx.Warnings.Add(new DocxUnsupportedWarning(
+                        Element: "altChunk",
+                        Path: child.Path,
+                        Reason: "alternate-format chunk reference dropped on dump (no curated emit path; the referenced payload part is reported separately)"));
+                    break;
                 default:
                     // Unknown body-level child types — skip for v0.5.
                     break;
