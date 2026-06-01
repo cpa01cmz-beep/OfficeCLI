@@ -1294,6 +1294,28 @@ public partial class PowerPointHandler
 
     public List<DocumentNode> Query(string selector)
     {
+        var results = QueryDispatch(selector);
+        // A trailing positional [N] in selector form (`shape[2]`, `picture[2]`,
+        // the slide-scoped `slide[1]>shape[2]`, or `slide[2]`) selects the Nth
+        // result, matching the Get path `/slide[1]/shape[N]`. Without this the
+        // bracket was dropped and every element matched — a footgun once
+        // Set/Remove routed non-slash selectors through Query. Skip slash-scoped
+        // paths and comma unions (each comma part is positional-narrowed by its
+        // own recursive Query call inside QueryDispatch).
+        if (string.IsNullOrEmpty(selector) || selector.StartsWith("/")) return results;
+        if (ContainsTopLevelComma(selector)) return results;
+        // `slide[N]` as the subject is scoped natively by the dispatch (its [N]
+        // becomes SlideNum and already returns that one slide), so it must not be
+        // re-indexed here. A trailing subject element after the slide prefix
+        // (`slide[1]>shape[2]`) still gets its own positional [N].
+        var trailing = Regex.Match(selector, @"(\w+)\[\d+\]\s*$");
+        if (trailing.Success && trailing.Groups[1].Value.Equals("slide", StringComparison.OrdinalIgnoreCase))
+            return results;
+        return Core.SelectorPositionalIndex.TakeNth(selector, results);
+    }
+
+    private List<DocumentNode> QueryDispatch(string selector)
+    {
         // CONSISTENCY(query-selector-vs-path): ParseShapeSelector's regex
         // `^(\w+)` can't match a leading '/', so a path-style selector like
         // "/slide" produced elementType=null, isKnownType=true, and returned

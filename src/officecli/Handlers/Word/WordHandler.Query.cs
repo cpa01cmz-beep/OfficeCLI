@@ -1425,6 +1425,19 @@ public partial class WordHandler
 
     public List<DocumentNode> Query(string selector)
     {
+        var results = QueryDispatch(selector);
+        // A trailing positional [N] in selector form (`p[2]`, `table[2]`,
+        // `run[2]`) selects the Nth result, matching the Get path `/body/p[N]`.
+        // Without this the bracket was dropped and every element matched — a
+        // footgun once Set/Remove routed non-slash selectors through Query.
+        // Slash-prefixed scoped paths (`/body/ole`, `/header[1]/...`) are left to
+        // the dispatch/Get machinery; Word has no comma-union so no comma guard.
+        if (string.IsNullOrEmpty(selector) || selector.StartsWith("/")) return results;
+        return Core.SelectorPositionalIndex.TakeNth(selector, results);
+    }
+
+    private List<DocumentNode> QueryDispatch(string selector)
+    {
         var results = new List<DocumentNode>();
         var body = _doc.MainDocumentPart?.Document?.Body;
         if (body == null) return results;
@@ -1450,7 +1463,11 @@ public partial class WordHandler
             var scopePrefix = wordOleScopeMatch.Groups["parent"].Value;
             var attrSuffix = wordOleScopeMatch.Groups["attrs"].Value; // "" when absent
             var oleSelector = "ole" + attrSuffix;
-            return Query(oleSelector)
+            // QueryDispatch (not Query): the scope filter below is applied
+            // AFTER, so the inner call must not positional-narrow `ole[N]` to a
+            // global Nth before scoping. Preserves the pre-existing scoped-ole
+            // behavior unchanged.
+            return QueryDispatch(oleSelector)
                 .Where(n => n.Path.StartsWith(scopePrefix + "/", StringComparison.OrdinalIgnoreCase))
                 .ToList();
         }
