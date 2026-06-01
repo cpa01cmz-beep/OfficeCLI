@@ -141,6 +141,10 @@ public static partial class PptxBatchEmitter
                 foreach (var key in new[] { "color", "lineWidth", "lineDash",
                     "marker", "markerSize", "smooth", "outlineColor",
                     "outlineWidth", "outlineDash", "transparency", "gradient",
+                    // Shadow on a series spPr/effectLst/outerShdw — emit as
+                    // series{N}.shadow=COLOR-BLUR-ANGLE-DIST-OPACITY so the
+                    // Setter's per-series shadow case reconstructs it.
+                    "shadow",
                     "trendline", "trendline.dispRSqr", "trendline.dispEq",
                     "errbars",
                     // R38: per-series labelFont dotted sub-keys — Reader now
