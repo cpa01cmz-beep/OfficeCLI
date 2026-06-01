@@ -103,7 +103,30 @@ public partial class PowerPointHandler
     private static string ReadGradientStopColor(Drawing.GradientStop gs)
     {
         var rgb = gs.GetFirstChild<Drawing.RgbColorModelHex>();
-        if (rgb?.Val?.Value != null) return ParseHelpers.FormatHexColor(rgb.Val.Value);
+        if (rgb?.Val?.Value != null)
+        {
+            // CONSISTENCY(color-input-form): srgbClr with an a:alpha child
+            // encodes a per-stop opacity (gradients use it for fade-in/out
+            // stops). Use ReadColorFromFill's logic — wrap in a SolidFill
+            // shell so the canonical 8-digit #RRGGBBAA emit path runs, then
+            // also append color transforms (lumMod / shade / tint / …) the
+            // same way ReadColorFromFill does. Without this, a stop like
+            // <a:srgbClr val="00B4D8"><a:alpha val="30000"/></a:srgbClr>
+            // surfaced as bare "#00B4D8" and dump→replay dropped the alpha.
+            var rgbCopy = (Drawing.RgbColorModelHex)rgb.CloneNode(true);
+            var hex = ParseHelpers.FormatHexColor(rgb.Val.Value);
+            var alphaVal = rgb.GetFirstChild<Drawing.Alpha>()?.Val?.Value;
+            string baseHex;
+            if (alphaVal == null || alphaVal >= 100000)
+                baseHex = hex;
+            else
+            {
+                var alphaByte = (int)Math.Round(alphaVal.Value / 100000.0 * 255);
+                alphaByte = Math.Clamp(alphaByte, 0, 255);
+                baseHex = $"{hex}{alphaByte:X2}";
+            }
+            return AppendColorTransforms(baseHex, rgbCopy);
+        }
         var scheme = gs.GetFirstChild<Drawing.SchemeColor>();
         // .Val.Value is an EnumValue<SchemeColorValues> — its ToString() returns the
         // enum object's CLR name ("SchemeColorValues { }"), not the semantic OOXML
@@ -114,7 +137,10 @@ public partial class PowerPointHandler
         // (dk1/lt1/hlink/…) round-trip through Get the same way
         // ReadColorFromFill normalises them.
         if (scheme?.Val?.InnerText != null)
-            return ParseHelpers.NormalizeSchemeColorName(scheme.Val.InnerText) ?? scheme.Val.InnerText;
+        {
+            var name = ParseHelpers.NormalizeSchemeColorName(scheme.Val.InnerText) ?? scheme.Val.InnerText;
+            return AppendColorTransforms(name, scheme);
+        }
         var sys = gs.GetFirstChild<Drawing.SystemColor>();
         if (sys?.Val?.InnerText != null) return sys.Val.InnerText;
         var preset = gs.GetFirstChild<Drawing.PresetColor>();
