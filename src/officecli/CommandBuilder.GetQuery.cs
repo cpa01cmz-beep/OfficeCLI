@@ -189,22 +189,18 @@ static partial class CommandBuilder
             var format = json ? OutputFormat.Json : OutputFormat.Text;
 
             using var handler = DocumentHandlerFactory.Open(file.FullName);
-            var filters = OfficeCli.Core.AttributeFilter.Parse(selector);
             // CONSISTENCY(cell-selector-alias): the Excel cell selector accepts short
-            // aliases (bold -> font.bold, size -> font.size, ...) via the handler's
-            // MatchesCellSelector alias map. The CLI-level AttributeFilter post-filter
-            // must apply the same normalization or it silently drops every hit.
+            // aliases (bold -> font.bold, size -> font.size, ...). FilterSelector
+            // applies the same normalization, runs the boolean and/or engine, and
+            // routes a pure-AND (flat) selector through the exact legacy path.
             // SelectorTargetsCells strips an optional sheet prefix (Sheet1!cell...,
             // /Sheet1/cell...) before the element check — without it, sheet-scoped
-            // cell selectors skip alias normalization and format-attribute filters
-            // drop all matches.
-            if (handler is OfficeCli.Handlers.ExcelHandler
-                && OfficeCli.Handlers.ExcelHandler.SelectorTargetsCells(selector))
-            {
-                filters = OfficeCli.Core.AttributeFilter.NormalizeKeys(
-                    filters, OfficeCli.Handlers.ExcelHandler.ResolveCellAttributeAlias);
-            }
-            var (results, warnings) = OfficeCli.Core.AttributeFilter.ApplyWithWarnings(handler.Query(selector), filters);
+            // cell selectors skip alias normalization and drop all matches.
+            Func<string, string>? keyResolver =
+                handler is OfficeCli.Handlers.ExcelHandler
+                && OfficeCli.Handlers.ExcelHandler.SelectorTargetsCells(selector)
+                    ? OfficeCli.Handlers.ExcelHandler.ResolveCellAttributeAlias : null;
+            var (results, warnings) = OfficeCli.Core.AttributeFilter.FilterSelector(selector, handler.Query, keyResolver);
             if (!string.IsNullOrEmpty(textFilter))
                 results = results.Where(n => n.Text != null && OfficeCli.Core.AttributeFilter.MatchesTextFilter(n.Text, textFilter)).ToList();
             if (json)

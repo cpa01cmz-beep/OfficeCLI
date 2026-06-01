@@ -432,14 +432,11 @@ public static class McpServer
                 var selector = Arg("selector");
                 var textFilter = Arg("text");
                 using var handler = DocumentHandlerFactory.Open(file);
-                var filters = AttributeFilter.Parse(selector);
-                if (handler is OfficeCli.Handlers.ExcelHandler
-                    && selector.TrimStart().StartsWith("cell", StringComparison.OrdinalIgnoreCase))
-                {
-                    filters = AttributeFilter.NormalizeKeys(
-                        filters, OfficeCli.Handlers.ExcelHandler.ResolveCellAttributeAlias);
-                }
-                var (results, _) = AttributeFilter.ApplyWithWarnings(handler.Query(selector), filters);
+                Func<string, string>? keyResolver =
+                    handler is OfficeCli.Handlers.ExcelHandler
+                    && OfficeCli.Handlers.ExcelHandler.SelectorTargetsCells(selector)
+                        ? OfficeCli.Handlers.ExcelHandler.ResolveCellAttributeAlias : null;
+                var (results, _) = AttributeFilter.FilterSelector(selector, handler.Query, keyResolver);
                 if (!string.IsNullOrEmpty(textFilter))
                     results = results.Where(n => n.Text != null && n.Text.Contains(textFilter, StringComparison.OrdinalIgnoreCase)).ToList();
                 return OutputFormatter.FormatNodes(results, OutputFormat.Json);

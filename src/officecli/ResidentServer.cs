@@ -1491,18 +1491,15 @@ public class ResidentServer : IDisposable
     private void ExecuteQuery(ResidentRequest req, OutputFormat format)
     {
         var selector = req.GetArg("selector", "");
-        var filters = AttributeFilter.Parse(selector);
-        // CONSISTENCY(cell-selector-alias): mirror the direct-mode normalization in
-        // CommandBuilder.GetQuery.cs — without this, resident-mode Excel cell queries
-        // with short aliases (bold, size, ...) silently drop every hit (BUG-R17-01).
-        // SelectorTargetsCells strips an optional sheet prefix first, or sheet-
-        // scoped cell selectors skip normalization and drop all matches.
-        if (_handler is ExcelHandler
-            && ExcelHandler.SelectorTargetsCells(selector))
-        {
-            filters = AttributeFilter.NormalizeKeys(filters, ExcelHandler.ResolveCellAttributeAlias);
-        }
-        var (results, warnings) = AttributeFilter.ApplyWithWarnings(_handler.Query(selector), filters);
+        // CONSISTENCY(cell-selector-alias): mirror the direct-mode normalization +
+        // boolean engine in CommandBuilder.GetQuery.cs — without alias normalization,
+        // resident-mode Excel cell queries with short aliases (bold, size, ...)
+        // silently drop every hit (BUG-R17-01). FilterSelector also runs the and/or
+        // engine and keeps pure-AND selectors on the exact legacy path.
+        Func<string, string>? keyResolver =
+            _handler is ExcelHandler && ExcelHandler.SelectorTargetsCells(selector)
+                ? ExcelHandler.ResolveCellAttributeAlias : null;
+        var (results, warnings) = AttributeFilter.FilterSelector(selector, _handler.Query, keyResolver);
         var textFilter = req.GetArgOrNull("find");
         if (!string.IsNullOrEmpty(textFilter))
             results = results.Where(n => n.Text != null && AttributeFilter.MatchesTextFilter(n.Text, textFilter)).ToList();

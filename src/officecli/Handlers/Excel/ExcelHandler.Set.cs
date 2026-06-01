@@ -23,18 +23,14 @@ public partial class ExcelHandler
         if (!string.IsNullOrEmpty(path) && !path.StartsWith("/"))
         {
             var unsupported = new List<string>();
-            var targets = Query(path);
-            // Query's handler-level selector only pre-filters =, != and
-            // :contains; it silently DROPS comparison operators (>, <, >=, <=)
-            // because ParseCellSelector's attr regex doesn't capture them. So a
-            // selector like `cell[value>100]` over-matches to every cell and a
-            // selector-set would mutate all of them while reporting success.
-            // Re-apply the shared AttributeFilter post-filter — the same one the
-            // `query` command runs (CommandBuilder.GetQuery.cs) — to narrow the
-            // mutation set to exactly the comparison-matched nodes before Set.
-            var compFilters = AttributeFilter.NormalizeKeys(
-                AttributeFilter.Parse(path), ResolveCellAttributeAlias);
-            targets = AttributeFilter.Apply(targets, compFilters);
+            // FilterSelector narrows the mutation set with the same engine `query`
+            // uses (CommandBuilder.GetQuery.cs): a pure-AND selector takes the
+            // legacy path (handler pre-filter + flat re-apply — so `cell[value>100]`
+            // no longer over-matches every cell), and an `or` selector is queried
+            // with its filter brackets stripped (Query returns broadly) then
+            // narrowed by the boolean expression tree. ResolveCellAttributeAlias
+            // maps cell short keys (bold -> font.bold, ...); a no-op on other keys.
+            var (targets, _) = AttributeFilter.FilterSelector(path, Query, ResolveCellAttributeAlias);
             if (targets.Count == 0)
                 throw new ArgumentException($"No elements matched selector: {path}");
             LastSelectorSetCount = targets.Count;

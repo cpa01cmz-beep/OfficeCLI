@@ -512,8 +512,11 @@ static partial class CommandBuilder
             case "query":
             {
                 var selector = item.Selector ?? "";
-                var filters = OfficeCli.Core.AttributeFilter.Parse(selector);
-                var (results, warnings) = OfficeCli.Core.AttributeFilter.ApplyWithWarnings(handler.Query(selector), filters);
+                Func<string, string>? keyResolver =
+                    handler is OfficeCli.Handlers.ExcelHandler
+                    && OfficeCli.Handlers.ExcelHandler.SelectorTargetsCells(selector)
+                        ? OfficeCli.Handlers.ExcelHandler.ResolveCellAttributeAlias : null;
+                var (results, warnings) = OfficeCli.Core.AttributeFilter.FilterSelector(selector, handler.Query, keyResolver);
                 if (item.Text is { } textFilter && !string.IsNullOrEmpty(textFilter))
                     results = results.Where(n => n.Text != null && n.Text.Contains(textFilter, StringComparison.OrdinalIgnoreCase)).ToList();
                 foreach (var w in warnings) Console.Error.WriteLine(w);

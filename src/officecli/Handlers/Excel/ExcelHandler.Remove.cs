@@ -34,12 +34,10 @@ public partial class ExcelHandler
         // index 0 and keep a stable relative order.
         if (!string.IsNullOrEmpty(path) && !path.StartsWith("/"))
         {
-            var targets = Query(path);
-            // Narrow via the shared comparison post-filter (same as Set) so a
-            // selector with >, <, >=, <= matches exactly, not over-broadly.
-            var compFilters = Core.AttributeFilter.NormalizeKeys(
-                Core.AttributeFilter.Parse(path), ResolveCellAttributeAlias);
-            targets = Core.AttributeFilter.Apply(targets, compFilters);
+            // Narrow via the shared engine (same as Set / query): pure-AND on the
+            // legacy path, `or` selectors queried bracket-stripped then narrowed by
+            // the boolean expression tree.
+            var (targets, _) = Core.AttributeFilter.FilterSelector(path, Query, ResolveCellAttributeAlias);
             if (targets.Count == 0)
                 throw new ArgumentException($"No elements matched selector: {path}");
 

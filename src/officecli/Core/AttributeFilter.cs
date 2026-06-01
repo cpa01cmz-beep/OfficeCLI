@@ -654,6 +654,37 @@ internal static class AttributeFilter
         return (results, warnings);
     }
 
+    /// <summary>
+    /// Remove filter brackets so a boolean selector can be queried bare (the
+    /// handler returns the full element set) and the expression applied to the
+    /// result. A pure-numeric bracket ([2]) is a positional index, kept.
+    /// </summary>
+    public static string StripFilterBrackets(string selector)
+        => BracketBlockRegex.Replace(selector, m =>
+            int.TryParse(m.Groups[1].Value.Trim(), out _) ? m.Value : "");
+
+    /// <summary>
+    /// Unified selector filtering for query / set / remove. A pure-AND (flat)
+    /// selector takes the exact legacy path: the handler pre-filters and the flat
+    /// conditions are re-applied (idempotent). A selector containing `or` is
+    /// queried with its filter brackets stripped — so the handler returns the full
+    /// element set — and then narrowed by the expression tree, since the handler's
+    /// own pre-filter cannot understand booleans. <paramref name="keyResolver"/>
+    /// (when non-null) rewrites alias keys, e.g. cell bold → font.bold.
+    /// </summary>
+    public static (List<DocumentNode> Results, List<string> Warnings) FilterSelector(
+        string selector, Func<string, List<DocumentNode>> query, Func<string, string>? keyResolver = null)
+    {
+        var expr = ParseExpr(selector);
+        if (expr != null && keyResolver != null)
+            expr = NormalizeKeysExpr(expr, keyResolver);
+
+        if (TryFlatten(expr) is { } flat)
+            return ApplyWithWarnings(query(selector), flat);
+
+        return ApplyExprWithWarnings(query(StripFilterBrackets(selector)), expr);
+    }
+
     private static IEnumerable<Condition> LeafConditions(FilterExpr expr) => expr switch
     {
         PredicateExpr p => new[] { p.Cond },
@@ -723,13 +754,24 @@ internal static class AttributeFilter
             if (key.Length == 0 || key == "@")
                 throw Err($"expected a predicate (key op value) at '{_s[_i..]}'");
             SkipWs();
+            // Has-attribute form [key] with no operator → Exists, matching the flat
+            // parser's CSS [attr] behavior. Detected when no operator char follows
+            // (end of input, a ')', or the start of an and/or connective).
+            if (_i >= _s.Length || _s[_i] == ')' || !IsOpStart(_s[_i]))
+                return new Condition(key.TrimStart('@'), FilterOp.Exists, "");
             var op = ReadOp();
             var rawVal = ReadValue();
             return BuildCondition(key, op, rawVal);
         }
 
+        private static bool IsOpStart(char c) => c is '>' or '<' or '=' or '!' or '~' or '\\';
+
         private string ReadOp()
         {
+            // zsh-escaped != (the shell may pass \!= through); mirrors the flat
+            // parser's \\?!= handling.
+            if (_i + 3 <= _s.Length && _s[_i] == '\\' && _s[_i + 1] == '!' && _s[_i + 2] == '=')
+            { _i += 3; return "!="; }
             foreach (var op in new[] { ">=", "<=", "!=", "~=", "=", ">", "<" })
                 if (_i + op.Length <= _s.Length && _s.Substring(_i, op.Length) == op)
                 {
