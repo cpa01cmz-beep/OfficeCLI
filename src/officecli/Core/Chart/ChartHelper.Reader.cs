@@ -866,10 +866,17 @@ internal static partial class ChartHelper
                     var outColor = ReadColorFromFill(outlineFill);
                     if (outColor != null) seriesNode.Format["outlineColor"] = outColor;
                 }
-                // Shadow (from EffectList)
+                // Shadow (from EffectList) — emit the full COLOR-BLUR-ANGLE-
+                // DIST-OPACITY spec so dump→replay reconstructs the exact
+                // <a:outerShdw> via the per-series shadow Setter (which
+                // routes through DrawingEffectsHelper.BuildOuterShadow).
+                // Prior emit of bare `shadow=true` silently dropped the
+                // chart-series effect on round-trip (the per-series Setter
+                // received "true" as the color spec and produced garbage).
                 var effectList = serSpPr?.GetFirstChild<Drawing.EffectList>();
                 var outerShadow = effectList?.GetFirstChild<Drawing.OuterShadow>();
-                if (outerShadow != null) seriesNode.Format["shadow"] = "true";
+                if (outerShadow != null)
+                    seriesNode.Format["shadow"] = FormatOuterShadowSpec(outerShadow);
                 // Marker
                 var marker = serEl?.GetFirstChild<C.Marker>();
                 var markerSymbol = marker?.GetFirstChild<C.Symbol>()?.Val;
@@ -1457,6 +1464,50 @@ internal static partial class ChartHelper
     /// Empty (no spPr.outline) emits "true"; presence-with-styling emits
     /// "color[:widthPt[:dash]]". Mirrors BuildLineShapeProperties input.
     /// </summary>
+    /// <summary>
+    /// Format an a:outerShdw element as "COLOR-BLUR-ANGLE-DIST-OPACITY"
+    /// — the spec DrawingEffectsHelper.BuildOuterShadow parses. Mirrors
+    /// the inverse of that builder so chart series shadow round-trips
+    /// through dump→replay.
+    /// </summary>
+    private static string FormatOuterShadowSpec(Drawing.OuterShadow shadow)
+    {
+        // Color element (a:srgbClr / a:schemeClr / ...) with optional
+        // a:alpha child carrying the opacity in 1000-units.
+        var clrEl = shadow.Elements().FirstOrDefault(e =>
+            e is Drawing.RgbColorModelHex
+                or Drawing.SchemeColor
+                or Drawing.PresetColor
+                or Drawing.SystemColor
+                or Drawing.RgbColorModelPercentage
+                or Drawing.HslColor);
+        string color;
+        if (clrEl is Drawing.RgbColorModelHex rgb && rgb.Val?.HasValue == true)
+            color = rgb.Val.Value!;
+        else if (clrEl is Drawing.SchemeColor sch && sch.Val?.HasValue == true)
+            color = sch.Val.InnerText ?? "000000";
+        else
+            color = "000000";
+
+        var blurPt = shadow.BlurRadius?.HasValue == true
+            ? shadow.BlurRadius.Value / EmuConverter.EmuPerPointF
+            : 4.0;
+        var distPt = shadow.Distance?.HasValue == true
+            ? shadow.Distance.Value / EmuConverter.EmuPerPointF
+            : 3.0;
+        var angleDeg = shadow.Direction?.HasValue == true
+            ? shadow.Direction.Value / 60000.0
+            : 45.0;
+        var alphaEl = clrEl?.GetFirstChild<Drawing.Alpha>();
+        var opacity = alphaEl?.Val?.HasValue == true
+            ? alphaEl.Val.Value / 1000.0
+            : 40.0;
+
+        string F(double v) => v.ToString("G",
+            System.Globalization.CultureInfo.InvariantCulture);
+        return $"{color}-{F(blurPt)}-{F(angleDeg)}-{F(distPt)}-{F(opacity)}";
+    }
+
     private static string FormatLineOverlaySpec(OpenXmlElement overlay)
     {
         var spPr = overlay.GetFirstChild<C.ChartShapeProperties>();
