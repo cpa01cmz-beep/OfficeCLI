@@ -28,6 +28,9 @@ public partial class ExcelHandler : IDocumentHandler
     // Invalidated by InvalidateRowIndex() whenever rows are structurally modified (shift, remove).
     private Dictionary<SheetData, SortedList<uint, Row>>? _rowIndex;
     public int LastFindMatchCount { get; internal set; }
+    // Number of elements a no-slash selector Set matched and mutated (Sheet1!row[...]).
+    // Read by the CLI/resident to echo the multi-element change count.
+    public int LastSelectorSetCount { get; internal set; }
 
     /// <summary>
     /// Set true by Add/Set/Remove/RawSet, consumed by Save/Dispose to decide

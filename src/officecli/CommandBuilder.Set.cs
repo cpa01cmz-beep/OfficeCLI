@@ -180,20 +180,15 @@ static partial class CommandBuilder
                 return 1;
             }
 
-            // Path that does not start with '/' is rejected up front (must run before
-            // TryResident — resident has its own dispatch and would otherwise execute
-            // selector-mode silently). handler.Set treats no-slash paths as CSS selectors
-            // (Query→Set per match), so a typo like "section[1]" would corrupt the doc with
-            // no way for the user to notice. Selector-mode is opt-in via the `query`
-            // subcommand, not via dropping the slash. CONSISTENCY(no-slash-reject):
-            // ResidentServer.ExecuteSet enforces the same rule.
-            if (!string.IsNullOrEmpty(path) && !path.StartsWith("/"))
-            {
-                var err = $"Error: path '{path}' must start with '/'. Did you mean '/{path}'?";
-                if (json) Console.WriteLine(OutputFormatter.WrapEnvelopeError(err));
-                else Console.Error.WriteLine(err);
-                return 1;
-            }
+            // Selector / Excel-native paths (not starting with '/') are accepted:
+            // handler.Set treats them as a Query→Set-per-match selector, the same
+            // engine `batch` uses, so `set` is consistent with get/query which
+            // already take both the XPath form (/Sheet1/A1) and the Excel form
+            // (Sheet1!A1, Sheet1!row[工资>5000]). Safety rests on the handler
+            // selector branch throwing on an empty match (no silent no-op) and the
+            // match-count echo below making a multi-element change visible.
+            // CONSISTENCY(selector-set): ResidentServer.ExecuteSet mirrors this.
+            var isSelectorSet = !string.IsNullOrEmpty(path) && !path.StartsWith("/");
 
             if (TryResident(file.FullName, req =>
             {
@@ -280,9 +275,21 @@ static partial class CommandBuilder
                 };
             }
 
+            // CONSISTENCY(selector-set): echo how many elements a multi-match
+            // selector set touched so a Sheet1!row[工资>5000]-style change shows
+            // its scope. Single-target paths (count 1) stay quiet.
+            int? selectorCount = !isSelectorSet ? null : handler switch
+            {
+                OfficeCli.Handlers.WordHandler wh => wh.LastSelectorSetCount,
+                OfficeCli.Handlers.PowerPointHandler ph => ph.LastSelectorSetCount,
+                OfficeCli.Handlers.ExcelHandler eh => eh.LastSelectorSetCount,
+                _ => null
+            };
+
             var message = applied.Count > 0
                 ? $"Updated {path}: {string.Join(", ", applied.Select(kv => $"{kv.Key}={kv.Value}"))}"
                   + (findMatchCount.HasValue ? $" ({findMatchCount.Value} matched)" : "")
+                  + (selectorCount > 1 ? $" ({selectorCount} elements matched)" : "")
                 : $"Error: No properties applied to {path}";
 
             // Check if position-related props were changed → show coordinates + overlap warning

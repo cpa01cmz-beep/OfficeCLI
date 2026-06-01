@@ -37,6 +37,7 @@ public partial class ExcelHandler
             targets = AttributeFilter.Apply(targets, compFilters);
             if (targets.Count == 0)
                 throw new ArgumentException($"No elements matched selector: {path}");
+            LastSelectorSetCount = targets.Count;
             foreach (var target in targets)
             {
                 var targetUnsupported = Set(target.Path, properties);

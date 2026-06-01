@@ -1533,14 +1533,10 @@ public class ResidentServer : IDisposable
         var path = req.GetArg("path", "/");
         var properties = req.GetProps();
 
-        // CONSISTENCY(no-slash-reject): mirrored in CommandBuilder.Set.cs. handler.Set
-        // treats a no-slash path as a CSS selector (Query→Set per match). Reject up
-        // front so a typo like "section[1]" cannot silently corrupt the document via
-        // the resident path; selector-mode is opt-in via `query`, not via the slash.
-        if (!string.IsNullOrEmpty(path) && !path.StartsWith("/"))
-            throw new ArgumentException(
-                $"path '{path}' must start with '/'. Did you mean '/{path}'?");
-
+        // CONSISTENCY(selector-set): mirrored in CommandBuilder.Set.cs. A no-slash
+        // path is a Query→Set-per-match selector (Sheet1!A1, Sheet1!row[工资>5000]),
+        // the same engine batch uses — accepted so resident `set` matches get/query.
+        // The handler selector branch throws on an empty match, so no silent no-op.
         var unsupported = _handler.Set(path, properties);
         // CONSISTENCY(unsupported-key-extract): mirrored in CommandBuilder.Set.cs.
         // Handler entries may be "key (reason)" or "key=value (reason)" (e.g.
@@ -1573,9 +1569,23 @@ public class ResidentServer : IDisposable
             };
         }
 
+        // CONSISTENCY(selector-set): echo how many elements a multi-match selector
+        // set touched, so a Sheet1!row[工资>5000]-style mutation makes its scope
+        // visible. Single-target paths (count 1) stay quiet.
+        int? selectorCount = null;
+        if (!string.IsNullOrEmpty(path) && !path.StartsWith("/"))
+            selectorCount = _handler switch
+            {
+                WordHandler wh => wh.LastSelectorSetCount,
+                PowerPointHandler ph => ph.LastSelectorSetCount,
+                ExcelHandler eh => eh.LastSelectorSetCount,
+                _ => null
+            };
+
         var message = applied.Count > 0
             ? $"Updated {path}: {string.Join(", ", applied.Select(kv => $"{kv.Key}={kv.Value}"))}"
               + (findMatchCount.HasValue ? $" ({findMatchCount.Value} matched)" : "")
+              + (selectorCount > 1 ? $" ({selectorCount} elements matched)" : "")
             : (unsupported.Count > 0 ? $"No properties applied to {path}" : $"Updated {path}");
 
         var warnings = new List<OfficeCli.Core.CliWarning>();

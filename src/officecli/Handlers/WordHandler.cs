@@ -15,6 +15,9 @@ public partial class WordHandler : IDocumentHandler
     private HashSet<string> _usedParaIds = new(StringComparer.OrdinalIgnoreCase);
     private int _nextParaId = 0x100000;
     public int LastFindMatchCount { get; internal set; }
+    // Number of elements a no-slash selector Set matched and mutated (Sheet1!row[...]).
+    // Read by the CLI/resident to echo the multi-element change count.
+    public int LastSelectorSetCount { get; internal set; }
 
     // Backing FileStream — mirrors the PPT pattern. Opening via a shared
     // FileStream (FileShare.Read in editable mode) lets external readers
