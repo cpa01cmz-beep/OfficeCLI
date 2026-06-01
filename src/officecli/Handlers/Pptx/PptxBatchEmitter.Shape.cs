@@ -480,13 +480,20 @@ public static partial class PptxBatchEmitter
             {
                 // CONSISTENCY(empty-paragraph-no-run): when the paragraph carried
                 // no text and the run-only attrs reduce to AddRun's hard-coded
-                // seeds (lang/altLang), there is no useful round-trip — emitting
-                // `add run` would only re-seed the same values and grow noise
-                // each cycle. Skip the row entirely (matches EmitRun /
-                // EmitFirstRunAsSet's RunDefaultOnlyKeys filter).
+                // seeds (lang/altLang), the noise concern is double-emit on
+                // multi-empty-run paragraphs. The original short-circuit ALSO
+                // dropped the single-empty-run case — which silently collapses
+                // <a:p><a:r><a:rPr lang="en-US"/><a:t/></a:r></a:p> (the form
+                // PowerPoint writes for an empty line, load-bearing for IME and
+                // cursor positioning) into <a:p><a:endParaRPr/></a:p> on replay.
+                // Keep the skip only when the seeded paragraph already has an
+                // <a:r> at run[1]; for placeholders/textboxes whose seed is
+                // endParaRPr-only, emit `add run` with empty text so the
+                // resulting paragraph carries the explicit run element.
                 bool collapseHasText = props.ContainsKey("text");
                 if (!collapseHasText
-                    && runOnly.Keys.All(k => RunDefaultOnlyKeys.Contains(k)))
+                    && runOnly.Keys.All(k => RunDefaultOnlyKeys.Contains(k))
+                    && (!firstParagraph || seededParaHasRun))
                 {
                     return;
                 }
@@ -583,6 +590,11 @@ public static partial class PptxBatchEmitter
         if (ctx != null) DeferRunSlideJumpLink(props, paraParent, 1, ctx);
         else DummyCtxStripSlideJump(props);
         bool hasText = !string.IsNullOrEmpty(runNode.Text);
+        // CONSISTENCY(empty-run-preserve): with seeded-has-run paragraphs the
+        // <a:r> at run[1] is already present, so an empty-text run with only
+        // default lang/altLang attrs is a true no-op `set`. Skip to avoid
+        // pointless noise. The single-empty-run-as-only-child case is handled
+        // by the collapse branch in EmitParagraph — see CONSISTENCY note there.
         if (!hasText && props.Count > 0
             && props.Keys.All(k => RunDefaultOnlyKeys.Contains(k)))
             return;
