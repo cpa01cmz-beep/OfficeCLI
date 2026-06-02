@@ -397,8 +397,22 @@ public static partial class PptxBatchEmitter
             altEnd += "</mc:AlternateContent>".Length;
             var slice = spTreeRegion.Substring(altIdx, altEnd - altIdx);
 
+            // Only AlternateContent that is a DIRECT child of <p:spTree>
+            // is in scope here. Equation shapes (<p:sp> containing
+            // <p:txBody><a:p><mc:AlternateContent> with <a14:m>/<m:oMath>)
+            // already round-trip through AddEquation — re-emitting their
+            // nested AlternateContent at slide root would duplicate the
+            // math block as a loose <p:spTree> child, which PowerPoint
+            // renders as plain runs without proper sup/sub binding (i 2,
+            // x 2, α 1, β 2 instead of i², x², α₁, β²). Same applies to
+            // any <p:sp>-nested AlternateContent (e.g. inline svg fallback
+            // patterns). Detect nesting by counting unclosed <p:sp> /
+            // <p:grpSp> opening tags before altIdx.
+            bool nested = IsInsideShapeOrGroup(spTreeRegion, altIdx);
+
             // Skip blocks owned by a specific emitter.
-            bool skip = slice.Contains("am3d:", StringComparison.Ordinal)
+            bool skip = nested
+                || slice.Contains("am3d:", StringComparison.Ordinal)
                 || slice.Contains("Requires=\"am3d\"", StringComparison.Ordinal)
                 || slice.Contains("<dgm:relIds", StringComparison.Ordinal)
                 || slice.Contains("<p:oleObj", StringComparison.Ordinal)
@@ -465,6 +479,29 @@ public static partial class PptxBatchEmitter
                 });
             }
         }
+    }
+
+    // True when <paramref name="offset"/> falls inside an unclosed
+    // <p:sp> or <p:grpSp> region — i.e. the AlternateContent at that
+    // position is a descendant of a shape (e.g. equation txBody) rather
+    // than a direct child of <p:spTree>. Counts opening minus closing
+    // tags via a regex sweep; treats self-closing forms as immediately
+    // balanced.
+    private static bool IsInsideShapeOrGroup(string spTreeRegion, int offset)
+    {
+        var rx = new System.Text.RegularExpressions.Regex(
+            @"<(/?)(p:sp|p:grpSp)(\s[^/>]*?/?|/?)>",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+        int depth = 0;
+        foreach (System.Text.RegularExpressions.Match m in rx.Matches(spTreeRegion))
+        {
+            if (m.Index >= offset) break;
+            bool isClose = m.Groups[1].Value == "/";
+            bool isSelfClose = m.Groups[3].Value.EndsWith('/');
+            if (isClose) depth--;
+            else if (!isSelfClose) depth++;
+        }
+        return depth > 0;
     }
 
     // Count <p:sp>/<p:pic>/<p:cxnSp>/<p:graphicFrame>/<p:grpSp>/

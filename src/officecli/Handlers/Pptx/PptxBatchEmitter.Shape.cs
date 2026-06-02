@@ -218,6 +218,7 @@ public static partial class PptxBatchEmitter
                     || shapeProps.ContainsKey("line")
                     || shapeProps.ContainsKey("lineWidth")
                     || shapeProps.ContainsKey("lineDash")
+                    || shapeProps.ContainsKey("lineDashRaw")
                     || shapeProps.ContainsKey("opacity");
                 stripRect = !hasExplicitStyling;
             }

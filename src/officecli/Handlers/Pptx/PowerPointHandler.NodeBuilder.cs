@@ -1310,6 +1310,14 @@ public partial class PowerPointHandler
                     _ => dashValue
                 };
             }
+            // R64 bt-3: <a:custDash> sibling to (not nested in) prstDash —
+            // mirror connector readback so shape outlines with author-defined
+            // dash patterns round-trip via lineDashRaw passthrough.
+            var custDash = outline.GetFirstChild<Drawing.CustomDash>();
+            if (custDash != null)
+            {
+                node.Format["lineDashRaw"] = custDash.OuterXml;
+            }
             // lineCap / lineJoin / cmpd / lineAlign readback. Previously
             // these attributes were accepted on input but silently dropped; the
             // bidirectional gap meant users couldn't see whether the value stuck.
@@ -2720,6 +2728,19 @@ public partial class PowerPointHandler
                 "sysDashDotDot" => "sysDashDotDot",
                 _ => dashValue
             };
+        }
+        // R64 bt-3: <a:custDash><a:ds d="N" sp="N"/>...</a:custDash> — author-
+        // defined dash pattern as alternating dash-length / space-length stops
+        // (1000ths of em). prstDash and custDash are mutually exclusive in
+        // CT_LineProperties (EG_LineDashProperties choice). No compressible
+        // string form — mirror shadowRaw / fillOverlayRaw and surface the
+        // OuterXml as lineDashRaw so dump→batch replay rebuilds the custom
+        // pattern verbatim instead of dropping the dash and falling back to
+        // a solid stroke.
+        var cxnCustDash = ln?.GetFirstChild<Drawing.CustomDash>();
+        if (cxnCustDash != null)
+        {
+            node.Format["lineDashRaw"] = cxnCustDash.OuterXml;
         }
         // R58 bt-3: <a:ln cap="..." cmpd="..."> attributes — connector readback
         // was previously dropping cap (lineCap) and cmpd (compound line) on

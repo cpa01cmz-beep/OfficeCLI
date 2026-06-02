@@ -733,4 +733,40 @@ public partial class PowerPointHandler
             _ => throw new ArgumentException(
                 $"Invalid 'lineDash' value: '{value}'. Valid values: solid, dot, dash, dashdot, lgDash, lgDashDot, lgDashDotDot, sysDot, sysDash, sysDashDot, sysDashDotDot.")
         };
+
+    // R64 bt-3: Parse a verbatim <a:custDash>…</a:custDash> string and
+    // reconstruct a typed Drawing.CustomDash. Mirrors the lift-attrs +
+    // InnerXml pattern used by shadowRaw / fillOverlayRaw / effectDagRaw /
+    // effectsRaw passthrough installs in ShapeProperties — keeps a single
+    // round-trip strategy for "no compressible string form" OOXML children.
+    // <a:custDash> itself has no attributes; the payload is <a:ds d="N" sp="N"/>
+    // stops.
+    internal static Drawing.CustomDash BuildCustomDashFromRaw(string raw)
+    {
+        var xml = raw.Contains("xmlns:a=")
+            ? raw
+            : raw.Replace("<a:custDash",
+                "<a:custDash xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"");
+        var custDash = new Drawing.CustomDash();
+        using var sr = new System.IO.StringReader(xml);
+        using var xr = System.Xml.XmlReader.Create(sr);
+        xr.MoveToContent();
+        if (xr.HasAttributes)
+        {
+            while (xr.MoveToNextAttribute())
+            {
+                if (xr.Prefix == "xmlns" || xr.Name == "xmlns") continue;
+                custDash.SetAttribute(new OpenXmlAttribute(
+                    xr.Prefix, xr.LocalName, xr.NamespaceURI, xr.Value));
+            }
+            xr.MoveToElement();
+        }
+        if (!xr.IsEmptyElement)
+        {
+            var inner = xr.ReadInnerXml();
+            if (!string.IsNullOrWhiteSpace(inner))
+                custDash.InnerXml = inner;
+        }
+        return custDash;
+    }
 }

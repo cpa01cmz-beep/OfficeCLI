@@ -948,7 +948,24 @@ public partial class PowerPointHandler
                     if (spPr == null) { unsupported.Add(key); break; }
                     var outline = EnsureOutline(spPr);
                     outline.RemoveAllChildren<Drawing.PresetDash>();
+                    outline.RemoveAllChildren<Drawing.CustomDash>();
                     outline.AppendChild(new Drawing.PresetDash { Val = ParseLineDashValue(value) });
+                    break;
+                }
+
+                // R64 bt-3: lineDashRaw — verbatim <a:custDash> passthrough on
+                // shape Set. Mirrors connector Set: clears any preset/custom
+                // dash and appends a fresh Drawing.CustomDash rebuilt from the
+                // source XML. Empty value removes the dash entirely.
+                case "linedashraw" or "line.dashraw":
+                {
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    var outline = EnsureOutline(spPr);
+                    outline.RemoveAllChildren<Drawing.PresetDash>();
+                    outline.RemoveAllChildren<Drawing.CustomDash>();
+                    if (!string.IsNullOrWhiteSpace(value))
+                        outline.AppendChild(BuildCustomDashFromRaw(value));
                     break;
                 }
 
