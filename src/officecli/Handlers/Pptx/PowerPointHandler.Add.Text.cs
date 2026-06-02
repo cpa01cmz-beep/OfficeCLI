@@ -790,6 +790,52 @@ public partial class PowerPointHandler
                         "", "smtId", "", smtIdVal.ToString(System.Globalization.CultureInfo.InvariantCulture)));
                 }
 
+                // R59 tester-1: inherit paragraph-level <a:endParaRPr> children
+                // onto the new run's <a:rPr>. When `set …/paragraph[N] font.*`
+                // lands before any run exists, font.* falls back to endParaRPr
+                // (the only rPr-shaped sink on an empty paragraph). A subsequent
+                // `add run` would then create a bare <a:rPr lang="…"/> and the
+                // endParaRPr typeface/color/bold/etc. would silently disappear
+                // from the rendered run. POI's XSLFTextRun resolves missing
+                // CTRunProperties slots up the inheritance chain (run → para's
+                // endParaRPr → lvl*pPr/defRPr → master) at read time; we apply
+                // the lowest step at write time so dump→batch→re-dump is
+                // byte-stable. Only copy children whose type isn't already
+                // present on the new rPr (explicit run props win).
+                var srcEndPr = targetPara.GetFirstChild<Drawing.EndParagraphRunProperties>();
+                if (srcEndPr != null)
+                {
+                    foreach (var srcChild in srcEndPr.ChildElements)
+                    {
+                        var t = srcChild.GetType();
+                        bool already = false;
+                        foreach (var existing in rProps.ChildElements)
+                            if (existing.GetType() == t) { already = true; break; }
+                        if (!already)
+                            rProps.AppendChild((OpenXmlElement)srcChild.CloneNode(true));
+                    }
+                    // Mirror endParaRPr scalar attributes (b, i, u, sz, kern,
+                    // baseline, strike, cap, spc, dirty, …) onto rPr when the
+                    // run didn't set them. Skip `lang`/`altLang` — AddRun
+                    // already initialized rProps.Language="en-US" by default
+                    // and respects explicit `lang=` overrides, matching the
+                    // historical run-add contract.
+                    foreach (var srcAttr in srcEndPr.GetAttributes())
+                    {
+                        if (srcAttr.LocalName == "lang" || srcAttr.LocalName == "altLang")
+                            continue;
+                        bool hasAttr = false;
+                        foreach (var existing in rProps.GetAttributes())
+                            if (existing.LocalName == srcAttr.LocalName
+                                && existing.NamespaceUri == srcAttr.NamespaceUri)
+                            { hasAttr = true; break; }
+                        if (!hasAttr)
+                            rProps.SetAttribute(new DocumentFormat.OpenXml.OpenXmlAttribute(
+                                srcAttr.Prefix, srcAttr.LocalName, srcAttr.NamespaceUri, srcAttr.Value));
+                    }
+                    ReorderDrawingRunProperties(rProps);
+                }
+
                 newRun.RunProperties = rProps;
                 // Hyperlink on the new run. Schema declares link.add=true with
                 // parent "shape|run" — without this branch the shape-level Add
