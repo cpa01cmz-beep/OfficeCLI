@@ -76,7 +76,7 @@ public static partial class PptxBatchEmitter
         // paragraph dispatcher then fan-out applied them to every run in
         // the paragraph (via the NoFillShape heuristic) — double-emit for
         // single-run paragraphs and over-broad emit for multi-run ones.
-        "shadow", "shadowRaw", "innerShadow", "glow",
+        "shadow", "shadowRaw", "innerShadow", "innerShadowRaw", "glow",
         "reflection", "reflectionRaw", "softEdge", "blur",
     };
 

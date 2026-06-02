@@ -1331,6 +1331,15 @@ public partial class PowerPointHandler
                 var isAlpha = innerShadow.Descendants<Drawing.Alpha>().FirstOrDefault();
                 var isOpacity = isAlpha?.Val?.HasValue == true ? $"{isAlpha.Val.Value / 1000.0:0.##}" : "100";
                 node.Format["innerShadow"] = $"{isColor}-{isBlur}-{isAngle}-{isDist}-{isOpacity}";
+                // R56 bt-2: parallel to outer shadowRaw — when the inner
+                // shadow's color child carries lumMod/lumOff/shade/tint/
+                // satMod/hueMod transforms, the compressed innerShadow=
+                // form embeds them via "+lumMod50+lumOff50" suffix syntax,
+                // then appends "-BLUR-ANGLE-DIST-OPACITY". The dash-tail
+                // after a transform chain is undocumented; surface OuterXml
+                // so Set can re-install the source <a:innerShdw> verbatim.
+                if (!IsPlainInnerShadow(innerShadow))
+                    node.Format["innerShadowRaw"] = innerShadow.OuterXml;
             }
             var glow = activeEffectList.GetFirstChild<Drawing.Glow>();
             if (glow != null)

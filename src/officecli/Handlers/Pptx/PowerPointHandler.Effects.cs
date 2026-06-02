@@ -1,6 +1,7 @@
 // Copyright 2025 OfficeCLI (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
+using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Presentation;
 using Drawing = DocumentFormat.OpenXml.Drawing;
 using OfficeCli.Core;
@@ -183,6 +184,16 @@ public partial class PowerPointHandler
     /// ApplyShadow emits Alignment=TopLeft, RotateWithShape=false — those
     /// are the compressed form's implicit defaults. We treat them as
     /// "compressible" only when present at exactly those values.
+    ///
+    /// R56 bt-2: also route to shadowRaw when the color child carries
+    /// lumMod/lumOff (or shade/tint/satMod/hueMod) transforms. The composite
+    /// `shadow=COLOR-BLUR-ANGLE-DIST-OPACITY` form embeds the color via the
+    /// `+lumMod50+lumOff50` suffix vocabulary (AppendColorTransforms), so
+    /// the emitted string becomes `accent1+lumMod50+lumOff50-4-45-3-100` —
+    /// readable, but the trailing `-4-45-3-100` tuple after a transform
+    /// chain is undocumented and not declared canonical in the schema.
+    /// Surface shadowRaw so the source <a:schemeClr>/<a:lumMod>/<a:lumOff>
+    /// round-trips verbatim, matching reflectionRaw/fillOverlayRaw.
     /// </summary>
     internal static bool IsPlainOuterShadow(Drawing.OuterShadow s)
     {
@@ -195,6 +206,51 @@ public partial class PowerPointHandler
             return false;
         if (s.RotateWithShape?.HasValue == true && s.RotateWithShape.Value)
             return false;
+        if (ColorChildHasNonAlphaTransform(s)) return false;
+        return true;
+    }
+
+    /// <summary>
+    /// R56 bt-2: detect lumMod/lumOff/shade/tint/satMod/satOff/hueMod/hueOff
+    /// transform children under the shadow's color element. Alpha is
+    /// excluded — the composite shadow= form already encodes alpha via the
+    /// trailing OPACITY token, so an alpha-only color child stays
+    /// compressible. Used to gate the shadowRaw fallback for outer and
+    /// inner shadows.
+    /// </summary>
+    internal static bool ColorChildHasNonAlphaTransform(OpenXmlElement shadowEl)
+    {
+        var colorChild = (OpenXmlElement?)shadowEl.GetFirstChild<Drawing.RgbColorModelHex>()
+            ?? shadowEl.GetFirstChild<Drawing.SchemeColor>();
+        if (colorChild == null) return false;
+        foreach (var t in colorChild.Elements())
+        {
+            switch (t.LocalName)
+            {
+                case "lumMod":
+                case "lumOff":
+                case "shade":
+                case "tint":
+                case "satMod":
+                case "satOff":
+                case "hueMod":
+                case "hueOff":
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// R56 bt-2: mirror of IsPlainOuterShadow for inner shadows. CT_InnerShadow
+    /// has BlurRadius/Distance/Direction only (no sx/sy/kx/ky/algn/rotWithShape
+    /// to guard), so the only non-compressible signal is a color child carrying
+    /// non-alpha color transforms — the same lumMod/lumOff/shade/tint case the
+    /// outer-shadow path now routes to shadowRaw.
+    /// </summary>
+    internal static bool IsPlainInnerShadow(Drawing.InnerShadow s)
+    {
+        if (ColorChildHasNonAlphaTransform(s)) return false;
         return true;
     }
 

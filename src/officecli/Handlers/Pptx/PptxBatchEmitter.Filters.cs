@@ -190,6 +190,14 @@ public static partial class PptxBatchEmitter
         if (result.ContainsKey("shadowRaw"))
             result.Remove("shadow");
 
+        // R56 bt-2: parallel — innerShadowRaw carries the verbatim
+        // <a:innerShdw> with lumMod/lumOff color transforms that the
+        // compressed innerShadow=COLOR-BLUR-… form encodes via the
+        // undocumented `accent1+lumMod50+lumOff50-…` mixed syntax. Drop
+        // the companion key so the raw install wins on Set replay.
+        if (result.ContainsKey("innerShadowRaw"))
+            result.Remove("innerShadow");
+
         // bt-B2: same shape as reflectionRaw — gradientRaw carries the
         // verbatim <a:gradFill flip=… ><a:tileRect/></a:gradFill>. The
         // companion semantic gradient=linear;… key would overwrite it via

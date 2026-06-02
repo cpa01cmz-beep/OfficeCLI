@@ -1474,6 +1474,58 @@ public partial class PowerPointHandler
                     break;
                 }
 
+                case "innershadowraw":
+                {
+                    // R56 bt-2 dump→replay path. Value is the verbatim
+                    // <a:innerShdw .../> element captured by NodeBuilder
+                    // when the color child carries lumMod/lumOff/shade/tint
+                    // transforms that the compressed innerShadow= form can
+                    // only express via the undocumented `accent1+lumMod50+
+                    // lumOff50-BLUR-ANGLE-DIST-OPACITY` mixed syntax.
+                    // Mirrors shadowRaw — lift attrs + InnerXml, install
+                    // a fresh <a:innerShdw> on the effectLst.
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    var effectList = EnsureEffectList(spPr);
+                    effectList.RemoveAllChildren<Drawing.InnerShadow>();
+                    if (!string.IsNullOrWhiteSpace(value))
+                    {
+                        try
+                        {
+                            var raw = value.Contains("xmlns:a=")
+                                ? value
+                                : value.Replace("<a:innerShdw",
+                                    "<a:innerShdw xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"");
+                            var shadow = new Drawing.InnerShadow();
+                            using var sr = new System.IO.StringReader(raw);
+                            using var xr = System.Xml.XmlReader.Create(sr);
+                            xr.MoveToContent();
+                            if (xr.HasAttributes)
+                            {
+                                while (xr.MoveToNextAttribute())
+                                {
+                                    if (xr.Prefix == "xmlns" || xr.Name == "xmlns") continue;
+                                    shadow.SetAttribute(new OpenXmlAttribute(
+                                        xr.Prefix, xr.LocalName, xr.NamespaceURI, xr.Value));
+                                }
+                                xr.MoveToElement();
+                            }
+                            if (!xr.IsEmptyElement)
+                            {
+                                var subtreeXml = xr.ReadInnerXml();
+                                if (!string.IsNullOrWhiteSpace(subtreeXml))
+                                    shadow.InnerXml = subtreeXml;
+                            }
+                            InsertEffectInOrder(effectList, shadow);
+                        }
+                        catch
+                        {
+                            unsupported.Add(key);
+                        }
+                    }
+                    break;
+                }
+
                 case "reflection":
                 {
                     var spPr = shape.ShapeProperties;
