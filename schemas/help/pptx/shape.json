@@ -199,18 +199,18 @@
     },
     "lang": {
       "type": "string",
-      "description": "BCP-47 language tag on first run rPr (drawingML rPr/@lang).",
+      "description": "BCP-47 language tag. lang lives per-run (drawingML a:rPr/@lang) — a shape has no language of its own, only an aggregate of differently-tongued runs. add/set on a shape is a convenience that writes the FIRST run's rPr; read it back at run scope (/shape[N]/paragraph[P]/run[R]). Not surfaced at shape level: a first-run projection cannot say which language each run is, and a newly added run would not inherit it.",
       "aliases": [
         "altLang",
         "altlang"
       ],
       "add": true,
       "set": true,
-      "get": true,
+      "get": false,
       "examples": [
         "--prop lang=en-US"
       ],
-      "readback": "BCP-47 tag",
+      "readback": "run scope only (/shape[N]/paragraph[P]/run[R])",
       "enforcement": "report"
     },
     "spacing": {

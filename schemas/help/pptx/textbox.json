@@ -233,11 +233,11 @@
     },
     "lang": {
       "type": "string",
-      "description": "BCP-47 language tag on first run rPr (drawingML rPr/@lang).",
+      "description": "BCP-47 language tag. lang lives per-run (drawingML a:rPr/@lang) — a textbox has no language of its own. add/set is a convenience that writes the FIRST run's rPr; read it back at run scope (/shape[N]/paragraph[P]/run[R]). Not surfaced at shape level (first-run projection is lossy and a new run would not inherit it).",
       "aliases": ["altLang", "altlang"],
-      "add": true, "set": true, "get": true,
+      "add": true, "set": true, "get": false,
       "examples": ["--prop lang=en-US"],
-      "readback": "BCP-47 language tag (e.g. \"en-US\")",
+      "readback": "run scope only (/shape[N]/paragraph[P]/run[R])",
       "enforcement": "report"
     }
   }
