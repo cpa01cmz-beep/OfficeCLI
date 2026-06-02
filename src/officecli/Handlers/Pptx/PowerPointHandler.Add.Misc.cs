@@ -601,6 +601,30 @@ public partial class PowerPointHandler
         long emptyY = (properties.TryGetValue("y", out var ey) || properties.TryGetValue("top", out ey)) ? ParseEmu(ey) : 0;
         long emptyCx = (properties.TryGetValue("width", out var ew) || properties.TryGetValue("cx", out ew)) ? ParseEmu(ew) : 0;
         long emptyCy = (properties.TryGetValue("height", out var eh) || properties.TryGetValue("cy", out eh)) ? ParseEmu(eh) : 0;
+        // R53 bt-4: explicit childOffset / childExtent input ("EMU_X,EMU_Y").
+        // When omitted, default to the outer offset/extent (identity mapping)
+        // — same behavior as before. When the source group declared an
+        // asymmetric chOff/chExt (NodeBuilder emits childOffset / childExtent),
+        // honoring it here keeps dump→replay byte-faithful so the inner
+        // shapes' positions resolve through the original child coord system
+        // instead of silently snapping to the outer rect.
+        long emptyChX = emptyX, emptyChY = emptyY, emptyChCx = emptyCx, emptyChCy = emptyCy;
+        if (properties.TryGetValue("childOffset", out var emptyChOffVal))
+        {
+            var parts = emptyChOffVal.Split(',');
+            if (parts.Length == 2
+                && long.TryParse(parts[0], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var chX)
+                && long.TryParse(parts[1], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var chY))
+            { emptyChX = chX; emptyChY = chY; }
+        }
+        if (properties.TryGetValue("childExtent", out var emptyChExtVal))
+        {
+            var parts = emptyChExtVal.Split(',');
+            if (parts.Length == 2
+                && long.TryParse(parts[0], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var chCx)
+                && long.TryParse(parts[1], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var chCy))
+            { emptyChCx = chCx; emptyChCy = chCy; }
+        }
 
         var groupShape = new GroupShape();
         groupShape.NonVisualGroupShapeProperties = new NonVisualGroupShapeProperties(
@@ -612,8 +636,8 @@ public partial class PowerPointHandler
             new Drawing.TransformGroup(
                 new Drawing.Offset { X = emptyX, Y = emptyY },
                 new Drawing.Extents { Cx = emptyCx, Cy = emptyCy },
-                new Drawing.ChildOffset { X = emptyX, Y = emptyY },
-                new Drawing.ChildExtents { Cx = emptyCx, Cy = emptyCy }
+                new Drawing.ChildOffset { X = emptyChX, Y = emptyChY },
+                new Drawing.ChildExtents { Cx = emptyChCx, Cy = emptyChCy }
             )
         );
 

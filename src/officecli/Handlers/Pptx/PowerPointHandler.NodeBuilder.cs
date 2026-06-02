@@ -213,6 +213,25 @@ public partial class PowerPointHandler
         if (grpXfrm?.Extents?.Cy != null) grpNode.Format["height"] = FormatEmu(grpXfrm.Extents.Cy.Value);
         if (grpXfrm?.Rotation != null && grpXfrm.Rotation.Value != 0)
             grpNode.Format["rotation"] = $"{grpXfrm.Rotation.Value / 60000.0:0.######}";
+        // R53 bt-4: <a:chOff>/<a:chExt> define the group's child coordinate
+        // system. When they diverge from <a:off>/<a:ext> (e.g. a deliberately
+        // shifted internal coord system the inner shapes' x/y are computed
+        // against), AddGroup defaults them to the outer rect and the inner
+        // shapes silently move. Surface verbatim only when they differ from
+        // the outer rect so the dump→replay round-trip stays quiet for the
+        // common identity case.
+        var grpChOff = grpXfrm?.ChildOffset;
+        var grpChExt = grpXfrm?.ChildExtents;
+        bool grpChOffDiverges = grpChOff != null
+            && ((grpChOff.X?.Value ?? 0) != (grpXfrm!.Offset?.X?.Value ?? 0)
+                || (grpChOff.Y?.Value ?? 0) != (grpXfrm.Offset?.Y?.Value ?? 0));
+        bool grpChExtDiverges = grpChExt != null
+            && ((grpChExt.Cx?.Value ?? 0) != (grpXfrm!.Extents?.Cx?.Value ?? 0)
+                || (grpChExt.Cy?.Value ?? 0) != (grpXfrm.Extents?.Cy?.Value ?? 0));
+        if (grpChOffDiverges)
+            grpNode.Format["childOffset"] = $"{grpChOff!.X?.Value ?? 0},{grpChOff.Y?.Value ?? 0}";
+        if (grpChExtDiverges)
+            grpNode.Format["childExtent"] = $"{grpChExt!.Cx?.Value ?? 0},{grpChExt.Cy?.Value ?? 0}";
         var grpFillColor = ReadColorFromFill(grp.GroupShapeProperties?.GetFirstChild<Drawing.SolidFill>());
         if (grpFillColor != null) grpNode.Format["fill"] = grpFillColor;
         else if (grp.GroupShapeProperties?.GetFirstChild<Drawing.NoFill>() != null) grpNode.Format["fill"] = "none";

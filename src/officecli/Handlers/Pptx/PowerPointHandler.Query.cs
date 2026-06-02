@@ -1249,6 +1249,20 @@ public partial class PowerPointHandler
             if (grpXfrm?.Extents?.Cy != null) grpNode.Format["height"] = FormatEmu(grpXfrm.Extents.Cy.Value);
             if (grpXfrm?.Rotation != null && grpXfrm.Rotation.Value != 0)
                 grpNode.Format["rotation"] = $"{grpXfrm.Rotation.Value / 60000.0:0.##}";
+            // R53 bt-4: surface <a:chOff>/<a:chExt> when they diverge from the
+            // outer rect (mirrors BuildGroupNode emit). Without this, dump→
+            // replay defaults the child coord system to the outer rect and
+            // inner shapes silently move.
+            var grpChOff2 = grpXfrm?.ChildOffset;
+            var grpChExt2 = grpXfrm?.ChildExtents;
+            if (grpChOff2 != null
+                && ((grpChOff2.X?.Value ?? 0) != (grpXfrm!.Offset?.X?.Value ?? 0)
+                    || (grpChOff2.Y?.Value ?? 0) != (grpXfrm.Offset?.Y?.Value ?? 0)))
+                grpNode.Format["childOffset"] = $"{grpChOff2.X?.Value ?? 0},{grpChOff2.Y?.Value ?? 0}";
+            if (grpChExt2 != null
+                && ((grpChExt2.Cx?.Value ?? 0) != (grpXfrm!.Extents?.Cx?.Value ?? 0)
+                    || (grpChExt2.Cy?.Value ?? 0) != (grpXfrm.Extents?.Cy?.Value ?? 0)))
+                grpNode.Format["childExtent"] = $"{grpChExt2.Cx?.Value ?? 0},{grpChExt2.Cy?.Value ?? 0}";
             var grpFillColor = ReadColorFromFill(grp.GroupShapeProperties?.GetFirstChild<Drawing.SolidFill>());
             if (grpFillColor != null) grpNode.Format["fill"] = grpFillColor;
             else if (grp.GroupShapeProperties?.GetFirstChild<Drawing.NoFill>() != null) grpNode.Format["fill"] = "none";
