@@ -239,6 +239,12 @@ public partial class PowerPointHandler
                     || properties.ContainsKey("linewidth") || properties.ContainsKey("lineWidth")
                     || properties.ContainsKey("line.width")
                     || properties.ContainsKey("lineDash") || properties.ContainsKey("linedash")
+                    // R64 bt-3: lineDashRaw (<a:custDash> verbatim passthrough)
+                    // — without this, replay of a connector that carries only
+                    // a custom dash pattern (no width/color/preset-dash) would
+                    // fall into the bareLine skip branch and drop <a:custDash>.
+                    || properties.ContainsKey("lineDashRaw") || properties.ContainsKey("linedashraw")
+                    || properties.ContainsKey("line.dashRaw") || properties.ContainsKey("line.dashraw")
                     || properties.ContainsKey("headEnd") || properties.ContainsKey("headend")
                     || properties.ContainsKey("tailEnd") || properties.ContainsKey("tailend")
                     // R58 bt-3: lineCap (<a:ln cap=...>) and cmpd (<a:ln cmpd=...>)
@@ -281,6 +287,24 @@ public partial class PowerPointHandler
                 if (properties.TryGetValue("lineDash", out var cxnDash) || properties.TryGetValue("linedash", out cxnDash))
                 {
                     cxnOutline.AppendChild(new Drawing.PresetDash { Val = ParseLineDashValue(cxnDash) });
+                }
+                // R64 bt-3: lineDashRaw — verbatim <a:custDash> install. Mirrors
+                // shadowRaw / fillOverlayRaw passthrough strategy: lift attrs
+                // (none on custDash itself) + InnerXml from the source XML and
+                // append a fresh Drawing.CustomDash. Wins over lineDash since
+                // CT_LineProperties accepts only one of prstDash / custDash
+                // (EG_LineDashProperties choice).
+                if (properties.TryGetValue("lineDashRaw", out var cxnDashRaw)
+                    || properties.TryGetValue("linedashraw", out cxnDashRaw)
+                    || properties.TryGetValue("line.dashRaw", out cxnDashRaw)
+                    || properties.TryGetValue("line.dashraw", out cxnDashRaw))
+                {
+                    if (!string.IsNullOrWhiteSpace(cxnDashRaw))
+                    {
+                        cxnOutline.RemoveAllChildren<Drawing.PresetDash>();
+                        cxnOutline.RemoveAllChildren<Drawing.CustomDash>();
+                        cxnOutline.AppendChild(BuildCustomDashFromRaw(cxnDashRaw));
+                    }
                 }
                 // R58 bt-3: lineCap (<a:ln cap="..."/>) and cmpd (<a:ln cmpd="..."/>)
                 // — attributes on the outline element itself, not children.

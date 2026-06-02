@@ -218,21 +218,34 @@ internal static class FormulaParser
 
             case "sSub":
             {
-                var baseText = ArgToLatex(element.ChildElements.FirstOrDefault(e => e.LocalName == "e"));
+                // SymbolToCommandMap appends a trailing space after each
+                // Greek/symbol command (e.g. "α" -> "\alpha ") so a
+                // following letter ("\alphax") doesn't fuse into a bogus
+                // command name. When the very next char on the assembled
+                // LaTeX is "_" or "^", that trailing space detaches the
+                // sub/sup from its base on re-parse: "\alpha _1" parses as
+                // a bare \alpha followed by a stray "_1" subscript, which
+                // round-trips through Add as an extra m:r run plus a
+                // headless m:sSub — visible as "α 1" instead of α₁.
+                // Strip the trailing space before stitching the script.
+                var baseText = ArgToLatex(element.ChildElements.FirstOrDefault(e => e.LocalName == "e")).TrimEnd();
                 var subText = ArgToLatex(element.ChildElements.FirstOrDefault(e => e.LocalName == "sub"));
                 return NeedsBraces(subText) ? $"{baseText}_{{{subText}}}" : $"{baseText}_{subText}";
             }
 
             case "sSup":
             {
-                var baseText = ArgToLatex(element.ChildElements.FirstOrDefault(e => e.LocalName == "e"));
+                // CONSISTENCY(latex-script-base-trim): see sSub above —
+                // trailing space on the base detaches "^" on re-parse.
+                var baseText = ArgToLatex(element.ChildElements.FirstOrDefault(e => e.LocalName == "e")).TrimEnd();
                 var supText = ArgToLatex(element.ChildElements.FirstOrDefault(e => e.LocalName == "sup"));
                 return NeedsBraces(supText) ? $"{baseText}^{{{supText}}}" : $"{baseText}^{supText}";
             }
 
             case "sSubSup":
             {
-                var baseText = ArgToLatex(element.ChildElements.FirstOrDefault(e => e.LocalName == "e"));
+                // CONSISTENCY(latex-script-base-trim): see sSub above.
+                var baseText = ArgToLatex(element.ChildElements.FirstOrDefault(e => e.LocalName == "e")).TrimEnd();
                 var subText = ArgToLatex(element.ChildElements.FirstOrDefault(e => e.LocalName == "sub"));
                 var supText = ArgToLatex(element.ChildElements.FirstOrDefault(e => e.LocalName == "sup"));
                 var subPart = NeedsBraces(subText) ? $"_{{{subText}}}" : $"_{subText}";

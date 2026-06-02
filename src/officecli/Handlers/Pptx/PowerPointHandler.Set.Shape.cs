@@ -248,14 +248,22 @@ public partial class PowerPointHandler
                     // (<a:bodyPr rtlCol="1"/>) belongs to shape-level Set,
                     // not paragraph-level. Run-level rtl remains reachable
                     // via /paragraph[K]/run[R] direction=rtl.
+                    //
+                    // R64 bt-2: write the attribute explicitly on BOTH rtl and
+                    // ltr instead of clearing for ltr. An explicit Set on the
+                    // paragraph is the caller's "override inheritance" signal —
+                    // a paragraph inside a master/layout with rtl=1 silently
+                    // inherits RTL when we strip the attribute on ltr, so the
+                    // Set looks Updated but the persisted XML reads as a no-op
+                    // (`<a:pPr/>` with no rtl attr). rtl="0" pins ltr regardless
+                    // of inherited cascade. (Add path keeps strip-on-ltr so a
+                    // freshly built ltr shape stays free of explicit-default
+                    // noise on every paragraph.)
                     var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
                     bool rtl = key.Equals("rtl", StringComparison.OrdinalIgnoreCase)
                         ? IsTruthy(value)
                         : ParsePptDirectionRtl(value);
-                    if (rtl)
-                        pProps.RightToLeft = true;
-                    else
-                        pProps.RightToLeft = null;
+                    pProps.RightToLeft = rtl;
                     break;
                 }
                 default:
@@ -632,6 +640,7 @@ public partial class PowerPointHandler
                     var spPr = cxn.ShapeProperties ?? (cxn.ShapeProperties = new ShapeProperties());
                     var outline = EnsureOutline(spPr);
                     outline.RemoveAllChildren<Drawing.PresetDash>();
+                    outline.RemoveAllChildren<Drawing.CustomDash>();
                     var newDash = new Drawing.PresetDash { Val = ParseLineDashValue(value) };
                     // CT_LineProperties schema: fill → prstDash → ... → headEnd → tailEnd
                     var headEnd = outline.GetFirstChild<Drawing.HeadEnd>();
@@ -644,6 +653,34 @@ public partial class PowerPointHandler
                             outline.InsertBefore(newDash, tailEnd);
                         else
                             outline.AppendChild(newDash);
+                    }
+                    break;
+                }
+                // R64 bt-3: lineDashRaw — verbatim <a:custDash> passthrough on
+                // connector Set. Mirrors lineDash schema-order install; clears
+                // any preset/custom dash already on the outline since
+                // CT_LineProperties choice EG_LineDashProperties accepts only
+                // one. Empty value removes the dash entirely.
+                case "linedashraw" or "line.dashraw":
+                {
+                    var spPr = cxn.ShapeProperties ?? (cxn.ShapeProperties = new ShapeProperties());
+                    var outline = EnsureOutline(spPr);
+                    outline.RemoveAllChildren<Drawing.PresetDash>();
+                    outline.RemoveAllChildren<Drawing.CustomDash>();
+                    if (!string.IsNullOrWhiteSpace(value))
+                    {
+                        var newCustDash = BuildCustomDashFromRaw(value);
+                        var headEnd = outline.GetFirstChild<Drawing.HeadEnd>();
+                        if (headEnd != null)
+                            outline.InsertBefore(newCustDash, headEnd);
+                        else
+                        {
+                            var tailEnd = outline.GetFirstChild<Drawing.TailEnd>();
+                            if (tailEnd != null)
+                                outline.InsertBefore(newCustDash, tailEnd);
+                            else
+                                outline.AppendChild(newCustDash);
+                        }
                     }
                     break;
                 }

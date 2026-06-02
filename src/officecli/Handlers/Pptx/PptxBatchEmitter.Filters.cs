@@ -221,6 +221,14 @@ public static partial class PptxBatchEmitter
             result.Remove("fillOverlayRaw");
         }
 
+        // R64 bt-3: lineDashRaw is a verbatim <a:custDash> passthrough; the
+        // companion lineDash=<token> would overwrite it on Set since the install
+        // path clears both prstDash and custDash before appending. The two are
+        // a CT_LineProperties choice anyway (EG_LineDashProperties), so they
+        // can never coexist on the same outline — raw wins by definition.
+        if (result.ContainsKey("lineDashRaw"))
+            result.Remove("lineDash");
+
         // bt-B2: same shape as reflectionRaw — gradientRaw carries the
         // verbatim <a:gradFill flip=… ><a:tileRect/></a:gradFill>. The
         // companion semantic gradient=linear;… key would overwrite it via
