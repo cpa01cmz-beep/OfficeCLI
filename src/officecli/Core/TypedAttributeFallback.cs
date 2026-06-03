@@ -160,14 +160,26 @@ internal static class TypedAttributeFallback
         // the round-trip parse above already validated the pair.
         var existing = parent.ChildElements.FirstOrDefault(e =>
             e.LocalName.Equals(elementLocal, StringComparison.OrdinalIgnoreCase));
+        OpenXmlElement target;
         if (existing != null)
         {
             foreach (var a in sample.GetAttributes())
                 existing.SetAttribute(a);
-            return true;
+            target = existing;
+        }
+        else
+        {
+            parent.AppendChild(sample);
+            target = sample;
         }
 
-        parent.AppendChild(sample);
+        // CT_Shd requires @val. The decomposed keys shd.fill / shd.color set only
+        // those attributes; without a @val the element is schema-invalid. Default
+        // to "clear" (OOXML's "solid fill, no pattern") so output always validates.
+        if (elementLocal.Equals("shd", StringComparison.OrdinalIgnoreCase)
+            && !target.GetAttributes().Any(a => a.LocalName.Equals("val", StringComparison.OrdinalIgnoreCase)))
+            target.SetAttribute(new DocumentFormat.OpenXml.OpenXmlAttribute(prefix, "val", nsUri, "clear"));
+
         return true;
     }
 
