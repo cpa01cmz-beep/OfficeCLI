@@ -256,7 +256,12 @@ public partial class WordHandler
                         var offsetEl = hPos.Descendants().FirstOrDefault(e => e.LocalName == "posOffset");
                         if (offsetEl != null && long.TryParse(offsetEl.InnerText, out var offsetEmu))
                         {
-                            var halfPageEmu = (long)(GetPageLayout().WidthPt * EmuConverter.EmuPerPoint); // pt to EMU
+                            // halfPageEmu must be HALF the page width: a posOffset
+                            // past the page center floats the image right. The
+                            // original omitted the /2 and compared against the FULL
+                            // page width, so right-positioned images (offset > center
+                            // but < full width) were mis-floated left.
+                            var halfPageEmu = (long)(GetPageLayout().WidthPt * EmuConverter.EmuPerPoint / 2); // pt to EMU, half page
                             isRight = offsetEmu > halfPageEmu;
                         }
                     }

@@ -58,6 +58,9 @@ public partial class WordHandler
     {
         OnHtmlParagraphBegin(para);
         _ctx.CurrentParagraphTabIndex = 0;
+        // Mark where this paragraph's content begins so positional tabs can
+        // retro-wrap the leading text into an absolute-width container.
+        _ctx.CurrentParagraphTabSegmentStart = sb.Length;
 
         // Render bookmark anchors for internal hyperlink targets
         foreach (var bm in para.Elements<BookmarkStart>())
@@ -379,6 +382,19 @@ public partial class WordHandler
                         var curPos = orderedStops[tabIdx].Position!.Value / 20.0; // twips → pt
                         var prevPos = tabIdx > 0 ? orderedStops[tabIdx - 1].Position!.Value / 20.0 : 0;
                         widthPt = curPos - prevPos;
+                        // Tab stops are absolute positions from the page margin, but
+                        // the paragraph content box is shifted right by the paragraph's
+                        // left indent (rendered as padding-left on the <p>). For the
+                        // FIRST tab segment (prevPos==0) the box starts at the indented
+                        // origin, so to land its right edge on the absolute tab position
+                        // we subtract the left indent from the box width. Later segments
+                        // continue from the previous segment's absolute end, so they
+                        // keep the plain (curPos - prevPos) width.
+                        if (tabIdx == 0)
+                        {
+                            var leftIndentPt = GetParagraphLeftIndentPt(para);
+                            widthPt = Math.Max(0, curPos - leftIndentPt);
+                        }
                         // Handle tab leader for positional tabs. OOXML values:
                         //   none, dot, hyphen, underscore, heavy, middleDot (spec)
                         //   some authors also emit "dash" as a hyphen alias.
@@ -394,8 +410,32 @@ public partial class WordHandler
                             "underscore" or "heavy" => "border-bottom:1px solid #000;",
                             _ => "",
                         };
-                        sb.Append($"<span style=\"display:inline-block;width:{widthPt:0.##}pt;{cssLeader}\"></span>");
+                        // Tab absolute-alignment fix: instead of an EMPTY fixed-width
+                        // spacer emitted AFTER the leading text (which makes the
+                        // following text start at natural_text_width + gap — varying
+                        // with text length), RETRO-WRAP the leading text since the
+                        // last tab segment INSIDE a fixed-width inline-block. The
+                        // following text then starts at the absolute tab position
+                        // regardless of leading-text length (matches Word's tab stops).
+                        if (needsSpan) { sb.Append("</span>"); needsSpan = false; }
+                        var segStart = _ctx.CurrentParagraphTabSegmentStart;
+                        if (segStart >= 0 && segStart <= sb.Length)
+                        {
+                            var leading = sb.ToString(segStart, sb.Length - segStart);
+                            sb.Length = segStart;
+                            sb.Append($"<span style=\"display:inline-block;width:{widthPt:0.##}pt;{cssLeader}white-space:nowrap;overflow:hidden;vertical-align:bottom\">{leading}</span>");
+                        }
+                        else
+                        {
+                            // No tracked segment (shouldn't happen) — fall back to the
+                            // original empty spacer to preserve the gap.
+                            sb.Append($"<span style=\"display:inline-block;width:{widthPt:0.##}pt;{cssLeader}\"></span>");
+                        }
+                        // Next segment's leading text starts here (after this container).
+                        _ctx.CurrentParagraphTabSegmentStart = sb.Length;
                         OnHtmlRenderTab(widthPt);
+                        if (!string.IsNullOrEmpty(style) && !_ctx.LineBreakEnabled)
+                        { sb.Append($"<span style=\"{style}\">"); needsSpan = true; }
                     }
                     else
                     {

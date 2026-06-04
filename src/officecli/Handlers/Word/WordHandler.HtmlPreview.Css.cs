@@ -1027,6 +1027,24 @@ public partial class WordHandler
     }
 
     /// <summary>
+    /// Effective left indent (pt) of a paragraph — direct w:ind/@w:left, else
+    /// the style chain. Used by the positional-tab renderer so the first tab
+    /// segment's box width compensates for the paragraph's left padding and the
+    /// following text lands on the absolute tab position. Mirrors the indent
+    /// resolution in GetParagraphInlineCss (direct ?? style).
+    /// </summary>
+    private double GetParagraphLeftIndentPt(Paragraph para)
+    {
+        var pProps = para.ParagraphProperties;
+        var styleId = pProps?.ParagraphStyleId?.Val?.Value;
+        var indLeft = pProps?.Indentation?.Left?.Value
+            ?? ResolveIndentationFromStyle(styleId)?.Left?.Value;
+        if (indLeft is string twips && twips != "0")
+            return Units.TwipsToPt(twips);
+        return 0;
+    }
+
+    /// <summary>
     /// Resolve Indentation from the style chain (basedOn walk).
     /// </summary>
     private Indentation? ResolveIndentationFromStyle(string? styleId)
@@ -1739,6 +1757,29 @@ public partial class WordHandler
                     break;
             }
         }
+
+        // Legacy w: namespace run effects (w:shadow/outline/emboss/imprint).
+        // These boolean RunProperties live in the w: namespace, so the W14Ns
+        // loop above skips them — they previously produced no CSS at all. Each
+        // is "on" when present and not explicitly false (Val == null = true per
+        // OOXML), matching the rProps.Bold/Strike read pattern used above.
+        if (rProps.Shadow != null && (rProps.Shadow.Val == null || rProps.Shadow.Val.Value))
+            textShadows.Add("1px 1px 0 rgba(0,0,0,0.5)");
+        if (rProps.Emboss != null && (rProps.Emboss.Val == null || rProps.Emboss.Val.Value))
+        {
+            // 3D raised: light edge on top, dark edge below.
+            textShadows.Add("0 1px 0 rgba(255,255,255,.7)");
+            textShadows.Add("0 -1px 0 rgba(0,0,0,.4)");
+        }
+        if (rProps.Imprint != null && (rProps.Imprint.Val == null || rProps.Imprint.Val.Value))
+        {
+            // 3D engraved: reversed vs emboss.
+            textShadows.Add("0 -1px 0 rgba(255,255,255,.7)");
+            textShadows.Add("0 1px 0 rgba(0,0,0,.4)");
+        }
+        if (rProps.Outline != null && (rProps.Outline.Val == null || rProps.Outline.Val.Value))
+            // Hollow/outline text approximation.
+            parts.Add("-webkit-text-stroke:0.5pt currentColor");
 
         if (textShadows.Count > 0)
             parts.Add($"text-shadow:{string.Join(",", textShadows)}");

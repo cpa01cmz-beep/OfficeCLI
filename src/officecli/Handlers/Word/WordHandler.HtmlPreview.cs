@@ -44,6 +44,14 @@ public partial class WordHandler
         // Reset per paragraph in RenderParagraphContentHtml.
         public int CurrentParagraphTabIndex { get; set; }
 
+        // Tab absolute-alignment: sb offset where the current tab segment's
+        // leading text begins (start of paragraph content, or just after the
+        // previous positional tab's wrapper). A positional tab retro-wraps the
+        // text from this offset in a fixed-width container so the following
+        // text lands at the absolute tab position regardless of leading-text
+        // length. -1 means "not tracking" (reset per paragraph).
+        public int CurrentParagraphTabSegmentStart { get; set; } = -1;
+
         public void ResetLineForParagraph(double contentWidthPt, double firstLineIndentPt, double defaultSizePt)
         {
             LineWidthPt = contentWidthPt - firstLineIndentPt;
@@ -297,8 +305,19 @@ public partial class WordHandler
             "$1<span class=\"num-pages-field\"><!--NUM_PAGES--></span>$2", 1);
         footerTemplate = footerTemplateWithTotal;
 
-        // Section-level multi-column layout: w:cols num=N sep=true
-        var sectCols = _doc.MainDocumentPart?.Document?.Body?.GetFirstChild<SectionProperties>()?.GetFirstChild<Columns>();
+        // Section-level multi-column layout: w:cols num=N sep=true.
+        // BUG(first-section-cols): in a multi-section doc the page-body's initial
+        // column layout belongs to SECTION 1, whose sectPr is the first inline
+        // <w:sectPr> on a paragraph — NOT body.GetFirstChild<SectionProperties>(),
+        // which is the LAST section's (trailing body) sectPr. Using the trailing
+        // one rendered section 1 with the final section's column count.
+        // CollectSections returns sections in document order (inline sectPr's
+        // first, trailing body sectPr last), so [0] is section 1. Single-section
+        // docs only have the trailing body sectPr → [0] is that, preserving the
+        // original behavior.
+        var firstSection = CollectSections(body).FirstOrDefault()
+            ?? _doc.MainDocumentPart?.Document?.Body?.GetFirstChild<SectionProperties>();
+        var sectCols = firstSection?.GetFirstChild<Columns>();
         var colCount = sectCols?.ColumnCount?.Value ?? 1;
         var colSep = sectCols?.Separator?.Value == true;
         var colSpacing = sectCols?.Space?.Value;
@@ -1864,6 +1883,7 @@ public partial class WordHandler
                         var bulletType = lvlText switch
                         {
                             "o" => "circle",
+                            "\u25E6" => "circle", // U+25E6 WHITE BULLET (Word outline level 1)
                             "\uf0a7" or "▪" or "\u25AA" => "square",
                             _ => "disc"
                         };
