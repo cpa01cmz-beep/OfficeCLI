@@ -31,6 +31,15 @@ public partial class PowerPointHandler
         // PowerPoint renders them in the heading face.
         bool isTitle = IsTitlePlaceholder(placeholderShape);
         string? themeFontFallback = ResolveThemeFontTypeface(placeholderPart, isTitle ? "major" : "minor");
+        // Bug #8(B): honor <a:normAutofit fontScale="N"> (1/1000% → ratio). A real
+        // PowerPoint deck that shrank text to fit stores the computed scale here;
+        // multiply run font sizes by it. Absent/100% (CLI-created files) = no scale.
+        // textBody is a p:txBody (Presentation.TextBody), and its a:bodyPr is a
+        // Drawing.BodyProperties child — read it generically, not via a cast to
+        // Drawing.TextBody (which a p:txBody is not).
+        var nafScale = textBody.GetFirstChild<Drawing.BodyProperties>()?
+            .GetFirstChild<Drawing.NormalAutoFit>()?.FontScale?.Value;
+        double fontScale = (nafScale.HasValue && nafScale.Value > 0) ? nafScale.Value / 100000.0 : 1.0;
         foreach (var para in textBody.Elements<Drawing.Paragraph>())
         {
             // Resolve per-paragraph font size based on paragraph level
@@ -230,7 +239,7 @@ public partial class PowerPointHandler
             {
                 foreach (var run in runs)
                 {
-                    RenderRun(sb, run, themeColors, defaultFontSizeHundredths, placeholderPart, themeFontFallback);
+                    RenderRun(sb, run, themeColors, defaultFontSizeHundredths, placeholderPart, themeFontFallback, fontScale);
                 }
             }
 
@@ -243,7 +252,8 @@ public partial class PowerPointHandler
     }
 
     private static void RenderRun(StringBuilder sb, Drawing.Run run, Dictionary<string, string> themeColors,
-        int? defaultFontSizeHundredths = null, OpenXmlPart? part = null, string? themeFontFallback = null)
+        int? defaultFontSizeHundredths = null, OpenXmlPart? part = null, string? themeFontFallback = null,
+        double fontScale = 1.0)
     {
         var text = run.Text?.Text ?? "";
         if (string.IsNullOrEmpty(text)) return;
@@ -284,11 +294,12 @@ public partial class PowerPointHandler
         if (rp != null)
         {
 
-            // Size — use explicit run size, fall back to placeholder default
+            // Size — use explicit run size, fall back to placeholder default.
+            // Bug #8(B): multiply by the textbody's normAutofit fontScale (1.0 = none).
             if (rp.FontSize?.HasValue == true)
-                styles.Add($"font-size:{rp.FontSize.Value / 100.0:0.##}pt");
+                styles.Add($"font-size:{rp.FontSize.Value / 100.0 * fontScale:0.##}pt");
             else if (defaultFontSizeHundredths.HasValue)
-                styles.Add($"font-size:{defaultFontSizeHundredths.Value / 100.0:0.##}pt");
+                styles.Add($"font-size:{defaultFontSizeHundredths.Value / 100.0 * fontScale:0.##}pt");
 
             // Bold
             if (rp.Bold?.Value == true)

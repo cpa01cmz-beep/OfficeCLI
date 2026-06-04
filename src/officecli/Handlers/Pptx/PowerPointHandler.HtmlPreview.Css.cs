@@ -269,14 +269,40 @@ public partial class PowerPointHandler
             var color = ResolveFillColor(gs.GetFirstChild<Drawing.SolidFill>(), themeColors);
             if (color == null)
             {
-                // Try direct color children
-                var rgb = gs.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
+                // Try direct color children. A gradient stop carries its color as a
+                // direct <a:srgbClr>/<a:schemeClr> child (not wrapped in solidFill),
+                // and that color may have an <a:alpha> child. Bug #7: read the alpha
+                // and emit rgba() — the old path dropped it, losing transparency.
+                var rgbEl = gs.GetFirstChild<Drawing.RgbColorModelHex>();
+                var rgb = rgbEl?.Val?.Value;
                 if (rgb != null && rgb.Length >= 6 && rgb[..6].All(char.IsAsciiHexDigit))
-                    color = $"#{rgb[..6]}";
+                {
+                    var alpha = rgbEl!.GetFirstChild<Drawing.Alpha>()?.Val?.Value;
+                    if (alpha.HasValue && alpha.Value < 100000)
+                    {
+                        var (r, g, b) = ColorMath.HexToRgb(rgb[..6]);
+                        color = $"rgba({r},{g},{b},{alpha.Value / 100000.0:0.##})";
+                    }
+                    else
+                        color = $"#{rgb[..6]}";
+                }
                 else
                 {
-                    var scheme = gs.GetFirstChild<Drawing.SchemeColor>()?.Val?.InnerText;
-                    color = scheme != null && themeColors.TryGetValue(scheme, out var tc) ? $"#{tc}" : "transparent";
+                    var schemeEl = gs.GetFirstChild<Drawing.SchemeColor>();
+                    var scheme = schemeEl?.Val?.InnerText;
+                    if (scheme != null && themeColors.TryGetValue(scheme, out var tc))
+                    {
+                        var alpha = schemeEl!.GetFirstChild<Drawing.Alpha>()?.Val?.Value;
+                        if (alpha.HasValue && alpha.Value < 100000)
+                        {
+                            var (r, g, b) = ColorMath.HexToRgb(tc);
+                            color = $"rgba({r},{g},{b},{alpha.Value / 100000.0:0.##})";
+                        }
+                        else
+                            color = $"#{tc}";
+                    }
+                    else
+                        color = "transparent";
                 }
             }
             var pos = gs.Position?.Value;
@@ -289,11 +315,30 @@ public partial class PowerPointHandler
         // Radial or linear?
         var pathGrad = gradFill.GetFirstChild<Drawing.PathGradientFill>();
         if (pathGrad != null)
+        {
             // OOXML <a:path path="circle"> with default fill rectangle fills to the shape
             // bounds (last stop at the edge). CSS default is `farthest-corner`, which overshoots
             // for square-ish shapes. `closest-side` lands the final stop at the nearer edge,
             // matching Office's rendering for rectangular shapes.
-            return $"radial-gradient(circle closest-side, {string.Join(", ", cssStops)})";
+            // Bug #6: the gradient FOCUS comes from <a:fillToRect l/t/r/b> (1/1000%
+            // units). The focus point is the rect's top-left (l, t): center =
+            // 50/50/50/50 → at 50% 50%; tl = l0/t0 → at 0% 0%; br = l100000/t100000
+            // → at 100% 100%; tr = l100000/t0 → at 100% 0%. Previously omitted, so
+            // every focal variant rendered centered.
+            var ftr = pathGrad.FillToRectangle;
+            var cx = (ftr?.Left?.Value ?? 50000) / 1000.0;
+            var cy = (ftr?.Top?.Value ?? 50000) / 1000.0;
+            // Size keyword must track the focus: `closest-side` is only right for a
+            // CENTERED focus (the nearer-edge radius that matches Office on a
+            // rectangle). At a corner/edge focus, closest-side's nearest-edge
+            // distance collapses to ~0 → the gradient degenerates to a point and
+            // the focus colors vanish (only the final stop's color shows). Use
+            // `farthest-corner` for off-center foci so the gradient fills the shape
+            // out to its far corner, matching native's large color fill.
+            var centered = Math.Abs(cx - 50) < 0.5 && Math.Abs(cy - 50) < 0.5;
+            var sizeKeyword = centered ? "closest-side" : "farthest-corner";
+            return $"radial-gradient(circle {sizeKeyword} at {cx:0.##}% {cy:0.##}%, {string.Join(", ", cssStops)})";
+        }
 
         var linear = gradFill.GetFirstChild<Drawing.LinearGradientFill>();
         var angleDeg = linear?.Angle?.HasValue == true ? linear.Angle.Value / 60000.0 : 90.0;

@@ -99,12 +99,22 @@ public partial class PowerPointHandler
             (x, y, cx, cy) = resolved.Value;
         }
 
+        // Bug #8(A): a shape with <a:spAutoFit/> grows to fit its text in real
+        // PowerPoint. A fixed pt height clips overflowing content, so emit
+        // min-height + height:auto for spAutoFit. All other autofit modes
+        // (normAutofit / noAutofit / none) keep the fixed OOXML height.
+        var autoFitBodyPr = shape.TextBody?.Elements<Drawing.BodyProperties>().FirstOrDefault();
+        var isSpAutoFit = autoFitBodyPr?.GetFirstChild<Drawing.ShapeAutoFit>() != null;
+        var heightStyle = isSpAutoFit
+            ? $"min-height:{Units.EmuToPt(cy)}pt;height:auto"
+            : $"height:{Units.EmuToPt(cy)}pt";
+
         var styles = new List<string>
         {
             $"left:{Units.EmuToPt(x)}pt",
             $"top:{Units.EmuToPt(y)}pt",
             $"width:{Units.EmuToPt(cx)}pt",
-            $"height:{Units.EmuToPt(cy)}pt"
+            heightStyle
         };
 
         // Fill
