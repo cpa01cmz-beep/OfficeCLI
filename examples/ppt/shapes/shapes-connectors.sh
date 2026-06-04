@@ -166,6 +166,75 @@ officecli add "$PPTX" '/slide[3]' --type textbox \
     --prop size=12 \
     --prop x=7in --prop y=4in --prop width=6in --prop height=0.5in
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Slide 4 — headEnd / lineJoin / miterLimit on connectors
+# ─────────────────────────────────────────────────────────────────────────────
+officecli add "$PPTX" / --type slide
+officecli add "$PPTX" '/slide[4]' --type shape \
+    --prop text="headEnd / lineJoin / miterLimit on Connectors" \
+    --prop size=24 --prop bold=true \
+    --prop x=0.5in --prop y=0.3in --prop width=12in --prop height=0.6in
+
+# headEnd — arrowhead at the START of the connector (the 'head' = from-side)
+# tailEnd — arrowhead at the END of the connector (the 'tail' = to-side)
+officecli add "$PPTX" '/slide[4]' --type textbox \
+    --prop text="headEnd + tailEnd arrowhead combinations:" \
+    --prop size=14 --prop bold=true \
+    --prop x=0.5in --prop y=1.1in --prop width=12in --prop height=0.4in
+
+Y=1.8
+for combo in "headEnd=triangle tailEnd=oval" "headEnd=diamond tailEnd=arrow" "headEnd=arrow tailEnd=arrow"; do
+    read -r h t <<< "$combo"
+    hv="${h#headEnd=}"; tv="${t#tailEnd=}"
+    officecli add "$PPTX" '/slide[4]' --type connector \
+        --prop shape=straight \
+        --prop x=0.5in --prop "y=${Y}in" --prop width=5in --prop height=0in \
+        --prop color=1D3557 --prop lineWidth=2pt \
+        --prop headEnd="$hv" --prop tailEnd="$tv"
+    officecli add "$PPTX" '/slide[4]' --type textbox \
+        --prop text="headEnd=$hv  tailEnd=$tv" --prop size=12 \
+        --prop x=5.8in --prop "y=${Y}in" --prop width=6in --prop height=0.4in
+    Y=$(echo "$Y + 0.8" | bc -l)
+done
+
+# lineJoin — connector joins: round / bevel / miter
+# lineJoin on connectors affects the joint where the connector bends (elbow)
+officecli add "$PPTX" '/slide[4]' --type textbox \
+    --prop text="lineJoin on elbow connectors:" \
+    --prop size=14 --prop bold=true \
+    --prop x=0.5in --prop y=4.6in --prop width=12in --prop height=0.4in
+
+# Two shapes to connect with elbows so the corner join is visible
+SX=$(add_shape_get_path '/slide[4]' --type shape --prop geometry=rect \
+    --prop x=0.5in --prop y=5.2in --prop width=1in --prop height=1in --prop fill=4472C4)
+SY=$(add_shape_get_path '/slide[4]' --type shape --prop geometry=rect \
+    --prop x=4in --prop y=6.8in --prop width=1in --prop height=1in --prop fill=4472C4)
+
+X=0.0
+for join in round bevel miter; do
+    OX=$(echo "$X + 0.5" | bc -l)
+    officecli add "$PPTX" '/slide[4]' --type connector \
+        --prop shape=elbow \
+        --prop x="${OX}in" --prop y=5.2in \
+        --prop width=4in --prop height=2in \
+        --prop color=E63946 --prop lineWidth=4pt \
+        --prop lineJoin="$join"
+    officecli add "$PPTX" '/slide[4]' --type textbox \
+        --prop text="lineJoin=$join" --prop size=12 \
+        --prop x="${OX}in" --prop y=7.3in --prop width=3in --prop height=0.4in
+    X=$(echo "$X + 4.5" | bc -l)
+done
+
+# miterLimit — via compound lineJoin=miter:<lim> (1/1000ths of %)
+officecli add "$PPTX" '/slide[4]' --type connector \
+    --prop shape=elbow \
+    --prop x=9.5in --prop y=5.2in --prop width=3in --prop height=2in \
+    --prop color=2A9D8F --prop lineWidth=6pt \
+    --prop lineJoin="miter:800000"
+officecli add "$PPTX" '/slide[4]' --type textbox \
+    --prop text='lineJoin="miter:800000"  (miter + 800% limit)' --prop size=12 \
+    --prop x=9.5in --prop y=7.3in --prop width=4in --prop height=0.4in
+
 officecli close "$PPTX"
 officecli validate "$PPTX"
 echo "Created: $PPTX"

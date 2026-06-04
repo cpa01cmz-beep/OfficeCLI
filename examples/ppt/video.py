@@ -115,8 +115,8 @@ def main():
         print("  -- Slide 1: Title --")
         run(f'add "{out_pptx}" / --type slide --prop layout=title')
         run(f'set "{out_pptx}" /slide[1] --prop background=radial:1B2838-4472C4-bl')
-        run(f'set "{out_pptx}" /slide[1]/placeholder[title] --prop text="Video Demo" --prop color=FFFFFF --prop size=44')
-        run(f'set "{out_pptx}" /slide[1]/placeholder[subtitle] --prop text="Embedded video with officecli" --prop color=B4C7E7 --prop size=20')
+        run(f'set "{out_pptx}" /slide[1]/placeholder[ctrTitle] --prop text="Video Demo" --prop color=FFFFFF --prop size=44')
+        run(f'set "{out_pptx}" /slide[1]/placeholder[subTitle] --prop text="Embedded video with officecli" --prop color=B4C7E7 --prop size=20')
 
         # Slide 2 - Video slide
         print("  -- Slide 2: Video --")
@@ -146,6 +146,25 @@ def main():
             f'--prop "series2=End:80,30,80" '
             f'--prop colors=E74C3C,27AE60 '
             f'--prop x=13cm --prop y=4cm --prop width=12cm --prop height=8cm')
+
+        # Slide 4 - loop / trimStart / trimEnd
+        print("  -- Slide 4: loop / trimStart / trimEnd --")
+        run(f'add "{out_pptx}" / --type slide --prop title="loop / trimStart / trimEnd"')
+        run(f'set "{out_pptx}" /slide[4] --prop background=0D1B2A')
+        run(f'set "{out_pptx}" /slide[4]/shape[1] --prop color=FFFFFF')
+        # loop=true — video restarts after it reaches the end
+        # trimStart / trimEnd — play only a sub-range of the video (seconds)
+        run(f'add "{out_pptx}" /slide[4] --type video '
+            f'--prop src="{video_path}" '
+            f'--prop poster="{cover_path}" '
+            f'--prop x=2cm --prop y=4cm --prop width=22cm --prop height=12.5cm '
+            f'--prop volume=60 --prop autoplay=true '
+            f'--prop loop=true --prop trimStart=0 --prop trimEnd=2')
+        run(f'add "{out_pptx}" /slide[4] --type shape '
+            f'--prop text="loop=true  trimStart=0  trimEnd=2\\n'
+            f'Video loops continuously; playback is clipped to the 0–2s range." '
+            f'--prop size=14 --prop color=B4C7E7 '
+            f'--prop x=1cm --prop y=17cm --prop width=24cm --prop height=2cm')
 
         # Close resident and verify
         run(f'close "{out_pptx}"')

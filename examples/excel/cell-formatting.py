@@ -200,6 +200,34 @@ cell("/Data/B15", arrayformula="B3*2")
 cell("/Data/col[1]", width="40")
 cell("/Data/col[2]", width="16")
 
+# ==========================================================================
+# Sheet6: Rich-text — runs (multi-format text within one cell)
+# ==========================================================================
+# `runs` is an add-time property (requires --type cell + type=richtext).
+# Each run is a JSON object with "text" plus any font props (bold, italic,
+# color, size, underline).  `set` does not support rich-text; use `add`.
+print("\n--- Sheet6: Rich-text runs ---")
+cli(f'add "{FILE}" / --type sheet --prop name=RichText')
+
+# Label
+cell("/RichText/A1", value="runs — rich-text within one cell", **{"font.bold": "true", "font.size": "14", "fill": "5B2C8B", "font.color": "FFFFFF"})
+
+# Each add creates the cell with multi-format text in a single SST entry.
+# Shown once with inline --prop syntax so the example is self-documenting.
+cli(f'add "{FILE}" /RichText --type cell --prop ref=A3'
+    f' --prop type=richtext'
+    f" --prop 'runs=[{{\"text\":\"Bold + Red  \",\"bold\":true,\"color\":\"C00000\"}},{{\"text\":\"Italic + Blue\",\"italic\":true,\"color\":\"2E75B6\"}},{{\"text\":\"  Normal\"}}]'")
+
+cli(f'add "{FILE}" /RichText --type cell --prop ref=A5'
+    f' --prop type=richtext'
+    f" --prop 'runs=[{{\"text\":\"H\",\"bold\":true,\"color\":\"1F4E79\",\"size\":18}},{{\"text\":\"2\",\"superscript\":true,\"size\":10}},{{\"text\":\"O water formula\",\"color\":\"1F4E79\"}}]'")
+
+cli(f'add "{FILE}" /RichText --type cell --prop ref=A7'
+    f' --prop type=richtext'
+    f" --prop 'runs=[{{\"text\":\"Strike\",\"strike\":true}},{{\"text\":\" | \"}},{{\"text\":\"underline\",\"underline\":\"single\"}},{{\"text\":\" | \"}},{{\"text\":\"size 14pt\",\"size\":14}}]'")
+
+cell("/RichText/col[1]", width="50")
+
 # flush resident edits to disk before reading back
 close_file()
 

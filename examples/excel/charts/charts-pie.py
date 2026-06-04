@@ -269,8 +269,128 @@ cli(f'add "{FILE}" "/2-Doughnut Charts" --type chart'
     f' --prop legend=right'
     f' --prop dataLabels=true --prop labelPos=bestFit')
 
+# ==========================================================================
+# Sheet: 3-Pie Advanced
+# ==========================================================================
+print("\n--- 3-Pie Advanced ---")
+cli(f'add "{FILE}" / --type sheet --prop name="3-Pie Advanced"')
+
+# --------------------------------------------------------------------------
+# Chart 1: varyColors=true + firstSliceAngle on pie
+#
+# officecli add charts-pie.xlsx "/3-Pie Advanced" --type chart \
+#   --prop chartType=pie \
+#   --prop title="Pie — varyColors + firstSliceAngle" \
+#   --prop series1="Share:40,30,20,10" \
+#   --prop categories=Q1,Q2,Q3,Q4 \
+#   --prop x=0 --prop y=0 --prop width=12 --prop height=18 \
+#   --prop varyColors=true \
+#   --prop firstSliceAngle=45 \
+#   --prop dataLabels=true --prop labelPos=outsideEnd
+#
+# Features: varyColors=true (each slice gets a distinct color automatically),
+#   firstSliceAngle=45 (rotates the first slice start angle, 0-360 degrees)
+# --------------------------------------------------------------------------
+cli(f'add "{FILE}" "/3-Pie Advanced" --type chart'
+    f' --prop chartType=pie'
+    f' --prop title="Pie — varyColors + firstSliceAngle"'
+    f' --prop series1=Share:40,30,20,10'
+    f' --prop categories=Q1,Q2,Q3,Q4'
+    f' --prop x=0 --prop y=0 --prop width=12 --prop height=18'
+    f' --prop varyColors=true'
+    f' --prop firstSliceAngle=45'
+    f' --prop dataLabels=true --prop labelPos=bestFit')
+
+# --------------------------------------------------------------------------
+# Chart 2: holeSize + leaderlines on doughnut
+#
+# officecli add charts-pie.xlsx "/3-Pie Advanced" --type chart \
+#   --prop chartType=doughnut \
+#   --prop title="Doughnut — holeSize + leaderlines" \
+#   --prop series1="Revenue:35,28,22,15" \
+#   --prop categories=North,South,East,West \
+#   --prop colors=2E75B6,ED7D31,70AD47,FFC000 \
+#   --prop x=13 --prop y=0 --prop width=12 --prop height=18 \
+#   --prop holeSize=65 \
+#   --prop leaderlines=true \
+#   --prop dataLabels=true --prop labelPos=outsideEnd
+#
+# Features: holeSize=65 (% of total radius — larger value = thinner ring),
+#   leaderlines=true (connecting lines from labels to slices, pie/doughnut)
+# --------------------------------------------------------------------------
+cli(f'add "{FILE}" "/3-Pie Advanced" --type chart'
+    f' --prop chartType=doughnut'
+    f' --prop title="Doughnut — holeSize + leaderlines"'
+    f' --prop series1=Revenue:35,28,22,15'
+    f' --prop categories=North,South,East,West'
+    f' --prop colors=2E75B6,ED7D31,70AD47,FFC000'
+    f' --prop x=13 --prop y=0 --prop width=12 --prop height=18'
+    f' --prop holeSize=65'
+    f' --prop leaderlines=true'
+    f' --prop dataLabels=true --prop labelPos=outsideEnd')
+
+# --------------------------------------------------------------------------
+# Chart 3: title.overlay on pie (title floats over plot area)
+#
+# officecli add charts-pie.xlsx "/3-Pie Advanced" --type chart \
+#   --prop chartType=pie \
+#   --prop title="Overlaid Title" \
+#   --prop title.overlay=true \
+#   --prop series1="Mix:50,30,20" \
+#   --prop categories=Online,Retail,Partner \
+#   --prop colors=4472C4,70AD47,FFC000 \
+#   --prop x=0 --prop y=19 --prop width=12 --prop height=18 \
+#   --prop varyColors=false \
+#   --prop dataLabels=percent --prop labelPos=center
+#
+# Features: title.overlay=true (title overlays the plot area, maximizing
+#   chart area — contrast with default where title reserves space above)
+# --------------------------------------------------------------------------
+cli(f'add "{FILE}" "/3-Pie Advanced" --type chart'
+    f' --prop chartType=pie'
+    f' --prop title="Overlaid Title"'
+    f' --prop title.overlay=true'
+    f' --prop series1=Mix:50,30,20'
+    f' --prop categories=Online,Retail,Partner'
+    f' --prop colors=4472C4,70AD47,FFC000'
+    f' --prop x=0 --prop y=19 --prop width=12 --prop height=18'
+    f' --prop varyColors=false'
+    f' --prop dataLabels=percent --prop labelPos=center')
+
+# --------------------------------------------------------------------------
+# Chart 4: Doughnut — holeSize + firstSliceAngle + title.overlay combined
+#
+# officecli add charts-pie.xlsx "/3-Pie Advanced" --type chart \
+#   --prop chartType=doughnut \
+#   --prop title="Doughnut — Combined" \
+#   --prop title.overlay=true \
+#   --prop series1="Split:45,35,20" \
+#   --prop categories=A,B,C \
+#   --prop colors=C00000,FFC000,548235 \
+#   --prop x=13 --prop y=19 --prop width=12 --prop height=18 \
+#   --prop holeSize=50 \
+#   --prop varyColors=false \
+#   --prop dataLabels=true --prop labelPos=center \
+#   --prop labelFont=12:FFFFFF:true
+#
+# Features: three doughnut-specific props together —
+#   holeSize, varyColors, title.overlay
+# --------------------------------------------------------------------------
+cli(f'add "{FILE}" "/3-Pie Advanced" --type chart'
+    f' --prop chartType=doughnut'
+    f' --prop title="Doughnut — Combined"'
+    f' --prop title.overlay=true'
+    f' --prop series1=Split:45,35,20'
+    f' --prop categories=A,B,C'
+    f' --prop colors=C00000,FFC000,548235'
+    f' --prop x=13 --prop y=19 --prop width=12 --prop height=18'
+    f' --prop holeSize=50'
+    f' --prop varyColors=false'
+    f' --prop dataLabels=true --prop labelPos=center'
+    f' --prop labelFont=12:FFFFFF:true')
+
 # Remove blank default Sheet1 (all data is inline)
 cli(f'remove "{FILE}" /Sheet1')
 
 print(f"\nDone! Generated: {FILE}")
-print("  3 sheets (2 chart sheets, 8 charts total)")
+print("  4 sheets (3 chart sheets, 12 charts total)")

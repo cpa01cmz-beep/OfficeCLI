@@ -3,7 +3,7 @@
 Three files work together:
 
 - **textboxes-advanced.sh** — Shell script that builds the deck.
-- **textboxes-advanced.pptx** — The generated 5-slide deck.
+- **textboxes-advanced.pptx** — The generated 6-slide deck.
 - **textboxes-advanced.md** — This file.
 
 Fills in the **child-element** properties (paragraph + run) that
@@ -159,9 +159,54 @@ Slide 5 also covers per-run `cap` directly on Add:
 --prop allCaps=false    # → cap=none
 ```
 
+### Slide 6 — `name` / `zorder` / `autoFit` / `direction` / `font.cs`
+
+**`name=`** — stable label for re-addressing the textbox by `@name`:
+
+```bash
+officecli add file.pptx /slide[6] --type textbox \
+  --prop text="Introduction" \
+  --prop name="intro-box"
+# Later: officecli set file.pptx /slide[6]/shape[@name=intro-box] ...
+```
+
+**`zorder=`** — explicit stack position (1 = back, higher = front).
+Aliases: `z-order`, `order`. Three overlapping textboxes with explicit
+zorder values show the layering:
+
+```bash
+--prop zorder=1    # sent to back
+--prop zorder=3    # brought to front
+```
+
+**`autoFit=`** — text overflow behavior for textboxes (same as shapes):
+
+| Value | Effect |
+|---|---|
+| `none` | text overflows the box |
+| `normal` | text shrinks to fit |
+| `shape` | box grows to fit text |
+
+**`direction=rtl`** — paragraph flows right-to-left. Combined with
+`font.cs=` to set the complex-script font face:
+
+```bash
+--prop direction=rtl --prop align=right \
+--prop font.cs="Arabic Typesetting"
+```
+
+**`font.cs=`** — complex-script font slot (DrawingML `a:cs`). PowerPoint
+picks it automatically for Arabic/Hebrew/Thai/Indic code points.
+
+> Note: `id` on textbox is read-only. `autoFit`, `direction`, and
+> `font.cs` are already demonstrated in `shapes-effects.sh` and
+> `shapes-typography.sh` but are repeated here in explicit textbox
+> context for completeness.
+
 **Features covered:** per-paragraph `align`/`lineSpacing` overrides
 inside one shape, `indent` (positive & negative for hanging-indent),
 `marginLeft`, `marginRight`, per-paragraph `bold`/`italic`/`color`/`size`/`lang`,
 per-run `font`, per-run `spacing` (points), per-run `kern`, per-run `lang`,
 per-run `cap` (with `allCaps` / `smallCaps` aliases),
-`subscript`/`superscript` aliases, custom `baseline=` percent.
+`subscript`/`superscript` aliases, custom `baseline=` percent,
+textbox-level `name`, `zorder`, `autoFit`, `direction`, `font.cs`.

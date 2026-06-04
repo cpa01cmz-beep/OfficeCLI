@@ -154,9 +154,10 @@ def main():
             "--prop", "x=8.5in", "--prop", "y=1.3in",
             "--prop", "width=3.5in", "--prop", "height=2.6in",
             "--prop", "alt=pseudo-photo gradient",
-            "--prop", "name=hero-photo")
+            "--prop", "name=hero-photo",
+            "--prop", "compressionState=print")
         run("add", PPTX, "/slide[1]", "--type", "textbox",
-            "--prop", 'text=src=<file path> + name="hero-photo"',
+            "--prop", 'text=src=<file> + name="hero-photo" + compressionState=print',
             "--prop", "size=12", "--prop", "italic=true",
             "--prop", "x=8.5in", "--prop", "y=4in",
             "--prop", "width=3.5in", "--prop", "height=0.4in")

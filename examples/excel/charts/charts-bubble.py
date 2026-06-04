@@ -370,8 +370,76 @@ cli(f'add "{FILE}" "/3-Bubble Advanced" --type chart'
     f' --prop trendline=linear'
     f' --prop legend=bottom')
 
+# ==========================================================================
+# Sheet: 4-Bubble Series Data
+# ==========================================================================
+print("\n--- 4-Bubble Series Data ---")
+cli(f'add "{FILE}" / --type sheet --prop name="4-Bubble Series Data"')
+
+# --------------------------------------------------------------------------
+# Chart 1: shownegbubbles — render bubbles for negative size values
+#
+# officecli add charts-bubble.xlsx "/4-Bubble Series Data" --type chart \
+#   --prop chartType=bubble \
+#   --prop title="shownegbubbles — negative sizes visible" \
+#   --prop series1="Data:60,30,90" \
+#   --prop series2="Neg:40,50,70" \
+#   --prop colors=4472C4,C00000 \
+#   --prop x=0 --prop y=0 --prop width=12 --prop height=18 \
+#   --prop shownegbubbles=true \
+#   --prop bubbleScale=80 \
+#   --prop legend=bottom
+#
+# Features: shownegbubbles=true (render bubbles whose size value is negative
+#   by reflecting them — Excel hides them by default when false)
+# --------------------------------------------------------------------------
+cli(f'add "{FILE}" "/4-Bubble Series Data" --type chart'
+    f' --prop chartType=bubble'
+    f' --prop title="shownegbubbles — negative sizes visible"'
+    f' --prop series1=Data:60,30,90'
+    f' --prop series2=Neg:40,50,70'
+    f' --prop colors=4472C4,C00000'
+    f' --prop x=0 --prop y=0 --prop width=12 --prop height=18'
+    f' --prop shownegbubbles=true'
+    f' --prop bubbleScale=80'
+    f' --prop legend=bottom')
+
+# --------------------------------------------------------------------------
+# Chart 2: series1.bubbleSize (range ref) — sizes from worksheet cells
+#
+# Populate some size data first, then reference it.
+# This demonstrates the bubbleSize + bubbleSizeRef round-trip.
+#
+# officecli set charts-bubble.xlsx "/4-Bubble Series Data/A1" --prop value=10
+# officecli set charts-bubble.xlsx "/4-Bubble Series Data/A2" --prop value=25
+# officecli set charts-bubble.xlsx "/4-Bubble Series Data/A3" --prop value=40
+# officecli add charts-bubble.xlsx "/4-Bubble Series Data" --type chart \
+#   --prop chartType=bubble \
+#   --prop title="series1.bubbleSize — range ref" \
+#   --prop series1="Sizes:80,45,60" \
+#   --prop 'series1.bubbleSize=4-Bubble Series Data!$A$1:$A$3' \
+#   --prop colors=70AD47 \
+#   --prop x=13 --prop y=0 --prop width=12 --prop height=18 \
+#   --prop bubbleScale=100 --prop legend=bottom
+#
+# Features: series1.bubbleSize=<range> (link bubble sizes to worksheet cells
+#   so Excel can re-compute when source data changes; bubbleSizeRef is emitted
+#   on Get alongside the cached literal bubbleSize values)
+# --------------------------------------------------------------------------
+cli(f'add "{FILE}" "/4-Bubble Series Data" --type cell --prop ref=A1 --prop value=10')
+cli(f'add "{FILE}" "/4-Bubble Series Data" --type cell --prop ref=A2 --prop value=25')
+cli(f'add "{FILE}" "/4-Bubble Series Data" --type cell --prop ref=A3 --prop value=40')
+cli(f'add "{FILE}" "/4-Bubble Series Data" --type chart'
+    f' --prop chartType=bubble'
+    f' --prop title="series1.bubbleSize — range ref"'
+    f' --prop series1=Sizes:80,45,60'
+    f" --prop 'series1.bubbleSize=4-Bubble Series Data!$A$1:$A$3'"
+    f' --prop colors=70AD47'
+    f' --prop x=13 --prop y=0 --prop width=12 --prop height=18'
+    f' --prop bubbleScale=100 --prop legend=bottom')
+
 # Remove blank default Sheet1 (all data is inline)
 cli(f'remove "{FILE}" /Sheet1')
 
 print(f"\nDone! Generated: {FILE}")
-print("  4 sheets (3 chart sheets, 12 charts total)")
+print("  5 sheets (4 chart sheets, 14 charts total)")

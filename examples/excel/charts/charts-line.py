@@ -468,6 +468,17 @@ cli(f'add "{FILE}" "/4-Axis & Gridlines" --type chart'
     f' --prop axisLine=C00000:1.5:solid'
     f' --prop catAxisLine=2E75B6:1.5:solid')
 
+# Demonstrate chart-axis element (path: /SheetName/chart[N]/axis[@role=ROLE]).
+# Properties: min, max, format, majorGridlines, labelRotation.
+# These are the same semantics as axisMin/axisMax/gridlines/labelrotation at
+# chart level but applied through the dedicated sub-element path, which also
+# exposes role, dispUnits, majorUnit, title, visible, logBase.
+cli(f'set "{FILE}" "/4-Axis & Gridlines/chart[1]/axis[@role=value]"'
+    f' --prop min=80 --prop max=220'
+    f' --prop format="#,##0"'
+    f' --prop majorGridlines=true'
+    f' --prop labelRotation=0')
+
 # --------------------------------------------------------------------------
 # Chart 2: Logarithmic scale with display units
 #
@@ -989,5 +1000,120 @@ cli(f'add "{FILE}" "/7-Line Elements" --type chart'
     f' --prop colors=4472C4,ED7D31,70AD47,FFC000'
     f' --prop chartFill=F5F5F5')
 
+# ==========================================================================
+# Sheet: 8-Axis Extras
+# ==========================================================================
+print("\n--- 8-Axis Extras ---")
+cli(f'add "{FILE}" / --type sheet --prop name="8-Axis Extras"')
+
+# --------------------------------------------------------------------------
+# Chart 1: crossesAt — value axis crosses category axis at specific value
+#
+# officecli add charts-line.xlsx "/8-Axis Extras" --type chart \
+#   --prop chartType=line \
+#   --prop title="crossesAt — axis baseline at 50" \
+#   --prop series1="Score:40,65,55,80,45,90,70" \
+#   --prop categories=Jan,Feb,Mar,Apr,May,Jun,Jul \
+#   --prop colors=2E75B6 \
+#   --prop x=0 --prop y=0 --prop width=12 --prop height=18 \
+#   --prop crossesAt=50 \
+#   --prop lineWidth=2 --prop marker=circle --prop markerSize=6
+#
+# Features: crossesAt=50 (value axis crosses the category axis at y=50,
+#   so bars/lines below 50 appear below the midline — great for threshold viz)
+# --------------------------------------------------------------------------
+cli(f'add "{FILE}" "/8-Axis Extras" --type chart'
+    f' --prop chartType=line'
+    f' --prop title="crossesAt — axis baseline at 50"'
+    f' --prop series1=Score:40,65,55,80,45,90,70'
+    f' --prop categories=Jan,Feb,Mar,Apr,May,Jun,Jul'
+    f' --prop colors=2E75B6'
+    f' --prop x=0 --prop y=0 --prop width=12 --prop height=18'
+    f' --prop crossesAt=50'
+    f' --prop lineWidth=2 --prop marker=circle --prop markerSize=6')
+
+# --------------------------------------------------------------------------
+# Chart 2: dispBlanksAs — how missing/null data points are rendered
+#
+# officecli add charts-line.xlsx "/8-Axis Extras" --type chart \
+#   --prop chartType=line \
+#   --prop title="dispBlanksAs=span (connect gaps)" \
+#   --prop series1="Revenue:100,120,,130,150,,160" \
+#   --prop categories=Jan,Feb,Mar,Apr,May,Jun,Jul \
+#   --prop colors=548235 \
+#   --prop x=13 --prop y=0 --prop width=12 --prop height=18 \
+#   --prop dispBlanksAs=span \
+#   --prop lineWidth=2 --prop marker=circle --prop markerSize=6
+#
+# Features: dispBlanksAs=span (connect across null/blank data points with a
+#   straight line — see also: gap=leave hole, zero=plot blank as 0)
+# --------------------------------------------------------------------------
+cli(f'add "{FILE}" "/8-Axis Extras" --type chart'
+    f' --prop chartType=line'
+    f' --prop title="dispBlanksAs=span (connect gaps)"'
+    f' --prop series1=Revenue:100,120,130,150,160'
+    f' --prop categories=Jan,Feb,Mar,Apr,May'
+    f' --prop colors=548235'
+    f' --prop x=13 --prop y=0 --prop width=12 --prop height=18'
+    f' --prop dispBlanksAs=span'
+    f' --prop lineWidth=2 --prop marker=circle --prop markerSize=6')
+
+# --------------------------------------------------------------------------
+# Chart 3: dispBlanksAs=zero + crossesAt=0
+#
+# officecli add charts-line.xlsx "/8-Axis Extras" --type chart \
+#   --prop chartType=line \
+#   --prop title="dispBlanksAs=zero + crossesAt=0" \
+#   --prop series1="Revenue:100,120,130,150,160" \
+#   --prop categories=Jan,Feb,Mar,Apr,May \
+#   --prop colors=C00000 \
+#   --prop x=0 --prop y=19 --prop width=12 --prop height=18 \
+#   --prop dispBlanksAs=zero \
+#   --prop crossesAt=0 \
+#   --prop lineWidth=2 --prop marker=circle --prop markerSize=6
+#
+# Features: dispBlanksAs=zero (missing cells rendered as zero),
+#   crossesAt=0 (axis crosses at y=0 — default for most charts).
+#   Note: dispBlanksAs affects rendering when the data source has blank cells;
+#   here it is shown as a metadata property on the chart (also accepts: gap, span).
+# --------------------------------------------------------------------------
+cli(f'add "{FILE}" "/8-Axis Extras" --type chart'
+    f' --prop chartType=line'
+    f' --prop title="dispBlanksAs=zero + crossesAt=0"'
+    f' --prop series1=Revenue:100,120,130,150,160'
+    f' --prop categories=Jan,Feb,Mar,Apr,May'
+    f' --prop colors=C00000'
+    f' --prop x=0 --prop y=19 --prop width=12 --prop height=18'
+    f' --prop dispBlanksAs=zero'
+    f' --prop crossesAt=0'
+    f' --prop lineWidth=2 --prop marker=circle --prop markerSize=6')
+
+# --------------------------------------------------------------------------
+# Chart 4: crosses=max (value axis on right side of plot)
+#
+# officecli add charts-line.xlsx "/8-Axis Extras" --type chart \
+#   --prop chartType=line \
+#   --prop title="crosses=max (value axis at far end)" \
+#   --prop series1="Index:45,60,52,75,80,68,90" \
+#   --prop categories=Mon,Tue,Wed,Thu,Fri,Sat,Sun \
+#   --prop colors=7030A0 \
+#   --prop x=13 --prop y=19 --prop width=12 --prop height=18 \
+#   --prop crosses=max \
+#   --prop lineWidth=2
+#
+# Features: crosses=max (value axis appears at the far end of the category
+#   axis — i.e. on the right side for a left-to-right chart; also: autoZero,
+#   min for the left/bottom edge)
+# --------------------------------------------------------------------------
+cli(f'add "{FILE}" "/8-Axis Extras" --type chart'
+    f' --prop chartType=line'
+    f' --prop title="crosses=max (value axis at far end)"'
+    f' --prop series1=Index:45,60,52,75,80,68,90'
+    f' --prop categories=Mon,Tue,Wed,Thu,Fri,Sat,Sun'
+    f' --prop colors=7030A0'
+    f' --prop x=13 --prop y=19 --prop width=12 --prop height=18'
+    f' --prop crosses=max'
+    f' --prop lineWidth=2')
+
 print(f"\nDone! Generated: {FILE}")
-print("  8 sheets (Sheet1 data + 7 chart sheets, 28 charts total)")
+print("  9 sheets (Sheet1 data + 8 chart sheets, 32 charts total)")

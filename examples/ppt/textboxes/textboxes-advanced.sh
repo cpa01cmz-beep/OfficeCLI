@@ -254,6 +254,76 @@ officecli add "$PPTX" '/slide[5]' --type textbox \
     --prop size=12 --prop italic=true --prop color=666666 \
     --prop x=0.5in --prop y=6.8in --prop width=13in --prop height=0.5in
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Slide 6 — name / zorder / autoFit / direction / font.cs (textbox-specific)
+# ─────────────────────────────────────────────────────────────────────────────
+officecli add "$PPTX" / --type slide
+officecli add "$PPTX" '/slide[6]' --type textbox \
+    --prop text="name / zorder / autoFit / direction / font.cs" \
+    --prop size=28 --prop bold=true \
+    --prop x=0.5in --prop y=0.3in --prop width=13in --prop height=0.6in
+
+# name= — label the textbox so it can be re-addressed by @name later
+officecli add "$PPTX" '/slide[6]' --type textbox \
+    --prop x=0.5in --prop y=1.2in --prop width=5in --prop height=1.5in \
+    --prop fill=F1FAEE --prop size=16 --prop bold=true \
+    --prop text="This is intro-box." \
+    --prop name="intro-box"
+
+officecli add "$PPTX" '/slide[6]' --type textbox \
+    --prop text='name="intro-box"  → addressable as /slide[6]/shape[@name=intro-box]' \
+    --prop size=12 --prop italic=true --prop color=666666 \
+    --prop x=0.5in --prop y=2.8in --prop width=5in --prop height=0.5in
+
+# zorder= — three overlapping textboxes with explicit stack order
+officecli add "$PPTX" '/slide[6]' --type textbox \
+    --prop x=6in --prop y=1.2in --prop width=3in --prop height=2in \
+    --prop fill=4472C4 --prop color=FFFFFF --prop bold=true --prop size=16 \
+    --prop text="back (zorder=1)" \
+    --prop name="tb-back" --prop zorder=1
+
+officecli add "$PPTX" '/slide[6]' --type textbox \
+    --prop x=7in --prop y=1.6in --prop width=3in --prop height=2in \
+    --prop fill=E63946 --prop color=FFFFFF --prop bold=true --prop size=16 \
+    --prop text="mid (zorder=2)" \
+    --prop name="tb-mid" --prop zorder=2
+
+officecli add "$PPTX" '/slide[6]' --type textbox \
+    --prop x=8in --prop y=2.0in --prop width=3in --prop height=2in \
+    --prop fill=2A9D8F --prop color=FFFFFF --prop bold=true --prop size=16 \
+    --prop text="front (zorder=3)" \
+    --prop name="tb-front" --prop zorder=3
+
+officecli add "$PPTX" '/slide[6]' --type textbox \
+    --prop text='zorder=  controls stack depth; aliases: z-order, order.' \
+    --prop size=12 --prop italic=true --prop color=666666 \
+    --prop x=6in --prop y=4.2in --prop width=5in --prop height=0.5in
+
+# autoFit= — overflow behavior for textbox (same as shape)
+LONGTEXT='Vivamus lacinia odio vitae vestibulum vestibulum. Sed molestie augue sit amet leo consequat posuere.'
+officecli add "$PPTX" '/slide[6]' --type textbox \
+    --prop x=0.5in --prop y=3.6in --prop width=3in --prop height=1.2in \
+    --prop fill=FFE66D --prop size=16 --prop text="$LONGTEXT" \
+    --prop autoFit=normal
+
+officecli add "$PPTX" '/slide[6]' --type textbox \
+    --prop text='autoFit=normal  (shrinks text to fit)' \
+    --prop size=12 --prop italic=true --prop color=666666 \
+    --prop x=0.5in --prop y=4.9in --prop width=3in --prop height=0.5in
+
+# direction=rtl — paragraph flows right-to-left inside a textbox
+officecli add "$PPTX" '/slide[6]' --type textbox \
+    --prop x=0.5in --prop y=5.6in --prop width=5in --prop height=1.2in \
+    --prop fill=A8DADC --prop size=20 --prop bold=true \
+    --prop text="مرحبا بالعالم — 2026" \
+    --prop direction=rtl --prop align=right \
+    --prop font.cs="Arabic Typesetting"
+
+officecli add "$PPTX" '/slide[6]' --type textbox \
+    --prop text='direction=rtl + font.cs="Arabic Typesetting"  (complex-script slot)' \
+    --prop size=12 --prop italic=true --prop color=666666 \
+    --prop x=0.5in --prop y=6.9in --prop width=5in --prop height=0.5in
+
 officecli close "$PPTX"
 officecli validate "$PPTX"
 echo "Created: $PPTX"

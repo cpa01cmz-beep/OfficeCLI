@@ -204,6 +204,18 @@ $CLI add "$OUT" /body --type equation --prop 'formula=A \subseteq B \iff \forall
 $CLI add "$OUT" /body --type paragraph --prop text="55. Norm and Inner Product:"
 $CLI add "$OUT" /body --type equation --prop 'formula=\|x\|_{2} = \sqrt{\langle x, x \rangle} = \sqrt{\sum_{i=1}^{n} x_{i}^{2}}'
 
+# ==================== IX. Equation Mode (display vs inline) ====================
+$CLI add "$OUT" /body --type paragraph --prop text="IX. Equation Mode — display vs inline" --prop style=Heading2
+
+# mode=display (default): equation gets its own block-level oMathPara element
+$CLI add "$OUT" /body --type paragraph --prop text="56. Display mode (default) — centred block equation:"
+$CLI add "$OUT" /body --type equation --prop 'formula=E = mc^{2}' --prop mode=display
+
+# mode=inline: equation is appended to the parent paragraph as an oMath child
+$CLI add "$OUT" /body --type paragraph --prop text="57. Inline mode — equation embedded mid-sentence:"
+$CLI add "$OUT" /body --type equation --prop 'formula=A = \pi r^{2}' --prop mode=inline
+
 $CLI close "$OUT"
 
+$CLI validate "$OUT"
 echo "Generated: $OUT"

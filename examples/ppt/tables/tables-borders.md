@@ -37,7 +37,7 @@ Six small tables demonstrating:
 - `border.all="1pt solid 808080"` — grey grid on every edge
 - `border.all="2pt solid FF0000"` — thick red on every edge
 - `border.all=none` — clear borders (table is invisible)
-- `border.top` / `border.bottom` / `border.left` — outer edges only
+- `border.top` / `border.bottom` / `border.left` / `border.right` — outer edges individually
 
 ### Slide 2 — Inside dividers & dash patterns
 
@@ -71,6 +71,6 @@ officecli set file.pptx /slide[3]/table[2]/tr[1]/tc[1] \
 
 Diagonal borders are **add/set only** — `get` does not surface them today.
 
-**Features:** `border.all`, `border.top/right/bottom/left`,
+**Features:** `border.all`, `border.top`/`border.right`/`border.bottom`/`border.left`,
 `border.horizontal`/`border.vertical`, `border.tl2br`/`border.tr2bl`,
 dash patterns.

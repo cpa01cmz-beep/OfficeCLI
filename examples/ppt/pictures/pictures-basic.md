@@ -34,7 +34,20 @@ python3 pictures/pictures-basic.py
 
 The slide shows file path → data-URI → file-with-name. The `name=`
 prop overrides the auto-generated `Picture {id}` label on `cNvPr@name`,
-useful if you want to look it up by `@name=` later.
+useful if you want to look it up by `@name=` later. The third picture
+also demonstrates `compressionState=print`:
+
+```bash
+officecli add file.pptx /slide[1] --type picture \
+  --prop src=/path/to/photo.png \
+  --prop name=hero-photo \
+  --prop compressionState=print
+```
+
+`compressionState=` sets the blip's `cstate` attribute — PowerPoint's
+"Compress Pictures → target use" setting. Accepted values:
+`email`, `print`, `hqprint`, `screen`, `none` (none = schema default,
+suppressed on readback).
 
 ```bash
 officecli add file.pptx /slide[1] --type picture \
@@ -141,8 +154,9 @@ name (slide 2 only reached them via the four-value `crop=L,T,R,B`
 shorthand).
 
 **Features:** three `src=` forms (file path / URL / data-URI),
-`alt=`/`name=` for accessibility and lookup, every `crop=` form
-(symmetric, `V,H`, `L,T,R,B`, per-edge `cropLeft`/`cropTop`/`cropRight`/`cropBottom`),
+`alt=`/`name=` for accessibility and lookup, `compressionState=` (blip
+compression target), every `crop=` form (symmetric, `V,H`, `L,T,R,B`,
+per-edge `cropLeft`/`cropTop`/`cropRight`/`cropBottom`),
 `rotation=` with positive and negative degrees, `link=` to URLs /
 slides / named actions, `tooltip=` hover text, Set-only effects
 `brightness`/`contrast`/`glow`/`shadow`.

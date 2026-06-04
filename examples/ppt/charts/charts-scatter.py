@@ -57,17 +57,18 @@ ch(BL,{"chartType":"scatter","scatterstyle":"marker","title":"scatterstyle=marke
 ch(BR,{"chartType":"scatter","scatterstyle":"smoothMarker","title":"scatterstyle=smoothMarker",
        "legend":"none","data":D})
 
-new_slide("Markers — symbol / size / color")
+new_slide("Markers — symbol / size / color / markercolor")
 ch(TL,{"chartType":"scatter","scatterstyle":"marker","title":"circle:10:FF0000",
        "marker":"circle:10:FF0000","legend":"none","data":D})
 ch(TR,{"chartType":"scatter","scatterstyle":"marker","title":"diamond:12:0070C0",
        "marker":"diamond:12:0070C0","legend":"none","data":D})
 ch(BL,{"chartType":"scatter","scatterstyle":"marker","title":"square:8:70AD47",
        "marker":"square:8:70AD47","legend":"none","data":D})
-ch(BR,{"chartType":"scatter","scatterstyle":"marker","title":"triangle:10",
-       "marker":"triangle:10","legend":"none","data":D})
+# markercolor — per-series marker fill color (independent of marker= compound form)
+ch(BR,{"chartType":"scatter","scatterstyle":"marker","title":"markercolor=E63946",
+       "marker":"circle:10","markercolor":"E63946","legend":"none","data":D})
 
-new_slide("Title & legend")
+new_slide("Title & legend — title.overlay / legend.overlay")
 ch(TL,{"chartType":"scatter","scatterstyle":"smoothMarker","title":"Styled title",
        "title.font":"Georgia","title.size":"20","title.color":"4472C4","title.bold":"true",
        "legend":"bottom","data":D2})
@@ -75,7 +76,9 @@ ch(TR,{"chartType":"scatter","scatterstyle":"lineMarker","title":"legend=top + l
        "legend":"top","legendFont":"10:333333:Calibri","data":D2})
 ch(BL,{"chartType":"scatter","scatterstyle":"lineMarker","title":"legend.overlay=true",
        "legend":"topRight","legend.overlay":"true","data":D2})
-ch(BR,{"chartType":"scatter","scatterstyle":"marker","autotitledeleted":"true","legend":"none","data":D2})
+# title.overlay — title rendered over the plot area (saves vertical space)
+ch(BR,{"chartType":"scatter","scatterstyle":"marker","title":"title.overlay=true",
+       "title.overlay":"true","legend":"none","data":D2})
 
 new_slide("Data labels — flags + labelfont")
 ch(TL,{"chartType":"scatter","scatterstyle":"marker","title":"value","dataLabels":"value",
@@ -132,5 +135,26 @@ cli("set",FILE,f"/slide[{slide}]/chart[4]/series[1]",
 cli("set",FILE,f"/slide[{slide}]/chart[4]/series[2]",
     *P({"name":"Beta","color":"2E75B6","lineWidth":"1.5","lineDash":"dash",
         "marker":"diamond","markerSize":"8"}))
+
+new_slide("series{N}= — named series shorthand (name:v1,v2,…)")
+# series{N}= is an alternative to data= that names each series at Add time.
+# series1=Name:v1,v2,…  series2=Name:v1,v2,…  (no shared categories needed for scatter)
+ch(TL,{"chartType":"scatter","scatterstyle":"lineMarker",
+       "title":"series1= + series2=",
+       "series1":"Alpha:10,25,18,40","series2":"Beta:5,15,12,30",
+       "legend":"bottom"})
+ch(TR,{"chartType":"scatter","scatterstyle":"marker",
+       "title":"three named series",
+       "series1":"Group A:8,20,15","series2":"Group B:4,12,10","series3":"Group C:12,28,22",
+       "legend":"bottom"})
+ch(BL,{"chartType":"scatter","scatterstyle":"smoothMarker",
+       "title":"series1 with colors",
+       "series1":"Rev:30,45,55,70","series2":"Cost:20,30,35,42",
+       "colors":"4472C4,E63946","legend":"bottom"})
+ch(BR,{"chartType":"scatter","scatterstyle":"marker",
+       "title":"series1.* per-series naming + colors=",
+       "series1.name":"Alpha","series1.values":"10,25,18,40",
+       "series2.name":"Beta","series2.values":"5,15,12,30",
+       "colors":"4472C4,E63946","legend":"bottom"})
 
 print(f"Done: {FILE}  ({slide} slides)")

@@ -274,6 +274,50 @@ officecli add "$DOCX" /body --type paragraph \
     --prop "numId=$NUMID_DEEP" --prop ilvl=3
 
 # ============================================================
+# Section 8: Missing property coverage
+#   • abstractNum: styleLink, numStyleLink, level<N>.start
+#   • level Set: direction (rtl), isLgl, lvlRestart
+# ============================================================
+officecli add "$DOCX" /body --type paragraph --prop "text="
+officecli add "$DOCX" /body --type paragraph \
+    --prop "text=8. styleLink, numStyleLink, level<N>.start, direction, isLgl, lvlRestart" \
+    --prop bold=true --prop size=14 --prop spaceBefore=240 --prop spaceAfter=120
+
+# abstractNum with styleLink + numStyleLink + level2.start (all 3 Add-only keys missing before)
+officecli add "$DOCX" /numbering --type abstractNum \
+    --prop id=400 \
+    --prop "name=CoverageAbs" \
+    --prop type=multilevel \
+    --prop "styleLink=CoverageStyle" \
+    --prop "numStyleLink=OutlineRef" \
+    --prop "level0.format=decimal" --prop "level0.text=%1." \
+    --prop "level0.start=1" \
+    --prop "level1.format=lowerLetter" --prop "level1.text=%2)" \
+    --prop "level1.start=3" \
+    --prop "level2.format=lowerRoman" --prop "level2.text=%3." \
+    --prop "level2.start=5"
+
+# Set direction=rtl, isLgl=true, lvlRestart=0 on individual levels via Set
+officecli set "$DOCX" '/numbering/abstractNum[@id=400]/level[1]' \
+    --prop direction=rtl
+officecli set "$DOCX" '/numbering/abstractNum[@id=400]/level[2]' \
+    --prop isLgl=true --prop lvlRestart=0
+
+NUMID_COV=$(officecli add "$DOCX" /numbering --type num --prop abstractNumId=400 \
+    | sed -n 's|.*@id=\([0-9]*\)\].*|\1|p')
+echo "  Created num #$NUMID_COV → abstractNum #400 (coverage)"
+
+officecli add "$DOCX" /body --type paragraph \
+    --prop "text=Item starting at 1 (level0.start=1)" \
+    --prop "numId=$NUMID_COV" --prop ilvl=0
+officecli add "$DOCX" /body --type paragraph \
+    --prop "text=Sub-item starting at c (level1.start=3, direction=rtl)" \
+    --prop "numId=$NUMID_COV" --prop ilvl=1
+officecli add "$DOCX" /body --type paragraph \
+    --prop "text=Deep item starting at v (level2.start=5, isLgl, lvlRestart=0)" \
+    --prop "numId=$NUMID_COV" --prop ilvl=2
+
+# ============================================================
 # Closer
 # ============================================================
 officecli add "$DOCX" /body --type paragraph --prop "text="
@@ -282,6 +326,7 @@ officecli add "$DOCX" /body --type paragraph \
     --prop italic=true --prop color=666666 --prop align=center
 
 officecli close "$DOCX"
+officecli validate "$DOCX"
 echo ""
 echo "Done. Output: $DOCX"
 echo ""
@@ -292,3 +337,4 @@ echo "  abstractNum #100 (ShowcaseMultilevel) — used by num #$NUMID_A, #$NUMID
 echo "  abstractNum #200 (StarBullet)         — used by num #$NUMID_BULLET"
 echo "  abstractNum #300 (StyleBorne)         — used by num #$NUMID_STYLE (via ShowcaseListItem style)"
 echo "  abstractNum #auto                     — used by num #$NUMID_AUTO (mode A)"
+echo "  abstractNum #400 (CoverageAbs)        — styleLink, numStyleLink, level.start, direction, isLgl, lvlRestart"

@@ -169,6 +169,104 @@ fill_skill_row 4 Mike   Familiar:FFC000 Familiar:FFC000 Expert:00B050 Familiar:F
 fill_skill_row 5 Emily  Expert:00B050 Beginner:FF0000 Familiar:FFC000 Expert:00B050 Proficient:92D050 Familiar:FFC000
 fill_skill_row 6 David  Proficient:92D050 Proficient:92D050 Proficient:92D050 Expert:00B050 Expert:00B050 Expert:00B050
 
+# -- Table 4: Property Coverage Table (missing table/row/cell props) --
+echo "  -> Table 4: Property coverage — border/layout/direction/cell-formatting"
+officecli add "$DOCX" /body --type paragraph --prop text=""
+officecli add "$DOCX" /body --type paragraph --prop text="4. Property Coverage (border / layout / direction / cell formatting)" --prop style=Heading2
+
+# Table with border.all + cellSpacing + colWidths + direction + indent + layout + padding
+officecli add "$DOCX" /body --type table \
+    --prop rows=3 --prop cols=4 \
+    --prop "border.all=single;8;2E74B5" \
+    --prop "colWidths=2500,2500,2500,2500" \
+    --prop "cellSpacing=20" \
+    --prop "indent=200" \
+    --prop "layout=fixed" \
+    --prop "padding=80"
+
+# Override outer-edge borders after creation
+officecli set "$DOCX" '/body/tbl[4]' --prop "border.top=double;8;1F3864"
+officecli set "$DOCX" '/body/tbl[4]' --prop "border.bottom=double;8;1F3864"
+officecli set "$DOCX" '/body/tbl[4]' --prop "border.left=double;8;1F3864"
+officecli set "$DOCX" '/body/tbl[4]' --prop "border.right=double;8;1F3864"
+officecli set "$DOCX" '/body/tbl[4]' --prop "border.horizontal=single;4;9DC3E6"
+officecli set "$DOCX" '/body/tbl[4]' --prop "border.vertical=single;4;9DC3E6"
+
+# Header row: header=true + height.exact
+officecli set "$DOCX" '/body/tbl[4]/tr[1]' --prop header=true --prop height.exact=400
+officecli set "$DOCX" '/body/tbl[4]/tr[1]/tc[1]' --prop text="Cell Borders" --prop bold=true --prop fill=2E74B5 --prop color=FFFFFF
+officecli set "$DOCX" '/body/tbl[4]/tr[1]/tc[2]' --prop text="Run Formatting" --prop bold=true --prop fill=2E74B5 --prop color=FFFFFF
+officecli set "$DOCX" '/body/tbl[4]/tr[1]/tc[3]' --prop text="Merge / Flow" --prop bold=true --prop fill=2E74B5 --prop color=FFFFFF
+officecli set "$DOCX" '/body/tbl[4]/tr[1]/tc[4]' --prop text="Padding / Grid" --prop bold=true --prop fill=2E74B5 --prop color=FFFFFF
+
+# Data row 2: cell borders (border.all, tl2br, tr2bl), direction, nowrap
+officecli set "$DOCX" '/body/tbl[4]/tr[2]/tc[1]' \
+    --prop text="border.all + tl2br + tr2bl" \
+    --prop "border.all=single;8;FF0000" \
+    --prop "border.tl2br=single;4;0000FF" \
+    --prop "border.tr2bl=single;4;0000FF"
+officecli set "$DOCX" '/body/tbl[4]/tr[2]/tc[2]' \
+    --prop text="font + italic + strike + underline + highlight" \
+    --prop "font=Times New Roman" \
+    --prop italic=true \
+    --prop strike=true \
+    --prop underline=single \
+    --prop highlight=yellow
+officecli set "$DOCX" '/body/tbl[4]/tr[2]/tc[3]' \
+    --prop text="direction=rtl + nowrap + textDirection=btlr" \
+    --prop direction=rtl \
+    --prop nowrap=true \
+    --prop textDirection=btlr
+officecli set "$DOCX" '/body/tbl[4]/tr[2]/tc[4]' \
+    --prop text="padding per side + skipGridSync" \
+    --prop padding.top=50 \
+    --prop padding.bottom=150 \
+    --prop padding.left=80 \
+    --prop padding.right=80
+
+# Data row 3: border.top/bottom/left/right per cell, fitText, skipGridSync
+officecli set "$DOCX" '/body/tbl[4]/tr[3]/tc[1]' \
+    --prop text="border.top + border.bottom" \
+    --prop "border.top=single;8;FF0000" \
+    --prop "border.bottom=single;8;0000FF"
+officecli set "$DOCX" '/body/tbl[4]/tr[3]/tc[2]' \
+    --prop text="border.left + border.right" \
+    --prop "border.left=single;8;00FF00" \
+    --prop "border.right=single;8;FF00FF"
+officecli set "$DOCX" '/body/tbl[4]/tr[3]/tc[3]' \
+    --prop text="fitText squeezes text to cell width" \
+    --prop fitText=true
+officecli set "$DOCX" '/body/tbl[4]/tr[3]/tc[4]' \
+    --prop text="width + skipGridSync" \
+    --prop width=2500 \
+    --prop skipGridSync=true
+
+# Demonstrate hmerge (horizontal merge) in a separate small 3-col table
+# hmerge=restart on tc[1] spans 2 cols and absorbs tc[2]; tc[3]→tc[2] after
+officecli add "$DOCX" /body --type table \
+    --prop rows=2 --prop cols=3 \
+    --prop "border.all=single;4;808080"
+# Set the non-merged cell before applying hmerge=restart (which removes tc[2])
+officecli set "$DOCX" '/body/tbl[5]/tr[1]/tc[3]' --prop text="normal tc"
+officecli set "$DOCX" '/body/tbl[5]/tr[1]/tc[1]' \
+    --prop text="hmerge restart (spans 2 cols)" \
+    --prop hmerge=restart
+# After hmerge=restart, original tc[3] is now tc[2]
+officecli set "$DOCX" '/body/tbl[5]/tr[2]/tc[1]' --prop text="row 2 col 1"
+officecli set "$DOCX" '/body/tbl[5]/tr[2]/tc[2]' --prop text="row 2 col 2"
+officecli set "$DOCX" '/body/tbl[5]/tr[2]/tc[3]' --prop text="row 2 col 3"
+
+# Also demonstrate table direction=rtl on a separate small table
+officecli add "$DOCX" /body --type table \
+    --prop rows=2 --prop cols=2 \
+    --prop "direction=rtl" \
+    --prop "border.all=single;8;C00000"
+officecli set "$DOCX" '/body/tbl[6]/tr[1]/tc[1]' --prop text="RTL table" --prop bold=true
+officecli set "$DOCX" '/body/tbl[6]/tr[1]/tc[2]' --prop text="column order mirrored"
+officecli set "$DOCX" '/body/tbl[6]/tr[2]/tc[1]' --prop text="row 2 col 1"
+officecli set "$DOCX" '/body/tbl[6]/tr[2]/tc[2]' --prop text="row 2 col 2"
+
+officecli validate "$DOCX"
 officecli close "$DOCX"
 echo "  Done: Word document: $DOCX"
 

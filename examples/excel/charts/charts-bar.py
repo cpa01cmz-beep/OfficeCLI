@@ -784,5 +784,124 @@ cli(f'add "{FILE}" "/6-Advanced" --type chart'
     f' --prop legend=none'
     f' --prop plotFill=FAFAFA')
 
+# ==========================================================================
+# Sheet: 7-Axis Controls
+# ==========================================================================
+print("\n--- 7-Axis Controls ---")
+cli(f'add "{FILE}" / --type sheet --prop name="7-Axis Controls"')
+
+# --------------------------------------------------------------------------
+# Chart 1: crosses, crossBetween, valAxisVisible
+#
+# officecli add charts-bar.xlsx "/7-Axis Controls" --type chart \
+#   --prop chartType=bar \
+#   --prop title="Axis Cross Controls" \
+#   --prop series1="Sales:120,80,-30,150" \
+#   --prop categories=Q1,Q2,Q3,Q4 \
+#   --prop x=0 --prop y=0 --prop width=12 --prop height=18 \
+#   --prop crosses=autoZero \
+#   --prop crossBetween=between \
+#   --prop valAxisVisible=true
+#
+# Features: crosses=autoZero (value axis crosses cat axis at zero, the default),
+#   crossBetween=between (bars centred between tick marks vs midCat at the mark),
+#   valAxisVisible=true/false (show or hide the value axis entirely)
+# --------------------------------------------------------------------------
+cli(f'add "{FILE}" "/7-Axis Controls" --type chart'
+    f' --prop chartType=bar'
+    f' --prop title="Axis Cross Controls"'
+    f' --prop series1=Sales:120,80,-30,150'
+    f' --prop categories=Q1,Q2,Q3,Q4'
+    f' --prop x=0 --prop y=0 --prop width=12 --prop height=18'
+    f' --prop crosses=autoZero'
+    f' --prop crossBetween=between'
+    f' --prop valAxisVisible=true')
+
+# --------------------------------------------------------------------------
+# Chart 2: labelrotation, labeloffset, ticklabelskip
+#
+# officecli add charts-bar.xlsx "/7-Axis Controls" --type chart \
+#   --prop chartType=column \
+#   --prop title="Tick-label Rotation, Offset & Skip" \
+#   --prop series1="Units:45,30,20,55,40,25,60" \
+#   --prop categories=January,February,March,April,May,June,July \
+#   --prop x=13 --prop y=0 --prop width=12 --prop height=18 \
+#   --prop labelrotation=45 \
+#   --prop labeloffset=100 \
+#   --prop ticklabelskip=2
+#
+# Features: labelrotation=45 (rotate category tick labels, -90..90 degrees),
+#   labeloffset=100 (category-axis label offset as % of default; 100=default),
+#   ticklabelskip=2 (draw tick labels every 2nd category — reduces crowding)
+# --------------------------------------------------------------------------
+cli(f'add "{FILE}" "/7-Axis Controls" --type chart'
+    f' --prop chartType=column'
+    f' --prop title="Tick-label Rotation, Offset & Skip"'
+    f' --prop series1=Units:45,30,20,55,40,25,60'
+    f' --prop categories=January,February,March,April,May,June,July'
+    f' --prop x=13 --prop y=0 --prop width=12 --prop height=18'
+    f' --prop labelrotation=45'
+    f' --prop labeloffset=100'
+    f' --prop ticklabelskip=2')
+
+# --------------------------------------------------------------------------
+# Chart 3: axisposition, serlines (stacked bar)
+#
+# officecli add charts-bar.xlsx "/7-Axis Controls" --type chart \
+#   --prop chartType=barStacked \
+#   --prop title="Stacked — axisposition + serlines" \
+#   --prop series1="Online:55,48,60,70" \
+#   --prop series2="Retail:30,40,35,25" \
+#   --prop categories=Q1,Q2,Q3,Q4 \
+#   --prop colors=4472C4,ED7D31 \
+#   --prop x=0 --prop y=19 --prop width=12 --prop height=18 \
+#   --prop axisposition=nextTo \
+#   --prop serlines=true
+#
+# Features: axisposition=nextTo (tick labels next to the axis — alias for
+#   tickLabelPos; also accepts: high, low),
+#   serlines=true (series connector lines on stacked bar charts)
+# --------------------------------------------------------------------------
+cli(f'add "{FILE}" "/7-Axis Controls" --type chart'
+    f' --prop chartType=barStacked'
+    f' --prop title="Stacked — axisposition + serlines"'
+    f' --prop series1=Online:55,48,60,70'
+    f' --prop series2=Retail:30,40,35,25'
+    f' --prop categories=Q1,Q2,Q3,Q4'
+    f' --prop colors=4472C4,ED7D31'
+    f' --prop x=0 --prop y=19 --prop width=12 --prop height=18'
+    f' --prop axisposition=nextTo'
+    f' --prop serlines=true')
+
+# --------------------------------------------------------------------------
+# Chart 4: markercolor on line/scatter (chart-level fanout)
+#
+# officecli add charts-bar.xlsx "/7-Axis Controls" --type chart \
+#   --prop chartType=line \
+#   --prop title="Line — markercolor" \
+#   --prop series1="Sales:120,145,132,160" \
+#   --prop series2="Costs:80,95,88,110" \
+#   --prop categories=Q1,Q2,Q3,Q4 \
+#   --prop colors=4472C4,ED7D31 \
+#   --prop x=13 --prop y=19 --prop width=12 --prop height=18 \
+#   --prop marker=circle --prop markerSize=8 \
+#   --prop markercolor=FF0000 \
+#   --prop lineWidth=2
+#
+# Features: markercolor=FF0000 (chart-level fan-out — applies the fill color
+#   to every series marker; per-series override via series[N] path)
+# --------------------------------------------------------------------------
+cli(f'add "{FILE}" "/7-Axis Controls" --type chart'
+    f' --prop chartType=line'
+    f' --prop title="Line — markercolor"'
+    f' --prop series1=Sales:120,145,132,160'
+    f' --prop series2=Costs:80,95,88,110'
+    f' --prop categories=Q1,Q2,Q3,Q4'
+    f' --prop colors=4472C4,ED7D31'
+    f' --prop x=13 --prop y=19 --prop width=12 --prop height=18'
+    f' --prop marker=circle --prop markerSize=8'
+    f' --prop markercolor=FF0000'
+    f' --prop lineWidth=2')
+
 print(f"\nDone! Generated: {FILE}")
-print("  7 sheets (Sheet1 data + 6 chart sheets, 24 charts total)")
+print("  8 sheets (Sheet1 data + 7 chart sheets, 28 charts total)")

@@ -211,6 +211,68 @@ officecli add "$PPTX" '/slide[4]' --type textbox \
     --prop text='lang=ja-JP + font.ea="Yu Mincho"' --prop size=12 --prop italic=true \
     --prop x=8.9in --prop y=4.9in --prop width=4in --prop height=0.4in
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Slide 5 — strike / underline / valign / margin / list / lineOpacity / animation
+# ─────────────────────────────────────────────────────────────────────────────
+officecli add "$PPTX" / --type slide
+officecli add "$PPTX" '/slide[5]' --type textbox \
+    --prop text="strike / underline / valign / margin / list / lineOpacity / animation" \
+    --prop size=22 --prop bold=true \
+    --prop x=0.5in --prop y=0.3in --prop width=13in --prop height=0.6in
+
+# strike + underline — set at shape level (applied to all runs as a default)
+officecli add "$PPTX" '/slide[5]' --type shape --prop geometry=roundRect \
+    --prop x=0.5in --prop y=1.2in --prop width=3.5in --prop height=1.2in \
+    --prop fill=F4A261 --prop color=000000 --prop size=18 \
+    --prop text="strike=single" \
+    --prop strike=single
+
+officecli add "$PPTX" '/slide[5]' --type shape --prop geometry=roundRect \
+    --prop x=4.3in --prop y=1.2in --prop width=3.5in --prop height=1.2in \
+    --prop fill=A8DADC --prop color=000000 --prop size=18 \
+    --prop text="underline=single" \
+    --prop underline=single
+
+# valign — vertical text position inside the shape (top / middle / bottom)
+for va in top middle bottom; do
+    case $va in top) X=0.5 ;; middle) X=4.3 ;; bottom) X=8.1 ;; esac
+    officecli add "$PPTX" '/slide[5]' --type shape --prop geometry=rect \
+        --prop x="${X}in" --prop y=2.6in --prop width=3.5in --prop height=2in \
+        --prop fill=DEEAF6 --prop lineColor=4472C4 --prop lineWidth=2pt \
+        --prop text="valign=$va" --prop size=16 --prop bold=true \
+        --prop valign="$va"
+done
+
+# margin — inner text padding (uniform; also accepts per-edge via marginLeft etc.)
+officecli add "$PPTX" '/slide[5]' --type shape --prop geometry=roundRect \
+    --prop x=0.5in --prop y=4.9in --prop width=5in --prop height=1.4in \
+    --prop fill=F1FAEE --prop lineColor=2A9D8F --prop lineWidth=2pt \
+    --prop text="margin=0.4in  — large inner padding" --prop size=16 \
+    --prop margin=0.4in
+
+# list — shape-level bullet or numbered list (applies to all paragraphs)
+officecli add "$PPTX" '/slide[5]' --type shape --prop geometry=rect \
+    --prop x=6in --prop y=4.9in --prop width=4.5in --prop height=2.5in \
+    --prop fill=F4A261 --prop color=000000 --prop size=14 \
+    --prop text="First item" \
+    --prop list=bullet
+officecli add "$PPTX" '/slide[5]/shape[8]' --type paragraph --prop text="Second item"
+officecli add "$PPTX" '/slide[5]/shape[8]' --type paragraph --prop text="Third item"
+
+# lineOpacity — outline transparency (0=opaque … 1=invisible); needs a non-none line
+officecli add "$PPTX" '/slide[5]' --type shape --prop geometry=rect \
+    --prop x=0.5in --prop y=6.5in --prop width=3.5in --prop height=1in \
+    --prop fill=4472C4 --prop lineColor=E63946 --prop lineWidth=6pt \
+    --prop lineOpacity=0.35 \
+    --prop text="lineOpacity=0.35" --prop color=FFFFFF --prop size=14
+
+# animation — shape entrance animation (see animations.sh for full coverage)
+officecli add "$PPTX" '/slide[5]' --type shape --prop geometry=roundRect \
+    --prop x=4.3in --prop y=6.5in --prop width=3.5in --prop height=1in \
+    --prop fill=E63946 --prop color=FFFFFF --prop size=14 --prop bold=true \
+    --prop text="animation=fadeIn" \
+    --prop animation=fadeIn
+
 officecli close "$PPTX"
 officecli validate "$PPTX"
 echo "Created: $PPTX"

@@ -463,6 +463,107 @@ cli(f'add "{FILE}" "/4-Pareto" --type chart'
     f' --prop legend=bottom'
     f' --prop x=14 --prop y=0 --prop width=13 --prop height=18')
 
+# ==========================================================================
+# Sheet: 5-Chart Meta
+# ==========================================================================
+print("\n--- 5-Chart Meta ---")
+cli(f'add "{FILE}" / --type sheet --prop name="5-Chart Meta"')
+
+# --------------------------------------------------------------------------
+# Chart 1: anchor (cell-range placement), preset (named style bundle)
+#
+# officecli add charts-extended.xlsx "/5-Chart Meta" --type chart \
+#   --prop chartType=column \
+#   --prop title="anchor + preset=corporate" \
+#   --prop series1="Revenue:120,145,132,160" \
+#   --prop categories=Q1,Q2,Q3,Q4 \
+#   --prop anchor="A1:M20" \
+#   --prop preset=corporate
+#
+# Features: anchor="A1:M20" (position chart at exact cell-range instead of
+#   x/y/width/height — accepts A1-notation two-cell anchor string),
+#   preset=corporate (named style bundle that sets colors, fonts, fill, border
+#   in one shot; values: minimal, dark, corporate, magazine, dashboard,
+#   colorful, monochrome)
+# --------------------------------------------------------------------------
+cli(f'add "{FILE}" "/5-Chart Meta" --type chart'
+    f' --prop chartType=column'
+    f' --prop title="anchor + preset=corporate"'
+    f' --prop series1=Revenue:120,145,132,160'
+    f' --prop categories=Q1,Q2,Q3,Q4'
+    f' --prop anchor=A1:M20'
+    f' --prop preset=corporate')
+
+# --------------------------------------------------------------------------
+# Chart 2: autotitledeleted, plotvisonly
+#
+# officecli add charts-extended.xlsx "/5-Chart Meta" --type chart \
+#   --prop chartType=bar \
+#   --prop series1="Sales:80,95,88,110" \
+#   --prop categories=Q1,Q2,Q3,Q4 \
+#   --prop x=0 --prop y=22 --prop width=12 --prop height=18 \
+#   --prop autotitledeleted=true \
+#   --prop plotvisonly=true
+#
+# Features: autotitledeleted=true (suppress the auto "Chart Title" placeholder
+#   that Excel inserts — use when you want no title at all without explicitly
+#   passing title=none),
+#   plotvisonly=true (skip plotting hidden rows/columns — mirrors Excel's
+#   "Show data in hidden rows and columns" unchecked)
+# --------------------------------------------------------------------------
+cli(f'add "{FILE}" "/5-Chart Meta" --type chart'
+    f' --prop chartType=bar'
+    f' --prop series1=Sales:80,95,88,110'
+    f' --prop categories=Q1,Q2,Q3,Q4'
+    f' --prop x=0 --prop y=22 --prop width=12 --prop height=18'
+    f' --prop autotitledeleted=true'
+    f' --prop plotvisonly=true')
+
+# --------------------------------------------------------------------------
+# Chart 3: preset variants — minimal vs dark
+#
+# officecli add charts-extended.xlsx "/5-Chart Meta" --type chart \
+#   --prop chartType=line \
+#   --prop title="preset=minimal" \
+#   --prop series1="A:10,20,15,25" \
+#   --prop series2="B:8,14,12,20" \
+#   --prop categories=W1,W2,W3,W4 \
+#   --prop x=13 --prop y=0 --prop width=12 --prop height=18 \
+#   --prop preset=minimal
+#
+# Features: preset=minimal (strip: removes gridlines, legend, border, most
+#   styling; exposes the data with minimal chrome)
+# --------------------------------------------------------------------------
+cli(f'add "{FILE}" "/5-Chart Meta" --type chart'
+    f' --prop chartType=line'
+    f' --prop title="preset=minimal"'
+    f' --prop series1=A:10,20,15,25'
+    f' --prop series2=B:8,14,12,20'
+    f' --prop categories=W1,W2,W3,W4'
+    f' --prop x=13 --prop y=0 --prop width=12 --prop height=18'
+    f' --prop preset=minimal')
+
+# --------------------------------------------------------------------------
+# Chart 4: preset=dark + anchor form
+#
+# officecli add charts-extended.xlsx "/5-Chart Meta" --type chart \
+#   --prop chartType=column \
+#   --prop title="preset=dark" \
+#   --prop series1="Sales:45,60,55,80" \
+#   --prop categories=Q1,Q2,Q3,Q4 \
+#   --prop x=13 --prop y=22 --prop width=12 --prop height=18 \
+#   --prop preset=dark
+#
+# Features: preset=dark (dark background, light-colored series and text)
+# --------------------------------------------------------------------------
+cli(f'add "{FILE}" "/5-Chart Meta" --type chart'
+    f' --prop chartType=column'
+    f' --prop title="preset=dark"'
+    f' --prop series1=Sales:45,60,55,80'
+    f' --prop categories=Q1,Q2,Q3,Q4'
+    f' --prop x=13 --prop y=22 --prop width=12 --prop height=18'
+    f' --prop preset=dark')
+
 # Remove blank default Sheet1 (all data is inline)
 cli(f'remove "{FILE}" /Sheet1')
 

@@ -18,13 +18,14 @@ python3 charts-scatter.py
 
 ```
   Slide 1  scatterstyle variants  line / lineMarker / marker / smooth / smoothMarker (5 charts)
-  Slide 2  Markers                marker symbol/size/color
-  Slide 3  Title & legend
+  Slide 2  Markers                marker symbol/size/color/markercolor
+  Slide 3  Title & legend         title.overlay / legend.overlay
   Slide 4  Data labels
   Slide 5  Axes                   min/max, gridlines, log on both axes
   Slide 6  Series styling         colors, gradient, transparency, outline, shadow
   Slide 7  Overlays               trendline (linear/poly/exp/log/power/movingAvg), errbars, referenceline
   Slide 8  Per-series Set         lineWidth/lineDash/marker/markerSize/color/smooth + presets
+  Slide 9  series{N}=             named series shorthand (series1= / series2= / series1.*= forms)
 ```
 
 ## Reference

@@ -225,6 +225,18 @@ for join in round bevel miter; do
     X=$(echo "$X + 3" | bc -l)
 done
 
+# miterLimit — caps how far a miter join's spike extends before it's clipped.
+# Expressed in 1/1000ths of a percent; 800000 = 800%. Supplied as the compound
+# lineJoin=miter:<lim> form which sets both join style and limit in one prop.
+officecli add "$PPTX" '/slide[5]' --type shape --prop geometry=triangle \
+    --prop x=0.5in --prop y=5.5in --prop width=2.5in --prop height=1.8in \
+    --prop fill=A8DADC --prop lineColor=E63946 --prop lineWidth=8pt \
+    --prop lineJoin="miter:800000"
+officecli add "$PPTX" '/slide[5]' --type shape \
+    --prop text='lineJoin="miter:800000"  (limit 800%)' --prop size=12 \
+    --prop x=0.5in --prop y=7.4in --prop width=4in --prop height=0.5in \
+    --prop fill=none --prop line="000000:0:solid"
+
 # lineAlign — stroke alignment relative to the path: ctr (centered) vs in (inset).
 # Same shape, same border width, only the alignment of the stroke differs.
 X=9

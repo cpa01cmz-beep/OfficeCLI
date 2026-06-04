@@ -121,9 +121,23 @@ the shape's outer bounds is `~12pt`.
 --prop lineAlign=in        # aliases: linealign, line.align
 ```
 
+**`miterLimit=`** — caps how far a miter join spike extends before it is
+clipped, in 1/1000ths of a percent (e.g. `800000` = 800%). Most
+convenient as the compound `lineJoin=miter:<lim>` form at Add time:
+
+```bash
+--prop lineJoin="miter:800000"   # set both join style and limit together
+```
+
+After Add, you can also change it independently via Set:
+
+```bash
+officecli set file.pptx /slide[1]/shape[1] --prop miterLimit=800000
+```
+
 **Features:** all 8 schema-declared `geometry` presets, every fill type
 (solid/theme/gradient/radial/pattern/opacity/none/per-stop), both line forms
 (`line="c:w:d"` compound and per-attribute `lineColor`/`lineWidth`/`lineDash`),
 compound strokes (`cmpd=dbl|tri`), arrowheads on shape outlines,
 rotation, shadow/glow/reflection effects, full stroke-geometry control
-(`lineCap`, `lineJoin`, `lineAlign`).
+(`lineCap`, `lineJoin`, `lineAlign`, `miterLimit`).

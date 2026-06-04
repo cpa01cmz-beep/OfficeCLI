@@ -29,7 +29,7 @@ add_table () {
 }
 
 # --- Slide 1: border shorthand & per-edge ---
-officecli add "$PPTX" /presentation/slides --type slide
+officecli add "$PPTX" / --type slide
 officecli add "$PPTX" '/slide[1]' --type shape \
     --prop text="Borders: Shorthand & Per-Edge" --prop size=28 --prop bold=true \
     --prop x=0.5in --prop y=0.3in --prop width=12in --prop height=0.6in
@@ -42,8 +42,11 @@ add_table 1 0.5  3.5 "border.top=3pt solid 000000"     --prop border.top="3pt so
 add_table 1 5.0  3.5 "border.bottom=3pt solid 0070C0"  --prop border.bottom="3pt solid 0070C0"
 add_table 1 9.5  3.5 "border.left=3pt solid 00B050"    --prop border.left="3pt solid 00B050"
 
+# Per-edge right border (mirrors left; same compound spec)
+add_table 1 0.5  5.8 "border.right=3pt solid C00000"   --prop border.right="3pt solid C00000"
+
 # --- Slide 2: inside dividers & dash patterns ---
-officecli add "$PPTX" /presentation/slides --type slide
+officecli add "$PPTX" / --type slide
 officecli add "$PPTX" '/slide[2]' --type shape \
     --prop text="Borders: Inside Dividers & Dashes" --prop size=28 --prop bold=true \
     --prop x=0.5in --prop y=0.3in --prop width=12in --prop height=0.6in
@@ -61,7 +64,7 @@ add_table 2 5.0  3.5 "dash=dashDot" --prop border.all="1.5pt dashDot 0070C0"
 add_table 2 9.5  3.5 "dash=sysDash" --prop border.all="1.5pt sysDash 00B050"
 
 # --- Slide 3: diagonal borders (per-cell) ---
-officecli add "$PPTX" /presentation/slides --type slide
+officecli add "$PPTX" / --type slide
 officecli add "$PPTX" '/slide[3]' --type shape \
     --prop text="Diagonal Borders (per-cell, tl2br / tr2bl)" --prop size=28 --prop bold=true \
     --prop x=0.5in --prop y=0.3in --prop width=12in --prop height=0.6in

@@ -3,7 +3,7 @@
 Three files work together:
 
 - **shapes-connectors.sh** — Shell script that calls `officecli` to build the deck.
-- **shapes-connectors.pptx** — The generated 3-slide deck.
+- **shapes-connectors.pptx** — The generated 4-slide deck.
 - **shapes-connectors.md** — This file.
 
 ## Regenerate
@@ -90,3 +90,31 @@ in the PowerPoint UI.
 endpoints via `from=` / `to=` with `@id` paths, dashed connector lines
 for branching/loopback semantics, arrowhead styling (`tailEnd=triangle`,
 `tailEnd=arrow`), `--type group` with comma-separated `shapes=` paths.
+
+### Slide 4 — `headEnd` / `lineJoin` / `miterLimit` on connectors
+
+**`headEnd=`** — arrowhead at the **start** of the connector (the
+head/from-side). Mirrors `tailEnd=` which decorates the end/to-side.
+Both accept: `none`, `triangle`, `stealth`, `diamond`, `oval`, `arrow`.
+
+```bash
+officecli add file.pptx /slide[4] --type connector \
+  --prop shape=straight --prop x=0.5in --prop y=2in \
+  --prop width=5in --prop height=0in \
+  --prop color=1D3557 --prop lineWidth=2pt \
+  --prop headEnd=triangle --prop tailEnd=oval
+```
+
+**`lineJoin=`** on connectors — same enum as on shapes (`round` /
+`bevel` / `miter`). Affects the visual corner where an elbow connector
+bends.
+
+**`miterLimit=`** on connectors — via the compound
+`lineJoin=miter:<lim>` form (1/1000ths of %; `800000` = 800%):
+
+```bash
+--prop lineJoin="miter:800000"
+```
+
+> Note: `id` and `zorder` on connectors are read-only (get-only) —
+> they cannot be set at Add or via Set.

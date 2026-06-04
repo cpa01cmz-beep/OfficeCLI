@@ -131,6 +131,58 @@ Affects spellcheck, hyphenation, and font fallback in PowerPoint:
 Aliases: `altLang`, `altlang`. Tag is validated against BCP-47 shape;
 max 35 characters.
 
+### Slide 5 — `strike` / `underline` / `valign` / `margin` / `list` / `lineOpacity` / `animation`
+
+**`strike=`** and **`underline=`** — set at shape level, they apply as
+defaults to all runs inside the shape:
+
+```bash
+--prop strike=single      # strikethrough (sngStrike)
+--prop underline=single   # underline (sng)
+```
+
+**`valign=`** — vertical text position inside the shape bounding box:
+
+| Value | Position |
+|---|---|
+| `top` | text anchored to top |
+| `middle` | vertically centered |
+| `bottom` | text anchored to bottom |
+
+**`margin=`** — uniform inner text padding (alias of `marginLeft` /
+`marginRight` / `marginTop` / `marginBottom` all at once):
+
+```bash
+--prop margin=0.4in     # 0.4in inner padding on all four sides
+```
+
+**`list=`** — shape-level bullet/numbered list (applies to ALL
+paragraphs in the shape):
+
+```bash
+--prop list=bullet      # filled circle bullets
+--prop list=numbered    # 1. 2. 3. …
+```
+
+After `Add`, append more items with `--type paragraph`.
+
+**`lineOpacity=`** — outline transparency as a 0–1 fraction:
+
+```bash
+--prop lineOpacity=0.35   # 35% opacity stroke (65% transparent)
+```
+
+Requires a non-none line color (`line=` or `lineColor=`).
+
+**`animation=`** — entrance animation preset applied to this shape
+(see `animations.sh` for the full animation showcase):
+
+```bash
+--prop animation=fadeIn     # canonical name or alias
+```
+
 **Features covered:** `lineSpacing`, `spaceBefore`, `spaceAfter`,
 `spacing` (char tracking), `kern` threshold, `cap=none|small|all`,
-`direction=rtl`, `font` (bare), `font.cs`, `lang` BCP-47 tag.
+`direction=rtl`, `font` (bare), `font.cs`, `lang` BCP-47 tag,
+`strike`, `underline`, `valign`, `margin`, `list`, `lineOpacity`,
+`animation`.

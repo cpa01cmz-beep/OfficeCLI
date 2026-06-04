@@ -3,7 +3,7 @@
 Three files work together:
 
 - **tables-basic.sh** — Shell script that calls `officecli` to build the deck.
-- **tables-basic.pptx** — The generated 3-slide deck.
+- **tables-basic.pptx** — The generated 5-slide deck.
 - **tables-basic.md** — This file.
 
 ## Regenerate
@@ -66,6 +66,43 @@ officecli set file.pptx /slide[2]/table[1]/tr[1]/tc[1] \
 Theme colors follow the deck theme — recolor the deck and the table follows.
 Hex/named colors are absolute.
 
+### Slide 4 — Cell typography
+
+Text-formatting properties applied directly on a cell (no inner run needed):
+
+| Property | Example | Effect |
+|---|---|---|
+| `italic=true` | `--prop italic=true` | italic text in cell |
+| `underline=single` | `--prop underline=single` | underlined text |
+| `strike=single` | `--prop strike=single` | strikethrough |
+| `font="Georgia"` | `--prop font="Georgia"` | font face override |
+| `wrap=false` | `--prop wrap=false` | disable word-wrap (text clips) |
+| `linespacing=1.5x` | `--prop linespacing=1.5x` | paragraph line spacing |
+| `spacebefore=4pt` | `--prop spacebefore=4pt` | space above paragraph |
+| `spaceafter=4pt` | `--prop spaceafter=4pt` | space below paragraph |
+
+### Slide 5 — Cell layout
+
+Cell-geometry properties:
+
+| Property | Example | Effect |
+|---|---|---|
+| `padding=0.25in` | `--prop padding=0.25in` | uniform inner margin |
+| `padding.bottom=0.3in` | `--prop padding.bottom=0.3in` | bottom edge only |
+| `opacity=0.4` | `--prop opacity=0.4` + `fill=...` | fill transparency |
+| `image=path` | `--prop image=/img.png` | picture fill (blipFill) |
+| `textdirection=vert` | `--prop textdirection=vert` | vertical text |
+| `direction=rtl` | `--prop direction=rtl` | RTL paragraph |
+| `bevel=circle` | `--prop bevel=circle` | 3D cell bevel (set-only) |
+| `border.right=2pt solid E63946` | `--prop border.right=...` | right-edge border |
+
+> `opacity` requires a fill on the same cell. `bevel` is set-only (no Get
+> readback — OOXML 3D cell data is write-only from the handler's
+> perspective). `id`, `zorder`, and `colWidths` on tables are read-only.
+
 **Features:** `data=` inline seed, `headerFill`/`bodyFill`, `rows`/`cols`,
 per-cell `text`/`bold`/`color`/`fill` (solid/named/rgb/theme/gradient/none),
-EMU-parseable dimensions (`0.5in`).
+`italic`, `underline`, `strike`, `font`, `wrap`, `linespacing`,
+`spacebefore`, `spaceafter`, `padding`, `padding.bottom`, `opacity`,
+`image`, `textdirection`, `direction`, `merge.right`, `bevel`,
+`border.right`, EMU-parseable dimensions (`0.5in`).
