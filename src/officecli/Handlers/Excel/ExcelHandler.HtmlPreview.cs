@@ -2690,7 +2690,26 @@ public partial class ExcelHandler
     }
 
     private static string ApplyNumberFormat(double value, string fmtCode)
+        => ApplyNumberFormat(value, fmtCode, autoMinus: false);
+
+    // autoMinus: caller has already taken Math.Abs(value) and wants the
+    // automatic negative sign PREPENDED to the whole section output (Excel's
+    // single-section rule: a format with no explicit negative section is used
+    // for negatives too, with a leading '-' added before everything). Literal
+    // format chars (e.g. a '-' or '$' written in the code) are emitted verbatim
+    // in position; this auto-minus is layered on top of that.
+    private static string ApplyNumberFormat(double value, string fmtCode, bool autoMinus)
     {
+        // Single-section negative: no ';' and no explicit [condition]. Excel
+        // reuses the (positive) section for negatives, prepending an automatic
+        // minus to the whole formatted result. Recurse on the magnitude with
+        // autoMinus set so literal chars stay in place and the sign leads.
+        if (value < 0 && !autoMinus && !fmtCode.Contains(';') &&
+            !System.Text.RegularExpressions.Regex.IsMatch(fmtCode, @"\[[<>=]=?\d"))
+        {
+            return "-" + ApplyNumberFormat(Math.Abs(value), fmtCode, autoMinus: true);
+        }
+
         // Handle multi-section format codes: positive;negative;zero
         if (fmtCode.Contains(';'))
         {
@@ -2805,6 +2824,13 @@ public partial class ExcelHandler
         var prefix = "";
         var suffix = "";
         var cleanFmt = fmtCode;
+        // A literal leading sign ('-' or '+') written in the format string is a
+        // verbatim character that must be emitted BEFORE the currency symbol
+        // (Excel: "-$#,##0.00" → "-$2.00", not "$-2.00"). Pull it into the
+        // prefix first so the currency symbol appends after it, preserving order.
+        cleanFmt = cleanFmt.TrimStart();
+        if (cleanFmt.StartsWith('-')) { prefix = "-"; cleanFmt = cleanFmt[1..]; }
+        else if (cleanFmt.StartsWith('+')) { prefix = "+"; cleanFmt = cleanFmt[1..]; }
         // Handle literal characters: $, ¥, €, £
         foreach (var sym in new[] { "$", "¥", "€", "£", "₹" })
         {
@@ -2816,7 +2842,7 @@ public partial class ExcelHandler
                 var firstDigit = (hashIdx >= 0 && zeroIdx >= 0) ? Math.Min(hashIdx, zeroIdx)
                     : Math.Max(hashIdx, zeroIdx);
                 if (firstDigit < 0 || idx <= firstDigit)
-                    prefix = sym;
+                    prefix += sym;
                 else
                     suffix = sym;
                 cleanFmt = cleanFmt.Replace(sym, "");
