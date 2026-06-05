@@ -1607,6 +1607,11 @@ internal partial class ChartSvgRenderer
         public string? CatAxisTitle { get; set; }
         public int CatAxisTitleFontPx { get; set; } = 9;
         public bool CatAxisTitleBold { get; set; }
+        // Secondary value axis title (combo right-side axis; also the bubble/scatter
+        // Y axis, which is the 2nd valAx rather than a catAx).
+        public string? SecondaryValAxisTitle { get; set; }
+        public int SecondaryValAxisTitleFontPx { get; set; } = 9;
+        public bool SecondaryValAxisTitleBold { get; set; }
         public string? PlotFillColor { get; set; }
         public string? ChartFillColor { get; set; }
         public bool HasLegend { get; set; }
@@ -1807,8 +1812,24 @@ internal partial class ChartSvgRenderer
         }
 
         // Axis info
-        var valAxis = plotArea.Elements().FirstOrDefault(e => e.LocalName == "valAx");
+        var valAxes = plotArea.Elements().Where(e => e.LocalName == "valAx").ToList();
+        var valAxis = valAxes.FirstOrDefault();
         var catAxis = plotArea.Elements().FirstOrDefault(e => e.LocalName == "catAx");
+
+        // A second value axis carries the secondary (combo right-side) title, or —
+        // for bubble/scatter charts that have no catAx — the Y-axis title. Emit it
+        // so it isn't silently dropped.
+        var secondaryValAxis = valAxes.Count >= 2 ? valAxes[1] : null;
+        if (secondaryValAxis != null)
+        {
+            var secTitleEl = secondaryValAxis.Elements().FirstOrDefault(e => e.LocalName == "title");
+            info.SecondaryValAxisTitle = secTitleEl?.Descendants<Drawing.Text>().FirstOrDefault()?.Text;
+            var secTitleRPr = secTitleEl?.Descendants<Drawing.RunProperties>().FirstOrDefault();
+            if (secTitleRPr?.FontSize?.HasValue == true)
+                info.SecondaryValAxisTitleFontPx = (int)(secTitleRPr.FontSize.Value / 100.0);
+            if (secTitleRPr?.Bold?.Value == true)
+                info.SecondaryValAxisTitleBold = true;
+        }
 
         if (valAxis != null)
         {
@@ -2338,16 +2359,32 @@ internal partial class ChartSvgRenderer
 
         // Axis titles inside SVG — for horizontal bar charts, value axis is on bottom and category axis is on left
         var isHorizBar = chartType.Contains("bar") && !chartType.Contains("column");
-        var bottomTitle = isHorizBar ? info.ValAxisTitle : info.CatAxisTitle;
-        var bottomTitleFont = isHorizBar ? info.ValAxisTitleFontPx : info.CatAxisTitleFontPx;
-        var bottomTitleBold = isHorizBar ? info.ValAxisTitleBold : info.CatAxisTitleBold;
-        var leftTitle = isHorizBar ? info.CatAxisTitle : info.ValAxisTitle;
-        var leftTitleFont = isHorizBar ? info.CatAxisTitleFontPx : info.ValAxisTitleFontPx;
-        var leftTitleBold = isHorizBar ? info.CatAxisTitleBold : info.ValAxisTitleBold;
+        // Bubble/scatter have no category axis: the X axis is the primary value
+        // axis and the Y axis is the secondary value axis.
+        var isXY = chartType == "bubble" || chartType == "scatter";
+        string? bottomTitle; int bottomTitleFont; bool bottomTitleBold;
+        string? leftTitle; int leftTitleFont; bool leftTitleBold;
+        if (isXY)
+        {
+            bottomTitle = info.ValAxisTitle; bottomTitleFont = info.ValAxisTitleFontPx; bottomTitleBold = info.ValAxisTitleBold;
+            leftTitle = info.SecondaryValAxisTitle; leftTitleFont = info.SecondaryValAxisTitleFontPx; leftTitleBold = info.SecondaryValAxisTitleBold;
+        }
+        else
+        {
+            bottomTitle = isHorizBar ? info.ValAxisTitle : info.CatAxisTitle;
+            bottomTitleFont = isHorizBar ? info.ValAxisTitleFontPx : info.CatAxisTitleFontPx;
+            bottomTitleBold = isHorizBar ? info.ValAxisTitleBold : info.CatAxisTitleBold;
+            leftTitle = isHorizBar ? info.CatAxisTitle : info.ValAxisTitle;
+            leftTitleFont = isHorizBar ? info.CatAxisTitleFontPx : info.ValAxisTitleFontPx;
+            leftTitleBold = isHorizBar ? info.CatAxisTitleBold : info.ValAxisTitleBold;
+        }
         if (!string.IsNullOrEmpty(leftTitle))
             sb.AppendLine($"    <text x=\"10\" y=\"{svgH / 2}\" fill=\"{AxisColor}\" font-size=\"{leftTitleFont}\"{(leftTitleBold ? " font-weight=\"bold\"" : "")} text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"rotate(-90,10,{svgH / 2})\">{HtmlEncode(leftTitle)}</text>");
         if (!string.IsNullOrEmpty(bottomTitle))
             sb.AppendLine($"    <text x=\"{svgW / 2}\" y=\"{svgH - 2}\" fill=\"{AxisColor}\" font-size=\"{bottomTitleFont}\"{(bottomTitleBold ? " font-weight=\"bold\"" : "")} text-anchor=\"middle\">{HtmlEncode(bottomTitle)}</text>");
+        // Combo charts (non-XY): the secondary value axis title sits on the right.
+        if (!isXY && !string.IsNullOrEmpty(info.SecondaryValAxisTitle))
+            sb.AppendLine($"    <text x=\"{svgW - 10}\" y=\"{svgH / 2}\" fill=\"{SecondaryAxisColor}\" font-size=\"{info.SecondaryValAxisTitleFontPx}\"{(info.SecondaryValAxisTitleBold ? " font-weight=\"bold\"" : "")} text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"rotate(90,{svgW - 10},{svgH / 2})\">{HtmlEncode(info.SecondaryValAxisTitle)}</text>");
     }
 
     /// <summary>Render chart legend HTML (outside the svg tag).</summary>

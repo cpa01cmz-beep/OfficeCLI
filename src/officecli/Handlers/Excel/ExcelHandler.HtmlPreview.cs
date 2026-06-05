@@ -1021,6 +1021,21 @@ public partial class ExcelHandler
                         if (fontColor.Length > 6) fontColor = fontColor[^6..];
                         cssParts.Add($"color:#{fontColor}");
                     }
+                    // A dxf font may also carry bold/italic/underline/strike — Excel
+                    // applies these on top of the color/fill for the matched cell.
+                    var bEl = font.GetFirstChild<Bold>();
+                    if (bEl != null && (bEl.Val == null || bEl.Val.Value))
+                        cssParts.Add("font-weight:bold");
+                    var iEl = font.GetFirstChild<Italic>();
+                    if (iEl != null && (iEl.Val == null || iEl.Val.Value))
+                        cssParts.Add("font-style:italic");
+                    var uEl = font.GetFirstChild<Underline>();
+                    bool hasUnderline = uEl != null && uEl.Val?.Value != UnderlineValues.None;
+                    var sEl = font.GetFirstChild<Strike>();
+                    bool hasStrike = sEl != null && (sEl.Val == null || sEl.Val.Value);
+                    if (hasUnderline && hasStrike) cssParts.Add("text-decoration:underline line-through");
+                    else if (hasUnderline) cssParts.Add("text-decoration:underline");
+                    else if (hasStrike) cssParts.Add("text-decoration:line-through");
                 }
                 if (cssParts.Count == 0) continue;
                 var cssOverride = string.Join(";", cssParts);
@@ -2042,6 +2057,13 @@ public partial class ExcelHandler
         var dt = cell.DataType?.Value;
         bool isText = dt == CellValues.SharedString || dt == CellValues.InlineString || dt == CellValues.String;
         if (isText) return;
+        // Boolean values (TRUE/FALSE, or a formula returning a boolean) are
+        // center-aligned by default in Excel — not right-aligned like numbers.
+        if (dt == CellValues.Boolean)
+        {
+            styles.Add("text-align:center");
+            return;
+        }
         // Error cells right-align even if the value lives only in the formula's
         // cached <v> (or is an error pattern), matching real Excel.
         bool isError = dt == CellValues.Error;
@@ -2517,21 +2539,66 @@ public partial class ExcelHandler
         if (fmtCode.Contains(';'))
         {
             var sections = fmtCode.Split(';');
-            if (value < 0 && sections.Length >= 2)
+
+            // Explicit [condition] sections (e.g. [>=100]"High: "0;[<0]"Low: "0;"Mid: "0).
+            // Excel: when any section carries a [<op><num>] bracket, evaluate the
+            // conditions IN DECLARATION ORDER; the first satisfied section applies,
+            // and the last unconditioned section is the "else". This overrides the
+            // positional positive/negative/zero convention below.
+            if (System.Text.RegularExpressions.Regex.IsMatch(
+                    fmtCode, @"\[[<>=]=?\d") )
             {
-                var negFmt = sections[1].Trim();
-                // If format already handles negative (has parens or minus), don't add extra minus
-                return ApplyNumberFormat(Math.Abs(value), negFmt);
+                for (int i = 0; i < sections.Length; i++)
+                {
+                    var sec = sections[i].Trim();
+                    var condMatch = System.Text.RegularExpressions.Regex.Match(
+                        sec, @"^\[(<=|>=|<>|<|>|=)(-?\d+\.?\d*)\]");
+                    if (condMatch.Success)
+                    {
+                        var op = condMatch.Groups[1].Value;
+                        var cmp = double.Parse(condMatch.Groups[2].Value,
+                            System.Globalization.CultureInfo.InvariantCulture);
+                        bool satisfied = op switch
+                        {
+                            "<" => value < cmp,
+                            "<=" => value <= cmp,
+                            ">" => value > cmp,
+                            ">=" => value >= cmp,
+                            "=" => value == cmp,
+                            "<>" => value != cmp,
+                            _ => false
+                        };
+                        if (satisfied)
+                            return ApplyNumberFormat(Math.Abs(value), sec);
+                    }
+                    else
+                    {
+                        // Unconditioned (else) section — applies when no prior
+                        // conditioned section matched.
+                        return ApplyNumberFormat(Math.Abs(value), sec);
+                    }
+                }
+                // No section matched and no else clause: fall back to first section.
+                fmtCode = sections[0].Trim();
             }
-            if (value == 0 && sections.Length >= 3)
+            else
             {
-                var zeroFmt = sections[2].Trim();
-                // Quoted literal for zero section: "zero" → zero
-                if (zeroFmt.StartsWith('"') && zeroFmt.EndsWith('"'))
-                    return zeroFmt[1..^1];
-                return ApplyNumberFormat(value, zeroFmt);
+                if (value < 0 && sections.Length >= 2)
+                {
+                    var negFmt = sections[1].Trim();
+                    // If format already handles negative (has parens or minus), don't add extra minus
+                    return ApplyNumberFormat(Math.Abs(value), negFmt);
+                }
+                if (value == 0 && sections.Length >= 3)
+                {
+                    var zeroFmt = sections[2].Trim();
+                    // Quoted literal for zero section: "zero" → zero
+                    if (zeroFmt.StartsWith('"') && zeroFmt.EndsWith('"'))
+                        return zeroFmt[1..^1];
+                    return ApplyNumberFormat(value, zeroFmt);
+                }
+                fmtCode = sections[0].Trim();
             }
-            fmtCode = sections[0].Trim();
         }
 
         // Strip [Color] markers: [Red], [Blue], [Green], [Color N], etc.
