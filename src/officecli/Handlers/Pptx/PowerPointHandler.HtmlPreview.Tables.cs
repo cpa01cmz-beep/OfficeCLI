@@ -150,6 +150,28 @@ public partial class PowerPointHandler
                     cellStyles.Add($"vertical-align:{va}");
                 }
 
+                // Cell text direction (a:tcPr vert="…"): rotate text via CSS
+                // writing-mode. Mirrors the Word handler's tcDir → writing-mode
+                // mapping (WordHandler.HtmlPreview.Css.cs). PowerPoint stores
+                // the direction on the tcPr "vert" attribute:
+                //   vert    → top-to-bottom (vertical-rl)
+                //   vert270 → bottom-to-top (vertical-rl + 180° rotate)
+                //   eaVert  → East-Asian top-to-bottom, upright glyphs
+                //   wordArtVert → stacked upright (approximate with upright)
+                var vertDir = tcPr?.Vertical?.HasValue == true ? tcPr.Vertical.InnerText : null;
+                if (vertDir != null)
+                {
+                    var wm = vertDir switch
+                    {
+                        "vert" => "vertical-rl",
+                        "vert270" => "vertical-rl;transform:rotate(180deg)",
+                        "eaVert" => "vertical-rl;text-orientation:upright",
+                        "wordArtVert" or "wordArtVertRtl" => "vertical-rl;text-orientation:upright",
+                        _ => null,
+                    };
+                    if (wm != null) cellStyles.Add($"writing-mode:{wm}");
+                }
+
                 // Cell text formatting
                 var firstRun = cell.Descendants<Drawing.Run>().FirstOrDefault();
                 if (firstRun?.RunProperties != null)

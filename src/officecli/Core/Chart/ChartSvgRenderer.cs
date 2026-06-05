@@ -384,12 +384,16 @@ internal partial class ChartSvgRenderer
                                     sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{bx + barW / 2:0.#}\" y=\"{by + barH / 2:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\" dominant-baseline=\"middle\">{vlabel}</text>");
                                 }
                             }
-                            // Waterfall connector line from previous bar's top to this bar's top
+                            // Waterfall connector line — a short HORIZONTAL
+                            // segment at the previous bar's cumulative top,
+                            // spanning the right edge of bar N to the left edge
+                            // of bar N+1. Real PowerPoint joins the running
+                            // total level across the gap; it does NOT draw a
+                            // diagonal down to the axis baseline.
                             if (s == 0 && c > 0 && !double.IsNaN(wfPrevTopY))
                             {
-                                var connY = oy + ph - (stackY / niceMax) * ph;
                                 var prevBx = ox + (c - 1) * groupW + gap + barW;
-                                sb.AppendLine($"        <line x1=\"{prevBx:0.#}\" y1=\"{wfPrevTopY:0.#}\" x2=\"{bx:0.#}\" y2=\"{connY:0.#}\" stroke=\"{GridColor}\" stroke-width=\"1\" stroke-dasharray=\"3,2\"/>");
+                                sb.AppendLine($"        <line x1=\"{prevBx:0.#}\" y1=\"{wfPrevTopY:0.#}\" x2=\"{bx:0.#}\" y2=\"{wfPrevTopY:0.#}\" stroke=\"{GridColor}\" stroke-width=\"1\" stroke-dasharray=\"3,2\"/>");
                             }
                             stackY += val;
                         }
