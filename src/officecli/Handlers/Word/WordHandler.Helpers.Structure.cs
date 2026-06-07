@@ -44,7 +44,14 @@ public partial class WordHandler
     {
         if (parent is Body body)
         {
-            var lastSectPr = body.GetFirstChild<SectionProperties>();
+            // The body-level sectPr is ALWAYS the last child, so check LastChild
+            // (O(1)) before falling back to GetFirstChild<SectionProperties>
+            // (which scans the whole child list — O(N) per append). Batch replay
+            // appends thousands of paragraphs to /body; the O(N) scan made that
+            // O(N²) (a 13k-paragraph doc spent tens of seconds just locating the
+            // trailing sectPr over and over).
+            var lastSectPr = body.LastChild as SectionProperties
+                             ?? body.GetFirstChild<SectionProperties>();
             if (lastSectPr != null)
             {
                 body.InsertBefore(child, lastSectPr);

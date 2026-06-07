@@ -1110,13 +1110,26 @@ public partial class WordHandler
         // siblings do not shift the effective insertion position. This
         // matches ResolveAnchorPosition, which computes anchor indices
         // against ChildElements.
-        var allChildren = parent.ChildElements.ToList();
-        if (index.HasValue && index.Value < allChildren.Count)
+        // PERF: only materialise the child list when an explicit index is given.
+        // The append path (the batch-replay hot case — thousands of paragraphs)
+        // does not need it, and ToList()'ing all children on every append made
+        // body building O(N²).
+        if (index.HasValue)
         {
-            var refElement = allChildren[index.Value];
-            parent.InsertBefore(para, refElement);
-            var paraPosIdx = parent.Elements<Paragraph>().ToList().IndexOf(para) + 1;
-            resultPath = $"{parentPath}/{BuildParaPathSegment(para, paraPosIdx)}";
+            var allChildren = parent.ChildElements.ToList();
+            if (index.Value < allChildren.Count)
+            {
+                var refElement = allChildren[index.Value];
+                parent.InsertBefore(para, refElement);
+                var paraPosIdx = parent.Elements<Paragraph>().ToList().IndexOf(para) + 1;
+                resultPath = $"{parentPath}/{BuildParaPathSegment(para, paraPosIdx)}";
+            }
+            else
+            {
+                AppendToParent(parent, para);
+                var paraCount = parent.Elements<Paragraph>().Count();
+                resultPath = $"{parentPath}/{BuildParaPathSegment(para, paraCount)}";
+            }
         }
         else
         {
