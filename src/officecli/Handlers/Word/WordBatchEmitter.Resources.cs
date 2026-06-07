@@ -175,6 +175,42 @@ public static partial class WordBatchEmitter
         }
     }
 
+    // <w:numPicBullet> defines a picture (image) list bullet; a level opts into
+    // it with <w:lvlPicBulletId>. The picture lives in word/media/* referenced
+    // by numbering.xml.rels (r:id inside the numPicBullet's VML/drawing). The
+    // dump round-trips numbering.xml verbatim via raw-set but never recreates
+    // the numbering part's rels or the media binary, so the r:id dangles on
+    // replay — real Word then refuses to open the file ("may be corrupt") and
+    // the SDK validator NREs walking the broken numPicBullet. Strip the
+    // numPicBullet definitions AND the lvlPicBulletId opt-ins so the level
+    // falls back to its own <w:lvlText> glyph (already round-tripped). Lossy
+    // for picture bullets only; mirrors the dangling footnote/endnote separator
+    // ref strip and the external-rel SDT fallback.
+    private static string StripDanglingPicBullets(string numberingXml)
+    {
+        if (string.IsNullOrEmpty(numberingXml) || !numberingXml.StartsWith("<")) return numberingXml;
+        if (!numberingXml.Contains("PicBullet")) return numberingXml; // fast path
+        try
+        {
+            var doc = System.Xml.Linq.XDocument.Parse(numberingXml);
+            if (doc.Root == null) return numberingXml;
+            var wNs = (System.Xml.Linq.XNamespace)"http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+            var removed = false;
+            foreach (var el in doc.Descendants(wNs + "numPicBullet")
+                         .Concat(doc.Descendants(wNs + "lvlPicBulletId")).ToList())
+            {
+                el.Remove();
+                removed = true;
+            }
+            if (!removed) return numberingXml;
+            return doc.Root.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
+        }
+        catch
+        {
+            return numberingXml;
+        }
+    }
+
     private static void EmitThemeRaw(WordHandler word, List<BatchItem> items)
     {
         // Theme carries clrScheme + fontScheme + fmtScheme — pure structured
@@ -270,6 +306,7 @@ public static partial class WordBatchEmitter
         // Skip when numbering is empty (just `<w:numbering/>` with no children).
         if (!xml.Contains("<w:abstractNum") && !xml.Contains("<w:num "))
             return;
+        xml = StripDanglingPicBullets(xml);
 
         items.Add(new BatchItem
         {
