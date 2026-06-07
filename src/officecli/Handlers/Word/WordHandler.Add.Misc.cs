@@ -1657,10 +1657,36 @@ public partial class WordHandler
         uint docPropId = NextDocPropId();
         // Build the textbox via InnerXml. wps:wsp ships in OOXML 2010+; the
         // namespace declarations are the canonical Word ones.
-        string fillXml = !string.IsNullOrEmpty(fillColor)
-            ? $"<a:solidFill><a:srgbClr val=\"{SanitizeHex(fillColor)}\"/></a:solidFill>"
-            : "<a:noFill/>";
+        // Advanced shape attributes (all optional; the dump emitter forwards
+        // the source values so a stress-test textbox round-trips faithfully):
+        //   geometry      → <a:prstGeom prst="...">      (rect / roundRect / …)
+        //   rotation      → <a:xfrm rot="...">           (degrees or raw 60000ths)
+        //   textDirection → <wps:bodyPr vert="...">      (horz / eaVert / vert / …)
+        //   textAnchor    → <wps:bodyPr anchor="...">    (t / ctr / b)
+        //   fill.gradient → <a:gradFill>                  ("c1@pos;c2@pos" or "c1,c2")
+        //   fill.opacity  → <a:alpha> inside solidFill    (0-100000 or "80%")
+        //   shadow        → <a:effectLst><a:outerShdw>    ("true" or "blur;dist;dir;color;alpha")
+        string geom = SanitizeGeometry(
+            properties.GetValueOrDefault("geometry") ?? properties.GetValueOrDefault("shape") ?? "rect");
+        string rotAttr = BuildRotAttr(
+            properties.GetValueOrDefault("rotation") ?? properties.GetValueOrDefault("rot"));
+        string vert = properties.GetValueOrDefault("textDirection") ?? properties.GetValueOrDefault("vert") ?? "";
+        string vertAttr = !string.IsNullOrEmpty(vert) ? $" vert=\"{SanitizeBodyVert(vert)}\"" : "";
+        string anchorVal = SanitizeBodyAnchor(
+            properties.GetValueOrDefault("textAnchor") ?? properties.GetValueOrDefault("vAlign"));
+        string? gradient = properties.GetValueOrDefault("fill.gradient") ?? properties.GetValueOrDefault("gradient");
+        string? fillOpacity = properties.GetValueOrDefault("fill.opacity") ?? properties.GetValueOrDefault("opacity");
+
+        string fillXml;
+        if (!string.IsNullOrEmpty(gradient))
+            fillXml = BuildGradientXml(gradient);
+        else if (!string.IsNullOrEmpty(fillColor))
+            fillXml = BuildSolidFillXml(fillColor, fillOpacity);
+        else
+            fillXml = "<a:noFill/>";
         string lnXml = BuildLineXml(lineStyle, lineWidth, lineColor);
+        // effectLst follows fill+ln in CT_ShapeProperties schema order.
+        string effectXml = BuildShadowXml(properties.GetValueOrDefault("shadow"));
         string txbxBodyXml = !string.IsNullOrEmpty(initialText)
             ? $"<w:p xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:r><w:t xml:space=\"preserve\">{System.Security.SecurityElement.Escape(initialText)}</w:t></w:r></w:p>"
             : "<w:p xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"/>";
@@ -1670,7 +1696,7 @@ public partial class WordHandler
         // Drawing scaffolding. EffectExtent + DocProperties + a:graphic with
         // a:graphicData uri = wordprocessingShape; inner wps:wsp carries
         // spPr (preset rect geometry + fill + line) + txbx (body paragraphs) + bodyPr.
-        string drawingXml = $@"<w:drawing xmlns:w=""http://schemas.openxmlformats.org/wordprocessingml/2006/main"" xmlns:wp=""http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"" xmlns:a=""http://schemas.openxmlformats.org/drawingml/2006/main"" xmlns:wps=""http://schemas.microsoft.com/office/word/2010/wordprocessingShape""><wp:anchor distT=""0"" distB=""0"" distL=""114300"" distR=""114300"" simplePos=""0"" relativeHeight=""251{siblingShapes:D3}"" behindDoc=""0"" locked=""0"" layoutInCell=""1"" allowOverlap=""1""><wp:simplePos x=""0"" y=""0""/><wp:positionH relativeFrom=""{hRel}""><wp:posOffset>{hPos}</wp:posOffset></wp:positionH><wp:positionV relativeFrom=""{vRel}""><wp:posOffset>{vPos}</wp:posOffset></wp:positionV><wp:extent cx=""{cxEmu}"" cy=""{cyEmu}""/><wp:effectExtent l=""0"" t=""0"" r=""0"" b=""0""/>{wrapInnerXml}<wp:docPr id=""{docPropId}"" name=""{System.Security.SecurityElement.Escape(altText)}""/><wp:cNvGraphicFramePr/><a:graphic><a:graphicData uri=""http://schemas.microsoft.com/office/word/2010/wordprocessingShape""><wps:wsp><wps:cNvSpPr txBox=""1""/><wps:spPr><a:xfrm><a:off x=""0"" y=""0""/><a:ext cx=""{cxEmu}"" cy=""{cyEmu}""/></a:xfrm><a:prstGeom prst=""rect""><a:avLst/></a:prstGeom>{fillXml}{lnXml}</wps:spPr><wps:txbx><w:txbxContent>{txbxBodyXml}</w:txbxContent></wps:txbx><wps:bodyPr rot=""0"" wrap=""square"" lIns=""{lIns}"" tIns=""{tIns}"" rIns=""{rIns}"" bIns=""{bIns}"" anchor=""t"" anchorCtr=""0""/></wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing>";
+        string drawingXml = $@"<w:drawing xmlns:w=""http://schemas.openxmlformats.org/wordprocessingml/2006/main"" xmlns:wp=""http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"" xmlns:a=""http://schemas.openxmlformats.org/drawingml/2006/main"" xmlns:wps=""http://schemas.microsoft.com/office/word/2010/wordprocessingShape""><wp:anchor distT=""0"" distB=""0"" distL=""114300"" distR=""114300"" simplePos=""0"" relativeHeight=""251{siblingShapes:D3}"" behindDoc=""0"" locked=""0"" layoutInCell=""1"" allowOverlap=""1""><wp:simplePos x=""0"" y=""0""/><wp:positionH relativeFrom=""{hRel}""><wp:posOffset>{hPos}</wp:posOffset></wp:positionH><wp:positionV relativeFrom=""{vRel}""><wp:posOffset>{vPos}</wp:posOffset></wp:positionV><wp:extent cx=""{cxEmu}"" cy=""{cyEmu}""/><wp:effectExtent l=""0"" t=""0"" r=""0"" b=""0""/>{wrapInnerXml}<wp:docPr id=""{docPropId}"" name=""{System.Security.SecurityElement.Escape(altText)}""/><wp:cNvGraphicFramePr/><a:graphic><a:graphicData uri=""http://schemas.microsoft.com/office/word/2010/wordprocessingShape""><wps:wsp><wps:cNvSpPr txBox=""1""/><wps:spPr><a:xfrm{rotAttr}><a:off x=""0"" y=""0""/><a:ext cx=""{cxEmu}"" cy=""{cyEmu}""/></a:xfrm><a:prstGeom prst=""{geom}""><a:avLst/></a:prstGeom>{fillXml}{lnXml}{effectXml}</wps:spPr><wps:txbx><w:txbxContent>{txbxBodyXml}</w:txbxContent></wps:txbx><wps:bodyPr rot=""0""{vertAttr} wrap=""square"" lIns=""{lIns}"" tIns=""{tIns}"" rIns=""{rIns}"" bIns=""{bIns}"" anchor=""{anchorVal}"" anchorCtr=""0""/></wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing>";
 
         var drawing = ParseDrawingFromXml(drawingXml);
         var run = new Run(drawing);
@@ -1858,6 +1884,127 @@ public partial class WordHandler
         "sysdot"                      => "sysDot",
         _                             => "solid",
     };
+
+    /// <summary>Build the <c>rot</c> attribute (with leading space) for
+    /// <c>&lt;a:xfrm&gt;</c>. Accepts raw OOXML 60000ths-of-a-degree (the dump
+    /// form, e.g. 2700000) or plain degrees (e.g. 45). A value ≤ 360 is read as
+    /// degrees; anything larger is the raw unit. Returns "" when unset.</summary>
+    private static string BuildRotAttr(string? rotation)
+    {
+        if (string.IsNullOrWhiteSpace(rotation)) return "";
+        var v = rotation.Trim().TrimEnd('°'); // tolerate a trailing degree sign
+        if (!double.TryParse(v, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var num)) return "";
+        long units = Math.Abs(num) <= 360 ? (long)Math.Round(num * 60000) : (long)Math.Round(num);
+        units %= 21_600_000; if (units < 0) units += 21_600_000;
+        return units == 0 ? "" : $" rot=\"{units}\"";
+    }
+
+    /// <summary>bodyPr text-flow direction. Pass-through of OOXML ST_TextVerticalType
+    /// values (the dump form); a couple of friendly aliases map in too.</summary>
+    private static string SanitizeBodyVert(string vert) => vert.Trim().ToLowerInvariant() switch
+    {
+        "horz" or "horizontal"        => "horz",
+        "vert" or "vertical"          => "vert",
+        "vert270"                     => "vert270",
+        "wordartvert"                 => "wordArtVert",
+        "eavert" or "eastasianvert"   => "eaVert",
+        "mongolianvert"               => "mongolianVert",
+        "wordartvertrtl"              => "wordArtVertRtl",
+        _                             => "horz",
+    };
+
+    /// <summary>bodyPr vertical text anchor (t / ctr / b). Defaults to top.</summary>
+    private static string SanitizeBodyAnchor(string? anchor) => (anchor ?? "").Trim().ToLowerInvariant() switch
+    {
+        "ctr" or "center" or "middle" => "ctr",
+        "b" or "bottom"               => "b",
+        "just" or "justified"          => "just",
+        "dist" or "distributed"        => "dist",
+        _                             => "t",
+    };
+
+    /// <summary>solidFill, optionally translucent. Opacity accepts 0-100000
+    /// (OOXML alpha, the dump form), a "NN%" string, or a 0-1 / 0-100 number.</summary>
+    private static string BuildSolidFillXml(string color, string? opacity)
+    {
+        var alpha = ParseAlpha(opacity);
+        var clr = alpha == null
+            ? $"<a:srgbClr val=\"{SanitizeHex(color)}\"/>"
+            : $"<a:srgbClr val=\"{SanitizeHex(color)}\"><a:alpha val=\"{alpha}\"/></a:srgbClr>";
+        return $"<a:solidFill>{clr}</a:solidFill>";
+    }
+
+    // Normalize an opacity input to OOXML alpha (0-100000), or null when unset.
+    private static int? ParseAlpha(string? opacity)
+    {
+        if (string.IsNullOrWhiteSpace(opacity)) return null;
+        var s = opacity.Trim();
+        bool pct = s.EndsWith("%");
+        if (pct) s = s[..^1].Trim();
+        if (!double.TryParse(s, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var n)) return null;
+        // Heuristic: "80%"/"0.8" → 80000; "80" → 80000; raw "80000" → 80000.
+        double alpha = pct ? n * 1000
+            : n <= 1 ? n * 100000
+            : n <= 100 ? n * 1000
+            : n;
+        return Math.Clamp((int)Math.Round(alpha), 0, 100000);
+    }
+
+    /// <summary>Build <c>&lt;a:gradFill&gt;</c> from a stop list. Each stop is
+    /// <c>color</c> with an optional <c>@pos</c> (0-100000); positions are spread
+    /// evenly when omitted. e.g. "FF6B6B@0;FFE66D@100000" or "FF6B6B,FFE66D".</summary>
+    private static string BuildGradientXml(string gradient)
+    {
+        var stops = gradient.Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries);
+        if (stops.Length == 0) return "<a:noFill/>";
+        var sb = new System.Text.StringBuilder("<a:gradFill><a:gsLst>");
+        for (int i = 0; i < stops.Length; i++)
+        {
+            var part = stops[i].Trim();
+            string color; int pos;
+            var at = part.IndexOf('@');
+            if (at >= 0)
+            {
+                color = part[..at].Trim();
+                if (!int.TryParse(part[(at + 1)..].Trim(), out pos))
+                    pos = stops.Length == 1 ? 0 : (int)Math.Round(i * 100000.0 / (stops.Length - 1));
+            }
+            else
+            {
+                color = part;
+                pos = stops.Length == 1 ? 0 : (int)Math.Round(i * 100000.0 / (stops.Length - 1));
+            }
+            sb.Append($"<a:gs pos=\"{Math.Clamp(pos, 0, 100000)}\"><a:srgbClr val=\"{SanitizeHex(color)}\"/></a:gs>");
+        }
+        sb.Append("</a:gsLst></a:gradFill>");
+        return sb.ToString();
+    }
+
+    /// <summary>Build <c>&lt;a:effectLst&gt;</c> with an outer shadow. Accepts
+    /// "true" (a standard offset drop shadow) or a compact
+    /// "blurRad;dist;dir;color;alpha" tuple (the dump form). Returns "" when
+    /// unset / "false".</summary>
+    private static string BuildShadowXml(string? shadow)
+    {
+        if (string.IsNullOrWhiteSpace(shadow)) return "";
+        var s = shadow.Trim();
+        if (string.Equals(s, "false", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(s, "none", StringComparison.OrdinalIgnoreCase)) return "";
+        // Defaults match Word's standard preset drop shadow.
+        long blur = 50800, dist = 38100, dir = 5400000; string color = "000000"; int alpha = 40000;
+        if (!string.Equals(s, "true", StringComparison.OrdinalIgnoreCase))
+        {
+            var p = s.Split(';');
+            if (p.Length > 0 && long.TryParse(p[0], out var b)) blur = b;
+            if (p.Length > 1 && long.TryParse(p[1], out var d)) dist = d;
+            if (p.Length > 2 && long.TryParse(p[2], out var dr)) dir = dr;
+            if (p.Length > 3 && !string.IsNullOrWhiteSpace(p[3])) color = SanitizeHex(p[3]);
+            if (p.Length > 4 && int.TryParse(p[4], out var a)) alpha = Math.Clamp(a, 0, 100000);
+        }
+        return $"<a:effectLst><a:outerShdw blurRad=\"{blur}\" dist=\"{dist}\" dir=\"{dir}\" algn=\"t\" rotWithShape=\"0\"><a:srgbClr val=\"{color}\"><a:alpha val=\"{alpha}\"/></a:srgbClr></a:outerShdw></a:effectLst>";
+    }
 
     /// <summary>Whitelist of common preset geometry names. Anything else
     /// falls back to rect rather than emitting schema-invalid XML.</summary>

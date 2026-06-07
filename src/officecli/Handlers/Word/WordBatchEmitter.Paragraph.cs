@@ -1151,11 +1151,52 @@ public static partial class WordBatchEmitter
                 else if (anchor.Element(wp + "wrapTopAndBottom") != null) props["wrap"] = "topAndBottom";
                 else if (anchor.Element(wp + "wrapNone") != null) props["wrap"] = "none";
             }
-            // Fill: solidFill > srgbClr inside wps:spPr.
             var spPr = doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "spPr");
+            // Geometry preset (rect default). roundRect etc. otherwise reverted
+            // to a sharp rectangle on rebuild.
+            var prst = spPr?.Element(a + "prstGeom")?.Attribute("prst")?.Value;
+            if (!string.IsNullOrEmpty(prst) && prst != "rect") props["geometry"] = prst;
+            // Rotation (<a:xfrm rot>, 60000ths of a degree). Round-trips raw.
+            var rot = spPr?.Element(a + "xfrm")?.Attribute("rot")?.Value;
+            if (!string.IsNullOrEmpty(rot) && rot != "0") props["rotation"] = rot;
+            // Fill: solidFill (with optional alpha) or gradFill inside wps:spPr.
             var solidFill = spPr?.Element(a + "solidFill");
-            var srgbClr = solidFill?.Element(a + "srgbClr")?.Attribute("val")?.Value;
-            if (!string.IsNullOrEmpty(srgbClr)) props["fill"] = srgbClr;
+            var srgbClr = solidFill?.Element(a + "srgbClr");
+            if (srgbClr?.Attribute("val")?.Value is string fillHex && !string.IsNullOrEmpty(fillHex))
+            {
+                props["fill"] = fillHex;
+                var alpha = srgbClr.Element(a + "alpha")?.Attribute("val")?.Value;
+                if (!string.IsNullOrEmpty(alpha)) props["fill.opacity"] = alpha;
+            }
+            else
+            {
+                var grad = spPr?.Element(a + "gradFill");
+                if (grad != null)
+                {
+                    var stops = grad.Element(a + "gsLst")?.Elements(a + "gs")
+                        .Select(gs => (gs.Element(a + "srgbClr")?.Attribute("val")?.Value, gs.Attribute("pos")?.Value))
+                        .Where(t => !string.IsNullOrEmpty(t.Item1))
+                        .Select(t => $"{t.Item1}@{t.Item2 ?? "0"}");
+                    if (stops != null)
+                    {
+                        var joined = string.Join(";", stops);
+                        if (!string.IsNullOrEmpty(joined)) props["fill.gradient"] = joined;
+                    }
+                }
+            }
+            // Shadow (<a:effectLst><a:outerShdw>): emit the compact tuple the
+            // add path understands so the drop shadow round-trips faithfully.
+            var shdw = spPr?.Element(a + "effectLst")?.Element(a + "outerShdw");
+            if (shdw != null)
+            {
+                var sClr = shdw.Element(a + "srgbClr");
+                props["shadow"] = string.Join(";",
+                    shdw.Attribute("blurRad")?.Value ?? "50800",
+                    shdw.Attribute("dist")?.Value ?? "38100",
+                    shdw.Attribute("dir")?.Value ?? "5400000",
+                    sClr?.Attribute("val")?.Value ?? "000000",
+                    sClr?.Element(a + "alpha")?.Attribute("val")?.Value ?? "40000");
+            }
             // Line / border (<a:ln>): width (EMU, round-trips through ParseEmu),
             // solidFill color, and dash style. Without this the textbox outline
             // was dropped entirely on dump→batch — borders vanished and content
@@ -1191,6 +1232,13 @@ public static partial class WordBatchEmitter
                     var v = bodyPr.Attribute(attr)?.Value;
                     if (!string.IsNullOrEmpty(v)) props[key] = v;
                 }
+                // Vertical text flow + vertical anchor. Without these a vertical
+                // (eaVert) box renders as char-wrapped horizontal text and a
+                // centered box anchors to the top.
+                var vert = bodyPr.Attribute("vert")?.Value;
+                if (!string.IsNullOrEmpty(vert) && vert != "horz") props["textDirection"] = vert;
+                var bAnchor = bodyPr.Attribute("anchor")?.Value;
+                if (!string.IsNullOrEmpty(bAnchor) && bAnchor != "t") props["textAnchor"] = bAnchor;
             }
             // docPr name → alt
             var docPr = doc.Descendants(wp + "docPr").FirstOrDefault();
