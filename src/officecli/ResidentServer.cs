@@ -798,10 +798,21 @@ public class ResidentServer : IDisposable
     // has actually mutated the document.
     private void PromoteToEditable()
     {
-        if (_editable) return;
-        _handler.Dispose();
-        _handler = OfficeCli.Handlers.DocumentHandlerFactory.Open(_filePath, editable: true);
-        _editable = true;
+        if (!_editable)
+        {
+            _handler.Dispose();
+            _handler = OfficeCli.Handlers.DocumentHandlerFactory.Open(_filePath, editable: true);
+            _editable = true;
+        }
+        // Resident keeps the document in memory and only flushes to disk on
+        // save/close, so per-mutation Document.Save() (an O(n) re-serialize
+        // each) is pure waste — and over a long editing session it compounds to
+        // O(n²). Defer it for the resident's whole life. save/close go through
+        // _doc.Save() directly, bypassing the flag, so they still flush. This is
+        // the shared prelude of every mutation command, so it also re-applies
+        // after a handler reopen (screenshot / page-count / refresh reset
+        // _handler). The non-resident batch path sets DeferSave on its own.
+        if (_handler is OfficeCli.Handlers.WordHandler wh) wh.DeferSave = true;
     }
 
     private void ExecuteCommand(ResidentRequest request)
