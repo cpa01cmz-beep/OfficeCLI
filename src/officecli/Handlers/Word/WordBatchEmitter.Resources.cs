@@ -132,6 +132,49 @@ public static partial class WordBatchEmitter
         }
     }
 
+    // <w:footnotePr>/<w:endnotePr> in settings.xml carry <w:footnote>/<w:endnote>
+    // child refs pointing at the separator + continuationSeparator notes
+    // (typically id="-1" and id="0") that live in footnotes.xml / endnotes.xml.
+    // The dump round-trips note CONTENT via typed `add footnote`/`add endnote`
+    // (body-referenced notes only) — it never recreates a separator-only notes
+    // part. So when a source carries those separator refs but no body-referenced
+    // notes (a footnotes.xml holding ONLY the id -1/0 separators, which every
+    // Word doc has), replaying the settings raw-set leaves the refs pointing at
+    // notes parts that don't exist in the blank target, and the referential
+    // validator rejects the result ("w:footnote … does not exist in part
+    // /MainDocumentPart/FootnotesPart"). Word auto-manages separators, so
+    // dropping these refs is lossless; strip them while keeping footnotePr/
+    // endnotePr and any real config children (pos, numFmt, numStart, …).
+    private static string StripDanglingNoteSeparatorRefs(string settingsXml)
+    {
+        if (string.IsNullOrEmpty(settingsXml) || !settingsXml.StartsWith("<")) return settingsXml;
+        // Fast path: nothing to strip unless a note-properties block is present.
+        if (!settingsXml.Contains("notePr")) return settingsXml;
+        try
+        {
+            var doc = System.Xml.Linq.XDocument.Parse(settingsXml);
+            if (doc.Root == null) return settingsXml;
+            var wNs = (System.Xml.Linq.XNamespace)"http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+            var removed = false;
+            foreach (var pr in doc.Descendants(wNs + "footnotePr")
+                         .Concat(doc.Descendants(wNs + "endnotePr")).ToList())
+            {
+                foreach (var sep in pr.Elements(wNs + "footnote")
+                             .Concat(pr.Elements(wNs + "endnote")).ToList())
+                {
+                    sep.Remove();
+                    removed = true;
+                }
+            }
+            if (!removed) return settingsXml;
+            return doc.Root.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
+        }
+        catch
+        {
+            return settingsXml;
+        }
+    }
+
     private static void EmitThemeRaw(WordHandler word, List<BatchItem> items)
     {
         // Theme carries clrScheme + fontScheme + fmtScheme — pure structured
@@ -199,6 +242,7 @@ public static partial class WordBatchEmitter
         xml = CanonicalizeRawXml(xml);
         if (string.IsNullOrEmpty(xml) || !xml.StartsWith("<"))
             xml = "<w:settings xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" />";
+        xml = StripDanglingNoteSeparatorRefs(xml);
 
         items.Add(new BatchItem
         {
