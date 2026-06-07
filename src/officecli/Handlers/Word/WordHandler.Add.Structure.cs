@@ -626,6 +626,26 @@ public partial class WordHandler
             {
                 existingByName!.Remove();
             }
+            else if (explicitId)
+            {
+                // Two distinct styles (the styleId collision is already caught
+                // above, so this explicit styleId is unique) sharing a display
+                // name is a real-world artifact — LibreOffice / document merges
+                // produce e.g. styleId "Subtitle1" + "Subtitle10" both named
+                // "Subtitle1". Word keys its Styles pane by name, so the
+                // duplicate collides in the UI, but NOTHING in the document
+                // references the name (pStyle / basedOn / link / next all use
+                // styleId). Auto-suffix the display name to a unique value: both
+                // styles survive and become distinguishable in Word, and
+                // dump→batch of such a source no longer fails (or drops the
+                // second style). Earlier BUG-R17-02 suffixed the *id* and left
+                // identical names — suffixing the name is the correct resolution.
+                // Gated on explicitId: an interactive `add style name=X` with no
+                // id is a likely typo and still gets the hard error below.
+                var baseName = styleName!;
+                int suffix = 2;
+                do { styleName = $"{baseName} {suffix++}"; } while (NameTaken(styleName));
+            }
             else
             {
                 throw new ArgumentException(
