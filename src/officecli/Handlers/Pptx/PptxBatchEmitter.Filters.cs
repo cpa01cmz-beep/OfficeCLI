@@ -132,6 +132,14 @@ public static partial class PptxBatchEmitter
                 result.Remove("fill");
             else if (fillVal.Equals("pattern", StringComparison.OrdinalIgnoreCase) && result.ContainsKey("pattern"))
                 result.Remove("fill");
+            // fill="image" is a Get-side type marker for a blipFill (e.g. a table
+            // cell or shape with an embedded picture fill). The image part is not
+            // surfaced as a re-importable source, so replay would parse "image" as
+            // a color and fail the op. Drop it — the element replays with default
+            // fill until cell/shape image-fill round-trip is implemented end-to-end.
+            // Mirrors the background="image" / image="true" filters below.
+            else if (fillVal.Equals("image", StringComparison.OrdinalIgnoreCase))
+                result.Remove("fill");
         }
 
         // Slide background="image" is a Get-side type marker — the embedded
