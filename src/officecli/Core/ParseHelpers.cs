@@ -374,6 +374,34 @@ internal static class ParseHelpers
     }
 
     /// <summary>
+    /// BUG-R4B(BUG1): Leniently parse an integer-valued OOXML attribute that
+    /// some producers emit with a fractional part (e.g. <c>w:w="0.0"</c> /
+    /// <c>w:w="9440.0"</c>). The Open XML SDK's typed accessors (e.g.
+    /// <c>Int32Value.Value</c>) parse the raw string lazily and throw a bare
+    /// <see cref="FormatException"/> ("The input string '0.0' was not in a
+    /// correct format") the first time the value is read. Reading the raw
+    /// <c>InnerText</c> and routing it through this helper truncates the
+    /// fractional part to an int (matching Word's own tolerance for these
+    /// attributes), so dump/get no longer crash on such files.
+    ///
+    /// Returns null when <paramref name="raw"/> is null/blank or cannot be
+    /// parsed even leniently.
+    /// </summary>
+    public static int? LenientInt(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        raw = raw.Trim();
+        if (int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var i))
+            return i;
+        // Accept a decimal string ("0.0", "9440.0", "12.5") and truncate.
+        if (double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var d)
+            && !double.IsNaN(d) && !double.IsInfinity(d)
+            && d >= int.MinValue && d <= int.MaxValue)
+            return (int)d;
+        return null;
+    }
+
+    /// <summary>
     /// Safely parse a string as int, throwing ArgumentException with a clear message on failure.
     /// </summary>
     public static int SafeParseInt(string value, string propertyName)

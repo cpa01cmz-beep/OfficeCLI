@@ -380,6 +380,14 @@ public static partial class WordBatchEmitter
         // a zip lacking word/document.xml. Surface a CliException pointing at
         // the file rather than leaking an internal path the user never asked
         // for (common when dumping "/" on a corrupt or non-Word zip).
+        //
+        // BUG-R4B(BUG1): the original catch swallowed EVERY non-CliException as
+        // "document.xml is missing", which is misleading when the part IS
+        // present but a value inside it failed to parse (e.g. a decimal-valued
+        // integer attribute like w:tblInd w:w="0.0"). Distinguish the two: the
+        // genuine missing-part path bottoms out in "Path not found: /body";
+        // anything else is a real read/parse failure and must surface its own
+        // message so the user can see the actual cause.
         DocumentNode bodyNode;
         try
         {
@@ -387,8 +395,14 @@ public static partial class WordBatchEmitter
         }
         catch (Exception ex) when (ex is not CliException)
         {
+            var isMissingPart = ex is ArgumentException
+                && ex.Message.Contains("Path not found", StringComparison.OrdinalIgnoreCase);
+            if (isMissingPart)
+                throw new CliException(
+                    "dump failed: word/document.xml is missing — the file may not be a valid Word document")
+                    { Code = "invalid_document" };
             throw new CliException(
-                "dump failed: word/document.xml is missing — the file may not be a valid Word document")
+                $"dump failed: could not read word/document.xml — {ex.Message}")
                 { Code = "invalid_document" };
         }
         if (bodyNode.Children == null) return;

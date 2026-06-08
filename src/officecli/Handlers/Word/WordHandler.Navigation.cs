@@ -46,6 +46,21 @@ public partial class WordHandler
     /// canonical Get readback (BUG-R2-04). Use this helper at every
     /// toggle-readback site so the override is honored.
     /// </summary>
+    // BUG-R4B(BUG1): width-bearing OOXML attributes (w:tblInd/@w,
+    // w:tblCellSpacing/@w, w:tcMar margins, …) are typed Int32Value in the SDK
+    // and throw FormatException on the first .Value read when a producer emits
+    // a decimal string ("0.0", "9440.0"). Read the raw InnerText and parse
+    // leniently (truncate) so get/dump survive such files. Returns null when
+    // absent or unparsable.
+    private static int? SafeWidth(Int32Value? w) =>
+        w is null ? null : ParseHelpers.LenientInt(w.InnerText);
+
+    private static int? SafeWidth(StringValue? w) =>
+        w is null ? null : ParseHelpers.LenientInt(w.InnerText);
+
+    private static int? SafeWidth(Int16Value? w) =>
+        w is null ? null : ParseHelpers.LenientInt(w.InnerText);
+
     private static bool IsToggleOn(Bold? t)   => t != null && (t.Val == null || t.Val.Value);
     private static bool IsToggleOn(Italic? t) => t != null && (t.Val == null || t.Val.Value);
     private static bool IsToggleOn(Strike? t) => t != null && (t.Val == null || t.Val.Value);
@@ -2364,16 +2379,18 @@ public partial class WordHandler
                 }
             }
             // Table width
-            if (tp.TableWidth?.Width?.Value != null)
+            // BUG-R4B(BUG1): read raw InnerText (decimal-tolerant) instead of
+            // .Value, which throws on producers that emit w:w="9440.0".
+            if (SafeWidth(tp.TableWidth?.Width) is int twWidth)
             {
-                var wType = tp.TableWidth.Type?.Value;
+                var wType = tp.TableWidth!.Type?.Value;
                 // BUG-DUMP19-03: type=auto must round-trip as "auto", not
                 // collapse to a bare dxa integer (Width="0").
                 node.Format["width"] = wType == TableWidthUnitValues.Pct
-                    ? (int.Parse(tp.TableWidth.Width.Value) / 50) + "%"
+                    ? (twWidth / 50) + "%"
                     : wType == TableWidthUnitValues.Auto
                         ? "auto"
-                        : tp.TableWidth.Width.Value;
+                        : twWidth.ToString(System.Globalization.CultureInfo.InvariantCulture);
             }
             else if (tp.TableWidth?.Type?.Value == TableWidthUnitValues.Auto)
             {
@@ -2394,11 +2411,12 @@ public partial class WordHandler
             if (tp.TableJustification?.Val?.Value != null)
                 node.Format["align"] = tp.TableJustification.Val.InnerText;
             // Indent
-            if (tp.TableIndentation?.Width?.Value != null)
-                node.Format["indent"] = tp.TableIndentation.Width.Value;
+            // BUG-R4B(BUG1): decimal-tolerant width read (w:tblInd w:w="0.0").
+            if (SafeWidth(tp.TableIndentation?.Width) is int tblIndW)
+                node.Format["indent"] = tblIndW;
             // Cell spacing
-            if (tp.TableCellSpacing?.Width?.Value != null)
-                node.Format["cellSpacing"] = tp.TableCellSpacing.Width.Value;
+            if (SafeWidth(tp.TableCellSpacing?.Width) is int tblCsW)
+                node.Format["cellSpacing"] = tblCsW;
             // Layout — emit "autofit" (not "auto") so the readback token
             // matches the canonical input vocabulary documented in the
             // table add/set help. Set accepts both "auto" and "autofit"
@@ -2413,14 +2431,15 @@ public partial class WordHandler
                 node.Format["direction"] = "rtl";
             // Default cell margin (padding)
             var dcm = tp.TableCellMarginDefault;
-            if (dcm?.TopMargin?.Width?.Value != null)
-                node.Format["padding.top"] = dcm.TopMargin.Width.Value;
-            if (dcm?.BottomMargin?.Width?.Value != null)
-                node.Format["padding.bottom"] = dcm.BottomMargin.Width.Value;
-            if (dcm?.TableCellLeftMargin?.Width?.Value != null)
-                node.Format["padding.left"] = dcm.TableCellLeftMargin.Width.Value;
-            if (dcm?.TableCellRightMargin?.Width?.Value != null)
-                node.Format["padding.right"] = dcm.TableCellRightMargin.Width.Value;
+            // BUG-R4B(BUG1): decimal-tolerant margin reads.
+            if (SafeWidth(dcm?.TopMargin?.Width) is int dcmT)
+                node.Format["padding.top"] = dcmT;
+            if (SafeWidth(dcm?.BottomMargin?.Width) is int dcmB)
+                node.Format["padding.bottom"] = dcmB;
+            if (SafeWidth(dcm?.TableCellLeftMargin?.Width) is int dcmL)
+                node.Format["padding.left"] = dcmL;
+            if (SafeWidth(dcm?.TableCellRightMargin?.Width) is int dcmR)
+                node.Format["padding.right"] = dcmR;
             // Table-level shading (w:tblPr/w:shd). Mirror paragraph shading
             // pattern: split into shading.val/.fill/.color sub-keys.
             // WordBatchEmitter's shading-fold collapses these into a single
@@ -4086,19 +4105,18 @@ public partial class WordHandler
             // BUG-R4-05: emit width with explicit unit suffix (dxa/%) — root
             // CLAUDE.md mandates unit-qualified width readback. Bare integer
             // ("3000") is the historic bug.
-            if (tcPr.TableCellWidth?.Width?.Value != null)
+            // BUG-R4B(BUG1): decimal-tolerant cell-width read.
+            if (SafeWidth(tcPr.TableCellWidth?.Width) is int cwRaw)
             {
-                var cwType = tcPr.TableCellWidth.Type?.Value;
-                if (cwType == TableWidthUnitValues.Pct
-                    && int.TryParse(tcPr.TableCellWidth.Width.Value, out var pctRaw))
-                    node.Format["width"] = (pctRaw / 50) + "%";
+                var cwType = tcPr.TableCellWidth!.Type?.Value;
+                if (cwType == TableWidthUnitValues.Pct)
+                    node.Format["width"] = (cwRaw / 50) + "%";
                 else if (cwType == TableWidthUnitValues.Auto)
                     node.Format["width"] = "auto";
-                else if (cwType == TableWidthUnitValues.Nil
-                    || tcPr.TableCellWidth.Width.Value == "0")
+                else if (cwType == TableWidthUnitValues.Nil || cwRaw == 0)
                     node.Format["width"] = "0dxa";
                 else
-                    node.Format["width"] = tcPr.TableCellWidth.Width.Value + "dxa";
+                    node.Format["width"] = cwRaw.ToString(System.Globalization.CultureInfo.InvariantCulture) + "dxa";
             }
             // Vertical alignment
             if (tcPr.TableCellVerticalAlignment?.Val?.Value != null)
@@ -4119,10 +4137,11 @@ public partial class WordHandler
             var mar = tcPr.TableCellMargin;
             if (mar != null)
             {
-                if (mar.TopMargin?.Width?.Value != null) node.Format["padding.top"] = mar.TopMargin.Width.Value;
-                if (mar.BottomMargin?.Width?.Value != null) node.Format["padding.bottom"] = mar.BottomMargin.Width.Value;
-                if (mar.LeftMargin?.Width?.Value != null) node.Format["padding.left"] = mar.LeftMargin.Width.Value;
-                if (mar.RightMargin?.Width?.Value != null) node.Format["padding.right"] = mar.RightMargin.Width.Value;
+                // BUG-R4B(BUG1): decimal-tolerant cell-margin reads.
+                if (SafeWidth(mar.TopMargin?.Width) is int mT) node.Format["padding.top"] = mT;
+                if (SafeWidth(mar.BottomMargin?.Width) is int mB) node.Format["padding.bottom"] = mB;
+                if (SafeWidth(mar.LeftMargin?.Width) is int mL) node.Format["padding.left"] = mL;
+                if (SafeWidth(mar.RightMargin?.Width) is int mR) node.Format["padding.right"] = mR;
             }
             // Text direction
             if (tcPr.TextDirection?.Val?.Value != null)
