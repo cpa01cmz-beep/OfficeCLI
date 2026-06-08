@@ -65,6 +65,17 @@ public partial class WordHandler
                     node.Format["columns.equalWidth"] = cols.EqualWidth.Value;
                 if (cols.Separator?.Value == true)
                     node.Format["columns.separator"] = true;
+                // CONSISTENCY(root-vs-section-readback): mirror BuildSectionNode —
+                // emit the explicit per-column widths/spaces for an unequal-width
+                // layout. Without this the body-level <w:cols equalWidth="false">
+                // round-tripped with no <w:col> children, silently collapsing the
+                // source's uneven columns to equal width.
+                var colDefs = cols.Elements<Column>().ToList();
+                if (colDefs.Count > 0)
+                {
+                    node.Format["colWidths"] = string.Join(",", colDefs.Select(c => c.Width?.Value ?? "0"));
+                    node.Format["colSpaces"] = string.Join(",", colDefs.Select(c => c.Space?.Value ?? "0"));
+                }
             }
 
             // ==================== SectionType ====================

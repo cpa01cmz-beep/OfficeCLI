@@ -264,6 +264,13 @@ public static partial class WordBatchEmitter
         // here, multi-column documents silently revert to single column on
         // round-trip.
         "columns", "columnSpace",
+        // BUG-R3: explicit per-column widths/spaces for an unequal-width
+        // (equalWidth="false") layout. Get now surfaces these on the body-level
+        // section (mirroring per-section readback) and Set / accepts them; without
+        // them here the emitted <w:cols equalWidth="false"> had no <w:col>
+        // children on replay, silently collapsing uneven columns to equal width.
+        // They don't match the "columns." prefix group so must be listed.
+        "colWidths", "colSpaces",
         // Document-level final-section break type (oddPage / evenPage /
         // continuous). Set / accepts section.type but the canonical Get
         // surfaces it bare; emit so the trailing sectPr's type survives.
