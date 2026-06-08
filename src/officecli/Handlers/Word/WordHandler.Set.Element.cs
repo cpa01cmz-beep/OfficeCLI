@@ -893,8 +893,35 @@ public partial class WordHandler
                     break;
                 }
                 default:
-                    unsupported.Add(key);
+                {
+                    // BUG-R4B(BUG4): run-level formatting keys (color, bold,
+                    // italic, font, size, underline, …) were rejected on a
+                    // hyperlink even though the identical key works on a run —
+                    // the dump emitter happily emits `color=text1` on a
+                    // hyperlink, so replay failed. Route these through the SAME
+                    // ApplyRunFormatting path the run handler uses, applied to
+                    // every child run, so theme/scheme colors and every other
+                    // run property resolve identically. ApplyRunFormatting
+                    // returns false for keys it doesn't own → genuinely
+                    // unsupported keys still surface.
+                    var hlRuns = hl.Descendants<Run>().ToList();
+                    if (hlRuns.Count == 0)
+                    {
+                        // No runs yet — nothing to format. Treat as unsupported
+                        // so the user gets feedback (mirrors run-on-empty).
+                        unsupported.Add(key);
+                        break;
+                    }
+                    bool appliedAny = false;
+                    foreach (var hlRun in hlRuns)
+                    {
+                        if (ApplyRunFormatting(EnsureRunProperties(hlRun), key, value))
+                            appliedAny = true;
+                    }
+                    if (!appliedAny)
+                        unsupported.Add(key);
                     break;
+                }
             }
         }
 

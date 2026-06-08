@@ -530,7 +530,15 @@ public partial class WordHandler
 
         var hlRProps = new RunProperties();
         if (properties.TryGetValue("color", out var hlColor))
-            hlRProps.Color = new Color { Val = SanitizeHex(hlColor) };
+        {
+            // BUG-R4B(BUG4): accept theme/scheme color names (text1, accent1, …)
+            // on hyperlink Add the same way the run color path does — the old
+            // bare SanitizeHex turned "text1" into a literal (invalid) hex. Route
+            // through ApplyRunFormatting's color case so scheme colors write the
+            // ThemeColor attribute and the dump→replay round-trip survives.
+            hlRProps.RemoveAllChildren<Color>();
+            ApplyRunFormatting(hlRProps, "color", hlColor);
+        }
         else
         {
             // Read hyperlink color from document theme, fallback to Word default
