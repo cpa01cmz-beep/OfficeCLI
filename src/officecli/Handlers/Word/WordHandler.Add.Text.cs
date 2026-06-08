@@ -1201,7 +1201,13 @@ public partial class WordHandler
             if (!string.IsNullOrEmpty(hTcAuthor) || !string.IsNullOrEmpty(hTcDate) || !string.IsNullOrEmpty(hTcId))
             {
                 var author = string.IsNullOrEmpty(hTcAuthor) ? "OfficeCLI" : hTcAuthor!;
-                DateTime date = !string.IsNullOrEmpty(hTcDate) && DateTime.TryParse(hTcDate, out var hd)
+                // BUG-R4F-03: parse with RoundtripKind so a UTC (…Z) revision
+                // date stays Utc and re-serializes as …Z, matching the source
+                // byte-for-byte (default TryParse degrades Z to host Local,
+                // making dump→batch→dump non-idempotent and timezone-dependent).
+                // Mirrors the comment-date path in Add.Misc.cs.
+                DateTime date = !string.IsNullOrEmpty(hTcDate)
+                    && DateTime.TryParse(hTcDate, null, System.Globalization.DateTimeStyles.RoundtripKind, out var hd)
                     ? hd : DateTime.UtcNow;
                 // ¶ mark: <w:pPr>…<w:rPr><w:ins/>…</w:rPr></w:pPr>
                 // Append (not prepend) the mark rPr: in CT_PPr the paragraph-mark
@@ -1267,7 +1273,9 @@ public partial class WordHandler
                 properties.TryGetValue("revision.id", out pmdId);
             }
             var author = string.IsNullOrEmpty(pmdAuthor) ? "OfficeCLI" : pmdAuthor!;
-            DateTime date = !string.IsNullOrEmpty(pmdDate) && DateTime.TryParse(pmdDate, out var hd2)
+            // BUG-R4F-03: RoundtripKind keeps a …Z date in Utc (see above).
+            DateTime date = !string.IsNullOrEmpty(pmdDate)
+                && DateTime.TryParse(pmdDate, null, System.Globalization.DateTimeStyles.RoundtripKind, out var hd2)
                 ? hd2 : DateTime.UtcNow;
             // Append (not prepend) the paragraph-mark rPr. In CT_PPr the
             // paragraph-mark <w:rPr> sits near the END of the sequence (after
@@ -2059,8 +2067,9 @@ public partial class WordHandler
             var rprChange = new RunPropertiesChange();
             if (!string.IsNullOrEmpty(trackChangeAuthor))
                 rprChange.Author = trackChangeAuthor;
+            // BUG-R4F-03: RoundtripKind keeps a …Z date in Utc (see above).
             if (!string.IsNullOrEmpty(trackChangeDate)
-                && DateTime.TryParse(trackChangeDate, out var tcfDate))
+                && DateTime.TryParse(trackChangeDate, null, System.Globalization.DateTimeStyles.RoundtripKind, out var tcfDate))
                 rprChange.Date = tcfDate;
             rprChange.Id = !string.IsNullOrEmpty(trackChangeId)
                 ? trackChangeId
@@ -2084,8 +2093,9 @@ public partial class WordHandler
                     if (wrapper is InsertedRun insW) insW.Author = trackChangeAuthor;
                     else if (wrapper is DeletedRun delW) delW.Author = trackChangeAuthor;
                 }
+                // BUG-R4F-03: RoundtripKind keeps a …Z date in Utc (see above).
                 if (!string.IsNullOrEmpty(trackChangeDate)
-                    && DateTime.TryParse(trackChangeDate, out var tcDate))
+                    && DateTime.TryParse(trackChangeDate, null, System.Globalization.DateTimeStyles.RoundtripKind, out var tcDate))
                 {
                     if (wrapper is InsertedRun insW2) insW2.Date = tcDate;
                     else if (wrapper is DeletedRun delW2) delW2.Date = tcDate;
@@ -2145,8 +2155,9 @@ public partial class WordHandler
                     if (wrapper is MoveFromRun mfA) mfA.Author = trackChangeAuthor;
                     else if (wrapper is MoveToRun mtA) mtA.Author = trackChangeAuthor;
                 }
+                // BUG-R4F-03: RoundtripKind keeps a …Z date in Utc (see above).
                 if (!string.IsNullOrEmpty(trackChangeDate)
-                    && DateTime.TryParse(trackChangeDate, out var mvDate))
+                    && DateTime.TryParse(trackChangeDate, null, System.Globalization.DateTimeStyles.RoundtripKind, out var mvDate))
                 {
                     if (wrapper is MoveFromRun mfD) mfD.Date = mvDate;
                     else if (wrapper is MoveToRun mtD) mtD.Date = mvDate;
