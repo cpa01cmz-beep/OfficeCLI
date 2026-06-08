@@ -463,6 +463,28 @@ internal static class GenericXmlQuery
         // be serialized as a foreign attribute and rejected by validation.
         if (valProp.GetValue(newChild) == null)
             return null;
+
+        // BUG-R9A(BUG2): the SDK's typed-val binding is LENIENT — a numeric
+        // Val (UInt32Value, e.g. w:fitText/@w:val which is ST_DecimalNumber)
+        // happily holds the raw string "true", so valProp.GetValue is non-null
+        // even though the attribute is schema-invalid (validation later rejects
+        // "'true' is not a valid 'UInt32'"). Boolean tokens are only legitimate
+        // on boolean wrapper Val types, and those have already been normalized
+        // to "1"/"0" upstream (NormalizeOnOffIfTyped) before reaching this
+        // probe — so a "true"/"false" token still present here against a
+        // non-boolean Val type is exactly the bad bool→non-bool coercion.
+        // Reject it so the caller surfaces an UNSUPPORTED/invalid-value message
+        // instead of silently writing schema-invalid XML. Numeric values
+        // (fitText=2000) and real boolean toggles are unaffected.
+        var trimmedVal = escapedVal.Trim();
+        if ((trimmedVal.Equals("true", StringComparison.OrdinalIgnoreCase)
+             || trimmedVal.Equals("false", StringComparison.OrdinalIgnoreCase)))
+        {
+            var valTypeName = (Nullable.GetUnderlyingType(valProp.PropertyType)
+                ?? valProp.PropertyType).Name;
+            if (valTypeName is not ("OnOffValue" or "TrueFalseValue" or "TrueFalseBlankValue"))
+                return null;
+        }
         return newChild;
     }
 
