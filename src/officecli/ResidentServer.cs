@@ -1005,6 +1005,16 @@ public class ResidentServer : IDisposable
             if (deferHandler != null) deferHandler.DeferSave = prevDefer;
         }
 
+        // BUG-R7B(BUG2): reconcile document-wide ids (wp:docPr, paraId, sdt)
+        // after the deferred batch. Each item ran under DeferSave so the
+        // per-raw-set id passes were skipped; a raw-set of a header/footer part
+        // can leave colliding wp:docPr ids in the in-memory tree until the next
+        // save/close. Run the same document-scoped passes here so a `validate`
+        // (or watch render) issued before the eventual save sees the same clean
+        // state save/close would write. Mirrors the non-resident path, where
+        // Dispose-time FinalizeDeferredIds already does this.
+        deferHandler?.ReconcileGlobalIds();
+
         // Judgment contract: batch is classified as a judgment command (root
         // CLAUDE.md "Judgment: any batch step failed -> outer false"). The
         // verdict flips to failure as soon as ANY step is rejected. Keeps

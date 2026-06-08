@@ -556,6 +556,20 @@ public partial class WordHandler : IDocumentHandler
         catch { /* id normalization is best-effort; never block the flush */ }
     }
 
+    /// <summary>
+    /// BUG-R7B(BUG2): document-wide id reconciliation, callable mid-session.
+    /// Under <see cref="DeferSave"/> the per-raw-set id passes
+    /// (EnsureDocPropIds / EnsureAllParaIds / EnsureSdtIds) are skipped, so a
+    /// batch that raw-sets header/footer parts can leave the in-memory document
+    /// with colliding wp:docPr ids until the next save/close runs
+    /// <see cref="FinalizeDeferredIds"/>. A `validate` (or any flush) issued
+    /// between the batch and the save would then see the duplicates. The
+    /// resident batch path calls this right after the batch loop so the
+    /// in-memory tree matches the on-disk state save/close would produce —
+    /// the same document-scoped passes, run once.
+    /// </summary>
+    public void ReconcileGlobalIds() => FinalizeDeferredIds();
+
     public void Save()
     {
         if (DeferSave) FinalizeDeferredIds();
