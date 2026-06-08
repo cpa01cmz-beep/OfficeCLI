@@ -1315,6 +1315,14 @@ public partial class WordHandler
         return resultPath;
     }
 
+    // BUG-R6A(BUG1): block-level containers that host w:p children and therefore
+    // cannot carry m:oMath / m:oMathPara as a direct child. The equation-add path
+    // must wrap math in a w:p for all of these. Body is included because the
+    // inline path already wraps there; for display, Body uniquely tolerates a
+    // bare m:oMathPara child (schema-legal) and is handled by its own branch.
+    private static bool IsMathBlockContainer(OpenXmlElement parent) =>
+        parent is Body or SdtBlock or Footnote or Endnote or Header or Footer;
+
     private string AddEquation(OpenXmlElement parent, string parentPath, int? index, Dictionary<string, string> properties)
     {
         string resultPath;
@@ -1351,11 +1359,15 @@ public partial class WordHandler
             resultPath = $"{parentPath}/equation[{mathCount}]";
             newElement = inlineHl;
         }
-        else if (mode == "inline" && (parent is Body || parent is SdtBlock))
+        else if (mode == "inline" && IsMathBlockContainer(parent))
         {
-            // Inline math under Body: wrap in a w:p (Body cannot host m:oMath directly)
-            // but emit a bare m:oMath instead of m:oMathPara so the math renders as
-            // inline-with-text rather than as a centered display equation.
+            // BUG-R6A(BUG1): inline math under a block container (Body, SdtBlock,
+            // footnote/endnote/header/footer) must be wrapped in a w:p — these
+            // containers cannot host m:oMath/m:oMathPara as a direct child (only
+            // Body tolerates a bare m:oMathPara, which masked the bug for the
+            // others). Emit a bare m:oMath instead of m:oMathPara so the math
+            // renders as inline-with-text rather than as a centered display
+            // equation.
             var mathElement = FormulaParser.Parse(formula);
             M.OfficeMath inlineOMath = mathElement is M.OfficeMath direct
                 ? direct
@@ -1486,6 +1498,31 @@ public partial class WordHandler
                 if (found == 0) found = oMathParaOrdinal; // fallback
                 var bodyPath = insertAfter != null ? parentPath.Substring(0, parentPath.LastIndexOf('/')) : parentPath;
                 resultPath = $"{bodyPath}/oMathPara[{found}]";
+            }
+            else if (IsMathBlockContainer(insertTarget))
+            {
+                // BUG-R6A(BUG1): block containers other than Body/SdtBlock
+                // (footnote/endnote/header/footer) cannot host m:oMathPara as a
+                // direct child — OOXML requires math to live inside a w:p. Wrap
+                // the m:oMathPara in a w:p exactly like the Body path, but use a
+                // simple paragraph-relative result path (these containers don't
+                // flatten to /oMathPara[N] the way Body does in NavigateToElement).
+                var wrapPara = new Paragraph(mathPara);
+                AssignParaId(wrapPara);
+                if (index.HasValue)
+                {
+                    var children = insertTarget.ChildElements.ToList();
+                    if (index.Value < children.Count)
+                        insertTarget.InsertBefore(wrapPara, children[index.Value]);
+                    else
+                        AppendToParent(insertTarget, wrapPara);
+                }
+                else
+                {
+                    AppendToParent(insertTarget, wrapPara);
+                }
+                var pIdx = insertTarget.Elements<Paragraph>().Count();
+                resultPath = $"{parentPath}/{BuildParaPathSegment(wrapPara, pIdx)}/oMathPara[1]";
             }
             else
             {
