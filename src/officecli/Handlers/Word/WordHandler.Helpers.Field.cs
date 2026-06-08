@@ -348,6 +348,10 @@ public partial class WordHandler
                 para.TextId = GenerateParaId();
         }
 
+        // Reassign accidentally-duplicated revision w:id values (runs after
+        // _nextParaId is seeded so it draws from the same global allocator).
+        DedupeRevisionIds(mainPart);
+
         // Ensure mc:Ignorable includes "w14" so Word 2007 skips w14:paraId/textId attributes
         var doc = mainPart.Document;
         const string mcNs = "http://schemas.openxmlformats.org/markup-compatibility/2006";
@@ -360,6 +364,57 @@ public partial class WordHandler
         {
             doc.MCAttributes ??= new DocumentFormat.OpenXml.MarkupCompatibilityAttributes();
             doc.MCAttributes.Ignorable = string.IsNullOrEmpty(ignorable) ? "w14" : $"{ignorable} w14";
+        }
+    }
+
+    /// <summary>
+    /// Reassign accidentally-duplicated revision <c>w:id</c> values. Word requires
+    /// every revision marker's id to be unique EXCEPT a moveFrom/moveTo pair,
+    /// which shares one id by design. On a dump→batch round-trip the content-run
+    /// ins/del ids are regenerated and can collide with a paragraph-mark id
+    /// preserved verbatim from the source (or with each other), producing
+    /// "id should have unique value" schema errors. Pin every move-pair id first
+    /// so a colliding non-move marker yields, then renumber the remaining
+    /// duplicates from the shared paraId/revision allocator. Mirrors the
+    /// duplicate sweep in <see cref="EnsureDocPropIds"/>; move ids are never
+    /// touched so the pairing survives.
+    /// </summary>
+    private void DedupeRevisionIds(MainDocumentPart mainPart)
+    {
+        static bool IsMoveType(OpenXmlElement e) =>
+            e is MoveFrom or MoveTo or MoveFromRun or MoveToRun;
+        static bool IsRevisionMarker(OpenXmlElement e) =>
+            e is InsertedRun or DeletedRun or MoveFromRun or MoveToRun
+              or RunPropertiesChange or ParagraphPropertiesChange
+              or SectionPropertiesChange or TablePropertiesChange
+              or TableCellPropertiesChange or TableRowPropertiesChange
+              or Inserted or Deleted or MoveFrom or MoveTo;
+
+        var revElems = EnumerateRevisionRoots(mainPart)
+            .SelectMany(r => r.Descendants())
+            .Where(IsRevisionMarker)
+            .ToList();
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Pass 1: pin move-pair ids (a moveFrom and its moveTo legitimately
+        // share one id — never renumber these).
+        foreach (var e in revElems)
+        {
+            if (!IsMoveType(e)) continue;
+            var v = e.GetAttributes().FirstOrDefault(a => a.LocalName == "id").Value;
+            if (!string.IsNullOrEmpty(v)) seen.Add(v);
+        }
+        // Pass 2: renumber non-move duplicates to a fresh allocator value.
+        foreach (var e in revElems)
+        {
+            if (IsMoveType(e)) continue;
+            var attr = e.GetAttributes().FirstOrDefault(a => a.LocalName == "id");
+            if (attr.Value == null) continue;
+            if (seen.Add(attr.Value)) continue; // first occurrence — keep
+            var newId = GenerateRevisionId();
+            e.SetAttribute(new DocumentFormat.OpenXml.OpenXmlAttribute(
+                attr.Prefix, attr.LocalName, attr.NamespaceUri, newId));
+            seen.Add(newId);
         }
     }
 
