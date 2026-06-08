@@ -190,6 +190,12 @@ internal static class FormulaParser
                     var sty = rPr.ChildElements.FirstOrDefault(e => e.LocalName == "sty");
                     var styVal = sty?.GetAttribute("val", "http://schemas.openxmlformats.org/officeDocument/2006/math").Value;
                     var hasNor = rPr.ChildElements.Any(e => e.LocalName == "nor");
+                    // BUG-R8A(BUG1) secondary: m:scr (math script style) was
+                    // dropped on dump — the write path emits \mathbb→double-struck
+                    // and \mathcal→script (m:scr in m:rPr), but XML→LaTeX never
+                    // read m:scr back, so those runs round-tripped as plain text.
+                    var scr = rPr.ChildElements.FirstOrDefault(e => e.LocalName == "scr");
+                    var scrVal = scr?.GetAttribute("val", "http://schemas.openxmlformats.org/officeDocument/2006/math").Value;
                     if (hasNor)
                     {
                         // m:nor (NormalText) flags an upright run. Function
@@ -205,6 +211,10 @@ internal static class FormulaParser
                         else
                             result = $"\\text{{{EscapeLatex(text)}}}";
                     }
+                    else if (scrVal == "double-struck")
+                        result = $"\\mathbb{{{EscapeLatex(text)}}}";
+                    else if (scrVal == "script")
+                        result = $"\\mathcal{{{EscapeLatex(text)}}}";
                     else if (styVal == "b")
                         result = $"\\mathbf{{{EscapeLatex(text)}}}";
                     else if (styVal == "bi")
@@ -1717,7 +1727,16 @@ internal static class FormulaParser
             if (rPr == null)
             {
                 rPr = new DocumentFormat.OpenXml.Wordprocessing.RunProperties();
-                run.InsertAt(rPr, 0);
+                // BUG-R8A(BUG1): OMML CT_R order is m:rPr?, (w:rPr|m:ctrlPr)?, m:t*.
+                // A math run carrying a math RunProperties (m:rPr, e.g. from
+                // \boldsymbol/\mathbf) must keep m:rPr first; insert w:rPr AFTER it,
+                // not at index 0 (which inverted the order → schema-invalid m:rPr
+                // flagged as an unexpected child).
+                var mathRPr = run.GetFirstChild<M.RunProperties>();
+                if (mathRPr != null)
+                    run.InsertAfter(rPr, mathRPr);
+                else
+                    run.InsertAt(rPr, 0);
             }
             rPr.Color = new DocumentFormat.OpenXml.Wordprocessing.Color { Val = colorHex };
             return;
