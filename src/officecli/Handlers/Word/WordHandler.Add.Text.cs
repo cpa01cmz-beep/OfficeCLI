@@ -1870,14 +1870,16 @@ public partial class WordHandler
         }
 
         newRun.AppendChild(newRProps);
-        // BUG-DUMP7-01: a run carrying `sym=font:hex` represents a single
-        // <w:sym/> glyph (no <w:t>). The dump round-trip flow surfaces both
-        // the resolved Unicode codepoint as `text` (so the run looks
-        // non-empty in textual previews) and the canonical font:char pair
-        // as `sym` so AddRun can rebuild the SymbolChar element verbatim.
-        // Drop the placeholder `text` when `sym` is present so the SymbolChar
-        // stands alone — appending both would also emit the cached glyph
-        // text in the body font, doubling the visual output.
+        // BUG-DUMP7-01: a run carrying `sym=font:hex` carries a <w:sym/> glyph.
+        // The dump surfaces the resolved Unicode codepoint of that glyph as the
+        // LEADING character of `text` (GetRunText walks children in order: the
+        // SymbolChar's PUA codepoint, then any literal <w:t>). So `text` is the
+        // PUA glyph optionally FOLLOWED by real literal text. Emit the <w:sym/>,
+        // then strip exactly the leading PUA glyph and append whatever literal
+        // text remains. Appending the PUA glyph as a literal <w:t> would double
+        // the visual output (cached glyph in body font + the <w:sym/>); dropping
+        // the remaining text entirely (the old behaviour) silently lost a run
+        // that mixed <w:sym/> + <w:t>WORLD</w:t> into a sym-only run.
         if (properties.TryGetValue("sym", out var symRaw) && !string.IsNullOrEmpty(symRaw))
         {
             var colon = symRaw.LastIndexOf(':');
@@ -1887,6 +1889,22 @@ public partial class WordHandler
             if (!string.IsNullOrEmpty(symFont)) sym.Font = symFont;
             if (!string.IsNullOrEmpty(symHex)) sym.Char = symHex.ToUpperInvariant();
             newRun.AppendChild(sym);
+
+            // Strip the leading PUA glyph (the dump-prepended cached codepoint)
+            // from `text`; what remains is the run's real literal <w:t> content.
+            var runText = properties.GetValueOrDefault("text", "");
+            if (!string.IsNullOrEmpty(symHex)
+                && int.TryParse(symHex, System.Globalization.NumberStyles.HexNumber,
+                    System.Globalization.CultureInfo.InvariantCulture, out var symCode))
+            {
+                var glyph = char.ConvertFromUtf32(symCode);
+                if (runText.StartsWith(glyph, StringComparison.Ordinal))
+                    runText = runText[glyph.Length..];
+            }
+            // Only emit a <w:t> when real text survives — a sym-only run leaves
+            // runText empty here and must NOT gain a spurious empty <w:t>.
+            if (!string.IsNullOrEmpty(runText))
+                AppendTextWithBreaks(newRun, runText);
         }
         else
         {
