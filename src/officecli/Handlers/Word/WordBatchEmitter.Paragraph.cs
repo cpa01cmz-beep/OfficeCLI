@@ -353,6 +353,7 @@ public static partial class WordBatchEmitter
                 sdtCursor++;
             }
             if (TryEmitBookmarkRun(run, paraTargetPath, items, ctx)) continue;
+            if (TryEmitPgNumRun(word, run, parentPath, items, ctx)) continue;
             if (TryEmitRubyRun(run, parentPath, paraTargetPath, items, ctx)) continue;
             if (TryEmitBreakRun(word, run, parentPath, paraTargetPath, items, ctx)) continue;
             if (TryEmitTabRun(run, paraTargetPath, items)) continue;
@@ -728,6 +729,12 @@ public static partial class WordBatchEmitter
             || r.Format.ContainsKey("numForm")
             || r.Format.ContainsKey("numSpacing")
             || r.Format.ContainsKey("revision.type")
+            // BUG-DUMP-PGNUM: a sole run containing <w:pgNum/> (even one that
+            // ALSO carries <w:t> text and/or a <w:cr/>) must stay on the
+            // explicit-run path so TryEmitPgNumRun raw-passes the verbatim
+            // <w:r>. Collapsing to `add p text="…"` flattens the run into
+            // paragraph props and silently drops the pgNum placeholder.
+            || r.Format.ContainsKey("_hasPgNum")
             || r.Format.ContainsKey("sym")) return false;
         // BUG-RSHD-PROMOTE: a sole run carrying run-level character shading
         // (<w:rPr><w:shd>) must NOT collapse into `add p`. AddParagraph routes
@@ -899,6 +906,50 @@ public static partial class WordBatchEmitter
                 Element: "ruby",
                 Path: run.Path,
                 Reason: "ruby (phonetic guide) inside a header/footer/table cell could not be serialized for round-trip; the base text is lost from the replayed document"));
+            return true;
+        }
+        items.Add(new BatchItem
+        {
+            Command = "raw-set",
+            Part = "/document",
+            Xpath = "/w:document/w:body/w:p[last()]",
+            Action = "append",
+            Xml = rawXml!
+        });
+        return true;
+    }
+
+    private static bool TryEmitPgNumRun(WordHandler word, DocumentNode run, string parentPath, List<BatchItem> items, BodyEmitContext? ctx)
+    {
+        // BUG-DUMP-PGNUM: a run containing <w:pgNum/> (page-number placeholder)
+        // has no scalar add/set representation — the typed `add r` path drops the
+        // <w:pgNum/> entirely (text/other content survives but the placeholder
+        // vanishes with no warning). Mirroring the rich-break / ruby raw-set
+        // fallback, re-insert the verbatim <w:r> via a raw-set append so the
+        // <w:pgNum/> — and any co-located <w:cr/> the typed path would demote to
+        // <w:br/> — survive the round-trip. RunToNode stamps Format["_hasPgNum"].
+        if (!run.Format.ContainsKey("_hasPgNum")) return false;
+        // Only the /body host has the addressable last() paragraph anchor the
+        // raw-set targets; a header/footer-hosted pgNum needs a different anchor
+        // (backlog, same conservatism as the non-body ruby/textbox fallback).
+        if (parentPath != "/body")
+        {
+            ctx?.Warnings.Add(new DocxUnsupportedWarning(
+                Element: "pgNum",
+                Path: run.Path,
+                Reason: "page-number placeholder (w:pgNum) inside a header/footer/table cell could not be serialized for round-trip; the placeholder is lost from the replayed document"));
+            return true;
+        }
+        var rawXml = word.RawElementXml(run.Path);
+        if (string.IsNullOrEmpty(rawXml)) return true; // nothing to emit
+        // Same external-rel guard as the other raw-set fallbacks — a dangling
+        // r:id/r:embed would not resolve in the rebuilt document.
+        if (HasExternalRelRef(rawXml!))
+        {
+            ctx?.Warnings.Add(new DocxUnsupportedWarning(
+                Element: "pgNum",
+                Path: run.Path,
+                Reason: "page-number placeholder run carries an external relationship reference and could not be serialized verbatim for round-trip"));
             return true;
         }
         items.Add(new BatchItem

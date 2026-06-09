@@ -1638,6 +1638,17 @@ public partial class WordHandler
     {
         node.Type = "run";
         node.Text = GetRunText(run);
+        // BUG-DUMP-PGNUM: a run containing <w:pgNum/> (page-number placeholder,
+        // valid inside header/footer runs) has no scalar add/set representation
+        // — GetRunText surfaces no glyph for it and the typed `add r` path drops
+        // it entirely on dump→batch round-trip, leaving an uncropped/blank run.
+        // Same class as the ruby / rich-break raw-set fallbacks: stamp a sentinel
+        // so TryEmitPgNumRun re-inserts the verbatim <w:r> at its source position.
+        // node.Type stays "run" — the flag only routes the emitter, not the
+        // readback. A co-located <w:cr/> (which the typed path otherwise demotes
+        // to <w:br/>) rides along inside the same verbatim run XML.
+        if (run.GetFirstChild<PageNumber>() != null)
+            node.Format["_hasPgNum"] = true;
         // BUG-DUMP7-01: surface <w:sym w:font=… w:char=…/> as a `sym`
         // Format key (font:hex). GetRunText also surfaces the resolved
         // Unicode glyph as Text so the run looks non-empty, but Text
