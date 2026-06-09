@@ -897,8 +897,14 @@ public partial class WordHandler
                 fieldRProps.AppendChild(new RunFonts { Ascii = ff, HighAnsi = ff, EastAsia = ff });
             if (properties.TryGetValue("bold", out var fb) && IsTruthy(fb))
                 fieldRProps.AppendChild(new Bold());
+            // BUG-R13B(BUG1): route field color through ApplyRunFormatting (same
+            // resolver the run/hyperlink Add paths use) so scheme/theme color
+            // names (accent1, dark1, …) write the w:themeColor attribute instead
+            // of being passed to SanitizeHex, which rejects non-hex names. Plain
+            // hex still works; InsertRunPropInSchemaOrder keeps Color in CT_RPr
+            // schema order regardless of the AppendChild sequence above.
             if (properties.TryGetValue("color", out var fc))
-                fieldRProps.AppendChild(new Color { Val = SanitizeHex(fc) });
+                ApplyRunFormatting(fieldRProps, "color", fc);
             if (properties.TryGetValue("size", out var fs))
                 fieldRProps.AppendChild(new FontSize { Val = ((int)Math.Round(ParseFontSize(fs) * 2, MidpointRounding.AwayFromZero)).ToString() });
         }
