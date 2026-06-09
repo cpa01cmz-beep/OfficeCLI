@@ -598,7 +598,25 @@ public partial class WordHandler
                 ?.ColorScheme?.Hyperlink?.RgbColorModelHex?.Val?.Value;
             hlRProps.Color = new Color { Val = themeHlink ?? "0563C1", ThemeColor = ThemeColorValues.Hyperlink };
         }
-        hlRProps.Underline = new Underline { Val = UnderlineValues.Single };
+        // CONSISTENCY(run-underline-enum): accept an explicit underline style on
+        // the hyperlink run via the shared NormalizeUnderlineValue helper (same
+        // enum/aliases as plain run `underline`). Default stays `single` for the
+        // common case so existing behavior is preserved when no underline is
+        // given. Without this, a source hyperlink whose run is dotted/wave/etc.
+        // round-trips to single (the dump captures it, AddHyperlink dropped it).
+        if (properties.TryGetValue("underline", out var hlUnderline)
+            || properties.TryGetValue("font.underline", out hlUnderline))
+        {
+            var hlUlVal = NormalizeUnderlineValue(hlUnderline);
+            if (hlUlVal == "none")
+                hlRProps.Underline = new Underline { Val = UnderlineValues.None };
+            else
+                hlRProps.Underline = new Underline { Val = new UnderlineValues(hlUlVal) };
+        }
+        else
+        {
+            hlRProps.Underline = new Underline { Val = UnderlineValues.Single };
+        }
         if (properties.TryGetValue("font", out var hlFont))
             hlRProps.RunFonts = new RunFonts { Ascii = hlFont, HighAnsi = hlFont };
         // Dump emits font.latin alongside bare font for hyperlink runs; mirror

@@ -109,6 +109,37 @@
       "enforcement": "report",
       "description": " Set after Add not supported — formatting lives on inner runs (Set the run, not the hyperlink wrapper)."
     },
+    "underline": {
+      "type": "enum",
+      "description": "underline style for the link's run. Defaults to single when omitted (theme Hyperlink look). Set after Add not supported — formatting lives on inner runs (Set the run, not the hyperlink wrapper). Aliases: font.underline.",
+      "values": [
+        "single",
+        "double",
+        "dotted",
+        "dash",
+        "wave",
+        "none",
+        "thick",
+        "dottedHeavy",
+        "dashLong",
+        "dashLongHeavy",
+        "dashDotHeavy",
+        "wavyHeavy",
+        "wavyDouble"
+      ],
+      "aliases": [
+        "font.underline"
+      ],
+      "add": true,
+      "set": false,
+      "get": true,
+      "examples": [
+        "--prop underline=dotted",
+        "--prop underline=wave"
+      ],
+      "readback": "underline style name",
+      "enforcement": "report"
+    },
     "bold": {
       "type": "bool",
       "add": true,
