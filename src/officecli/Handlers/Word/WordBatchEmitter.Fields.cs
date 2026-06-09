@@ -39,6 +39,25 @@ public static partial class WordBatchEmitter
         return false;
     }
 
+    // Track-change attribution keys a revision wrapper (<w:del>/<w:ins>/
+    // <w:moveFrom>/<w:moveTo>) stamps on each run it wraps. A field collapsed
+    // out of such runs must carry them onto its synth so the emitter re-wraps
+    // the rebuilt field in the same revision marker.
+    private static readonly string[] RevisionAttributionKeys =
+    {
+        "revision.type", "revision.author", "revision.date", "revision.id",
+    };
+
+    private static void PropagateRevisionKeys(DocumentNode from, DocumentNode to)
+    {
+        foreach (var rk in RevisionAttributionKeys)
+        {
+            if (to.Format.ContainsKey(rk)) continue;
+            if (from.Format.TryGetValue(rk, out var rv) && rv != null)
+                to.Format[rk] = rv;
+        }
+    }
+
     private static List<DocumentNode> CollapseFieldChains(List<DocumentNode> children)
     {
         var result = new List<DocumentNode>();
@@ -260,6 +279,16 @@ public static partial class WordBatchEmitter
             // on replay.
             if (c.Format.TryGetValue("_hyperlinkParent", out var hlp) && hlp != null)
                 synth.Format["_hyperlinkParent"] = hlp;
+            // BUG-DUMP-DELFIELD: a field wrapped in a <w:del>/<w:ins> revision
+            // collapses N runs (begin/instr/separate/result/end) into one synth.
+            // Every constituent run carries the same revision.* attribution from
+            // the shared wrapper; the synth must inherit it so TryEmitFieldRun
+            // re-emits `add field` with revision.type=del/ins (rebuilding the
+            // <w:del>/<w:ins> + <w:delInstrText>/<w:delText> on replay). Without
+            // this the deletion is dropped and tracked-deleted field text is
+            // resurrected as live document text. Read from the begin run (c) —
+            // all runs in the chain share the one wrapper.
+            PropagateRevisionKeys(c, synth);
             result.Add(synth);
             i = end;
         }
