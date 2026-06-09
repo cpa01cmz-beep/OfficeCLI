@@ -261,8 +261,19 @@ public static partial class WordBatchEmitter
         var paraTargetPath = $"{parentPath}/p[last()]";
         EmitTabStops(paraTargetPath, pTabs, items);
 
-        // BUG-DUMP4-06: emit inline SdtRun children before the runs loop.
-        foreach (var sdt in inlineSdts)
+        // BUG-DUMP4-06 / BUG-R12B(BUG1): emit each inline SdtRun child AT its
+        // real intra-paragraph position interleaved with the runs, not hoisted
+        // ahead of them. Navigation appends every SdtRun at the tail of
+        // pNode.Children (it sits outside the DOM-ordered run/bookmark/eq merge),
+        // so emitting all SDTs before the runs loop scrambled document order: a
+        // content control sitting between two runs ("Video [sdt] a powerful…")
+        // came back as "[sdt] Video a powerful…". Recover each child's true
+        // document rank from the source paragraph XML (top-level child order),
+        // then flush each SDT just before the first run whose rank exceeds it.
+        var childDocOrder = ComputeParagraphChildDocOrder(word, pNode.Path);
+        // Local SDT emit (formerly the standalone foreach above). Returns after
+        // appending the appropriate `add sdt` / rich raw-set op to `items`.
+        void EmitInlineSdt(DocumentNode sdt)
         {
             // BUG-R12A(BUG1): an inline/run-level <w:sdt> whose content carries
             // more than one run OR any run-level rPr (bold/color/size/…) cannot
@@ -276,7 +287,7 @@ public static partial class WordBatchEmitter
             // textbox raw-set) so dangling r:id/r:embed can't be produced; other
             // hosts fall back to the flat text emit.
             if (parentPath == "/body" && TryEmitRichInlineSdt(word, sdt, items, ctx))
-                continue;
+                return;
             var sdtProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var key in new[] { "type", "alias", "tag", "items", "format" })
             {
@@ -322,11 +333,28 @@ public static partial class WordBatchEmitter
         // in THIS paragraph re-index from 1 — see EmitStructuredHyperlink.
         int hlBaseline = items.Count(it => it.Type == "hyperlink"
             && string.Equals(it.Parent, paraTargetPath, StringComparison.Ordinal));
+        // BUG-R12B(BUG1): inline SDTs sorted by their source document rank,
+        // each flushed just before the first run that sits after it. A rank of
+        // int.MaxValue (no XML position recovered) falls through to the post-loop
+        // tail flush — same behavior as the old hoist-to-end ordering, so a
+        // paragraph whose XML can't be probed degrades to the prior shape rather
+        // than dropping the SDT.
+        var pendingSdts = inlineSdts
+            .Select(s => (sdt: s, rank: ChildDocRank(childDocOrder, s.Path)))
+            .OrderBy(t => t.rank)
+            .ToList();
+        int sdtCursor = 0;
         foreach (var run in runs)
         {
+            int runRank = ChildDocRank(childDocOrder, run.Path);
+            while (sdtCursor < pendingSdts.Count && pendingSdts[sdtCursor].rank < runRank)
+            {
+                EmitInlineSdt(pendingSdts[sdtCursor].sdt);
+                sdtCursor++;
+            }
             if (TryEmitBookmarkRun(run, paraTargetPath, items, ctx)) continue;
             if (TryEmitRubyRun(run, parentPath, paraTargetPath, items, ctx)) continue;
-            if (TryEmitBreakRun(run, paraTargetPath, items)) continue;
+            if (TryEmitBreakRun(word, run, parentPath, paraTargetPath, items, ctx)) continue;
             if (TryEmitTabRun(run, paraTargetPath, items)) continue;
             if (TryEmitPtabRun(run, paraTargetPath, items)) continue;
             if (TryEmitEquationRun(word, run, paraTargetPath, items)) continue;
@@ -343,6 +371,83 @@ public static partial class WordBatchEmitter
             if (TryEmitNoteRefRun(word, run, paraTargetPath, items, ctx)) continue;
             EmitPlainOrHyperlinkRun(run, paraTargetPath, items, ctx, hlBaseline);
         }
+        // Flush any SDTs that sit after the last run (or whose rank could not be
+        // recovered from the XML — int.MaxValue lands here).
+        for (; sdtCursor < pendingSdts.Count; sdtCursor++)
+            EmitInlineSdt(pendingSdts[sdtCursor].sdt);
+    }
+
+    // BUG-R12B(BUG1): recover the document-order rank of each top-level
+    // paragraph child (run / sdt / bookmark / …) from the source paragraph XML.
+    // Navigation surfaces inline SdtRun children at the tail of pNode.Children
+    // (outside the DOM-ordered run merge), so the only place the true
+    // interleaving survives is the OOXML element order itself. Returns a map
+    // from positional child segment ("r[2]", "sdt[1]", "bookmark[1]") to a
+    // 0-based document rank. Depth-tracked so a <w:r> nested INSIDE a <w:sdt>
+    // (the SDT's own content run) is not counted as a sibling.
+    private static Dictionary<string, int> ComputeParagraphChildDocOrder(WordHandler word, string? paragraphPath)
+    {
+        var map = new Dictionary<string, int>(StringComparer.Ordinal);
+        if (string.IsNullOrEmpty(paragraphPath)) return map;
+        string xml;
+        try { xml = word.GetElementXml(paragraphPath) ?? ""; }
+        catch { return map; }
+        if (string.IsNullOrEmpty(xml)) return map;
+        // Strip the leading <w:p …> open and trailing </w:p> so we walk only the
+        // paragraph's content; track nesting depth to keep to top-level children.
+        var perNameIdx = new Dictionary<string, int>(StringComparer.Ordinal);
+        int rank = 0;
+        int depth = 0; // depth relative to the paragraph's content (0 = direct child)
+        bool seenParaOpen = false;
+        // Match element opens/closes/self-closes for the w: and m: namespaces
+        // (m:oMathPara / m:oMath surface as paragraph children too).
+        foreach (System.Text.RegularExpressions.Match m in
+                 System.Text.RegularExpressions.Regex.Matches(xml, @"<(/?)(?:w|m):([A-Za-z]+)\b[^>]*?(/?)>"))
+        {
+            var closing = m.Groups[1].Value == "/";
+            var name = m.Groups[2].Value;
+            var selfClose = m.Groups[3].Value == "/";
+            if (!seenParaOpen)
+            {
+                // The first open we encounter is the paragraph element itself.
+                if (!closing) { seenParaOpen = true; }
+                continue;
+            }
+            if (closing) { depth--; continue; }
+            if (depth == 0)
+            {
+                // Direct child of the paragraph — assign the next document rank
+                // under its OOXML local name (matches the /r[N], /sdt[N], …
+                // path segments Navigation builds).
+                var seg = name switch
+                {
+                    "r" => "r",
+                    "sdt" => "sdt",
+                    "bookmarkStart" => "bookmark",
+                    "bookmarkEnd" => "bookmarkEnd",
+                    "hyperlink" => "hyperlink",
+                    "fldSimple" => "field",
+                    _ => name,
+                };
+                int idx = perNameIdx.TryGetValue(seg, out var c) ? c : 0;
+                perNameIdx[seg] = idx + 1;
+                map[$"{seg}[{idx + 1}]"] = rank++;
+            }
+            if (!selfClose) depth++;
+        }
+        return map;
+    }
+
+    // Look up a child node's document rank from the trailing positional path
+    // segment (e.g. "/body/p[…]/r[2]" → "r[2]"). Falls back to int.MaxValue when
+    // the path uses a non-positional segment (e.g. r[@…]) or isn't in the map,
+    // so unrecoverable children sort to the tail rather than to the front.
+    private static int ChildDocRank(Dictionary<string, int> docOrder, string? path)
+    {
+        if (string.IsNullOrEmpty(path) || docOrder.Count == 0) return int.MaxValue;
+        int slash = path.LastIndexOf('/');
+        var seg = slash >= 0 ? path[(slash + 1)..] : path;
+        return docOrder.TryGetValue(seg, out var r) ? r : int.MaxValue;
     }
 
     // ── Extracted helpers (behavior unchanged from inline original) ──
@@ -706,7 +811,7 @@ public static partial class WordBatchEmitter
         return true;
     }
 
-    private static bool TryEmitBreakRun(DocumentNode run, string paraTargetPath, List<BatchItem> items)
+    private static bool TryEmitBreakRun(WordHandler word, DocumentNode run, string parentPath, string paraTargetPath, List<BatchItem> items, BodyEmitContext? ctx)
     {
         // BUG-DUMP5-01/02: a soft <w:br/> with NO type attribute is a line
         // break, not a page break — fall back to type=line. Emitted inline
@@ -714,6 +819,34 @@ public static partial class WordBatchEmitter
         // position instead of being hoisted to the front of the paragraph.
         if (run.Type != "break") return false;
         var breakType = run.Format.TryGetValue("breakType", out var bt) ? bt?.ToString() : null;
+        // BUG-R12B(BUG3): a break run can carry its own <w:rPr> (<w:noProof/>,
+        // font, color, …). Navigation strips every typography/proofing key from
+        // a `break` node (TypographyOnlyKeys), and `add pagebreak` builds a bare
+        // <w:r><w:br/></w:r> with no rPr, so the run-properties were dropped on
+        // round-trip. The break has no scalar add-API for arbitrary rPr, so —
+        // mirroring the ruby / rich-inline-SDT raw-set fallback — re-insert the
+        // verbatim <w:r><w:rPr>…</w:rPr><w:br/></w:r> when the source run carries
+        // a non-empty rPr. Restricted to /body hosts with no external rels (same
+        // constraints as the other raw-set fallbacks) so no r:id/r:embed can
+        // dangle; everything else stays on the lossless typed `add pagebreak`.
+        if (parentPath == "/body")
+        {
+            var rawXml = word.RawElementXml(run.Path);
+            if (!string.IsNullOrEmpty(rawXml)
+                && BreakRunHasMeaningfulRunProps(rawXml!)
+                && !HasExternalRelRef(rawXml!))
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "raw-set",
+                    Part = "/document",
+                    Xpath = "/w:document/w:body/w:p[last()]",
+                    Action = "append",
+                    Xml = rawXml!
+                });
+                return true;
+            }
+        }
         items.Add(new BatchItem
         {
             Command = "add",
@@ -725,6 +858,20 @@ public static partial class WordBatchEmitter
             }
         });
         return true;
+    }
+
+    // A break run is "rich" when it carries a non-empty <w:rPr> (noProof, font,
+    // color, …) that the typed `add pagebreak` path cannot reproduce. An empty
+    // <w:rPr/> (or none at all) is lossless on the typed path, so only a
+    // populated rPr forces the verbatim raw-set fallback.
+    private static bool BreakRunHasMeaningfulRunProps(string runXml)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(
+            runXml, @"<w:rPr\b[^>]*?(?:/>|>(.*?)</w:rPr>)", System.Text.RegularExpressions.RegexOptions.Singleline);
+        if (!m.Success) return false;
+        // Self-closing <w:rPr/> has no inner content → nothing to preserve.
+        var inner = m.Groups[1].Value;
+        return !string.IsNullOrWhiteSpace(inner);
     }
 
     private static bool TryEmitRubyRun(DocumentNode run, string parentPath, string paraTargetPath, List<BatchItem> items, BodyEmitContext? ctx)
