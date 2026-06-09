@@ -260,6 +260,29 @@ public partial class WordHandler
                 node.Format["contrast"] = ((lumModVal - 100000) / 1000).ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
 
+        // BUG-DUMP-CROP: surface the picture's crop rectangle <a:srcRect>
+        // (inside <a:blipFill>) so dump→batch round-trips the crop. Set already
+        // writes srcRect (WordHandler.Set.Element.cs `crop` case: @l/@t/@r/@b are
+        // 1000ths-of-a-percent, input is percent l,t,r,b) but Get/dump never read
+        // it back, so the rebuilt image was uncropped. Emit the percent l,t,r,b
+        // string that the Set `crop` input accepts (e.g. "12,6,18,9"); the
+        // picture replay re-applies it via a follow-up `set <pic> crop=…`
+        // (WordBatchEmitter.Paragraph.cs picture-emit). srcRect with all-zero
+        // sides is the Set "no crop" form and is never written, so a present
+        // srcRect always carries at least one non-zero side.
+        var srcRect = drawing.Descendants<A.SourceRectangle>().FirstOrDefault();
+        if (srcRect != null)
+        {
+            static string CropPct(int thousandths) =>
+                (thousandths / 1000.0).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+            int l = srcRect.Left?.Value ?? 0;
+            int t = srcRect.Top?.Value ?? 0;
+            int r = srcRect.Right?.Value ?? 0;
+            int b = srcRect.Bottom?.Value ?? 0;
+            if (l != 0 || t != 0 || r != 0 || b != 0)
+                node.Format["crop"] = $"{CropPct(l)},{CropPct(t)},{CropPct(r)},{CropPct(b)}";
+        }
+
         // Distinguish inline from floating (anchor) and, for anchors, expose
         // the wrap mode, position offsets, and behind-text flag so callers
         // can inspect how the image is laid out.
@@ -322,6 +345,88 @@ public partial class WordHandler
         }
 
         return node;
+    }
+
+    // BUG-DUMP-CROP: shared crop → <a:srcRect> writer used by both Set
+    // (WordHandler.Set.Element.cs `crop` case) and Add (AddPicture's property
+    // pass), so dump→batch round-trips a cropped image without diverging
+    // encodings. `crop` takes 1 or 4 comma-separated percentages (l,t,r,b);
+    // the side variants (cropleft/croptop/cropright/cropbottom) take a single
+    // percentage. Values are stored as 1000ths-of-a-percent on @l/@t/@r/@b. An
+    // all-zero rectangle is the "no crop" form and removes the element. Returns
+    // false for an unrecognised key so the caller can report it unsupported.
+    internal static bool ApplyCropToBlipFill(PIC.BlipFill blipFill, string key, string value)
+    {
+        static string StripPct(string s)
+        {
+            var t = s.Trim();
+            return t.EndsWith("%", StringComparison.Ordinal) ? t[..^1].Trim() : t;
+        }
+        var lk = key.ToLowerInvariant();
+        if (lk is not ("crop" or "cropleft" or "cropright" or "croptop" or "cropbottom"))
+            return false;
+        var srcRect = blipFill.GetFirstChild<A.SourceRectangle>();
+        if (srcRect == null)
+        {
+            srcRect = new A.SourceRectangle();
+            // CONSISTENCY(ooxml-element-order): srcRect precedes the fill-mode element.
+            var fillMode = (OpenXmlElement?)blipFill.GetFirstChild<A.Stretch>()
+                ?? blipFill.GetFirstChild<A.Tile>();
+            if (fillMode != null) blipFill.InsertBefore(srcRect, fillMode);
+            else blipFill.AppendChild(srcRect);
+        }
+        if (lk == "crop")
+        {
+            var parts = value.Split(',');
+            if (parts.Length == 4)
+            {
+                var cv = new double[4];
+                for (int ci = 0; ci < 4; ci++)
+                {
+                    cv[ci] = ParseHelpers.SafeParseDouble(StripPct(parts[ci]), "crop");
+                    if (cv[ci] < 0 || cv[ci] > 100)
+                        throw new ArgumentException($"Invalid 'crop' value: '{parts[ci].Trim()}'. Crop percentage must be between 0 and 100.");
+                }
+                srcRect.Left = (int)(cv[0] * 1000);
+                srcRect.Top = (int)(cv[1] * 1000);
+                srcRect.Right = (int)(cv[2] * 1000);
+                srcRect.Bottom = (int)(cv[3] * 1000);
+            }
+            else if (parts.Length == 1)
+            {
+                if (!double.TryParse(StripPct(value), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var cv1)
+                    || cv1 < 0 || cv1 > 100)
+                    throw new ArgumentException($"Invalid 'crop' value: '{value}'. Expected percentage 0-100.");
+                var pctAll = (int)(cv1 * 1000);
+                srcRect.Left = pctAll; srcRect.Top = pctAll;
+                srcRect.Right = pctAll; srcRect.Bottom = pctAll;
+            }
+            else
+            {
+                throw new ArgumentException($"Invalid 'crop' value: '{value}'. Expected 1 or 4 comma-separated percentages.");
+            }
+        }
+        else
+        {
+            if (!double.TryParse(StripPct(value), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var cs1)
+                || cs1 < 0 || cs1 > 100)
+                throw new ArgumentException($"Invalid '{key}' value: '{value}'. Expected percentage 0-100.");
+            var pctSide = (int)(cs1 * 1000);
+            switch (lk)
+            {
+                case "cropleft": srcRect.Left = pctSide; break;
+                case "croptop": srcRect.Top = pctSide; break;
+                case "cropright": srcRect.Right = pctSide; break;
+                case "cropbottom": srcRect.Bottom = pctSide; break;
+            }
+        }
+        int L = srcRect.Left?.Value ?? 0;
+        int T = srcRect.Top?.Value ?? 0;
+        int R = srcRect.Right?.Value ?? 0;
+        int B = srcRect.Bottom?.Value ?? 0;
+        if (L == 0 && T == 0 && R == 0 && B == 0)
+            srcRect.Remove();
+        return true;
     }
 
     private static string DetectWrapType(DW.Anchor anchor)

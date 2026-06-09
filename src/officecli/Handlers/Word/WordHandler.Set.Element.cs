@@ -680,77 +680,12 @@ public partial class WordHandler
                 }
                 case "crop" or "cropleft" or "cropright" or "croptop" or "cropbottom":
                 {
-                    static string StripPct(string s)
-                    {
-                        var t = s.Trim();
-                        return t.EndsWith("%", StringComparison.Ordinal) ? t[..^1].Trim() : t;
-                    }
+                    // BUG-DUMP-CROP: delegate to the shared srcRect writer so Set
+                    // and AddPicture stay byte-identical (dump→batch round-trip).
                     var drawingCrop = run.GetFirstChild<Drawing>();
                     var blipFillCrop = drawingCrop?.Descendants<DocumentFormat.OpenXml.Drawing.Pictures.BlipFill>().FirstOrDefault();
                     if (blipFillCrop == null) { unsupported.Add(key); break; }
-                    var srcRectCrop = blipFillCrop.GetFirstChild<A.SourceRectangle>();
-                    if (srcRectCrop == null)
-                    {
-                        srcRectCrop = new A.SourceRectangle();
-                        // CONSISTENCY(ooxml-element-order): srcRect precedes the fill-mode element.
-                        var fillModeCrop = (OpenXmlElement?)blipFillCrop.GetFirstChild<A.Stretch>()
-                            ?? blipFillCrop.GetFirstChild<A.Tile>();
-                        if (fillModeCrop != null)
-                            blipFillCrop.InsertBefore(srcRectCrop, fillModeCrop);
-                        else
-                            blipFillCrop.AppendChild(srcRectCrop);
-                    }
-                    if (key.Equals("crop", StringComparison.OrdinalIgnoreCase))
-                    {
-                        var partsCrop = value.Split(',');
-                        if (partsCrop.Length == 4)
-                        {
-                            var cv = new double[4];
-                            for (int ci = 0; ci < 4; ci++)
-                            {
-                                cv[ci] = ParseHelpers.SafeParseDouble(StripPct(partsCrop[ci]), "crop");
-                                if (cv[ci] < 0 || cv[ci] > 100)
-                                    throw new ArgumentException($"Invalid 'crop' value: '{partsCrop[ci].Trim()}'. Crop percentage must be between 0 and 100.");
-                            }
-                            srcRectCrop.Left = (int)(cv[0] * 1000);
-                            srcRectCrop.Top = (int)(cv[1] * 1000);
-                            srcRectCrop.Right = (int)(cv[2] * 1000);
-                            srcRectCrop.Bottom = (int)(cv[3] * 1000);
-                        }
-                        else if (partsCrop.Length == 1)
-                        {
-                            if (!double.TryParse(StripPct(value), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var cv1)
-                                || cv1 < 0 || cv1 > 100)
-                                throw new ArgumentException($"Invalid 'crop' value: '{value}'. Expected percentage 0-100.");
-                            var pctAll = (int)(cv1 * 1000);
-                            srcRectCrop.Left = pctAll; srcRectCrop.Top = pctAll;
-                            srcRectCrop.Right = pctAll; srcRectCrop.Bottom = pctAll;
-                        }
-                        else
-                        {
-                            throw new ArgumentException($"Invalid 'crop' value: '{value}'. Expected 1 or 4 comma-separated percentages.");
-                        }
-                    }
-                    else
-                    {
-                        if (!double.TryParse(StripPct(value), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var cs1)
-                            || cs1 < 0 || cs1 > 100)
-                            throw new ArgumentException($"Invalid '{key}' value: '{value}'. Expected percentage 0-100.");
-                        var pctSide = (int)(cs1 * 1000);
-                        switch (key.ToLowerInvariant())
-                        {
-                            case "cropleft": srcRectCrop.Left = pctSide; break;
-                            case "croptop": srcRectCrop.Top = pctSide; break;
-                            case "cropright": srcRectCrop.Right = pctSide; break;
-                            case "cropbottom": srcRectCrop.Bottom = pctSide; break;
-                        }
-                    }
-                    int Lc = srcRectCrop.Left?.Value ?? 0;
-                    int Tc = srcRectCrop.Top?.Value ?? 0;
-                    int Rc = srcRectCrop.Right?.Value ?? 0;
-                    int Bc = srcRectCrop.Bottom?.Value ?? 0;
-                    if (Lc == 0 && Tc == 0 && Rc == 0 && Bc == 0)
-                        srcRectCrop.Remove();
+                    ApplyCropToBlipFill(blipFillCrop, key, value);
                     break;
                 }
                 case "brightness" or "contrast":

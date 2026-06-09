@@ -530,6 +530,18 @@ public partial class WordHandler
                 or "relid" or "id" or "contenttype" or "filesize"
                 or "src.svg")
                 continue;
+            // BUG-DUMP-CROP: crop is a blipFill property, not a run-rPr key —
+            // ApplyRunFormatting would silently drop it, so the dump→batch
+            // `add picture --prop crop=…` op (emitted by CreateImageNode's crop
+            // readback) never re-applied the source rectangle. Route it through
+            // the shared writer that Set uses.
+            if (lk is "crop" or "cropleft" or "cropright" or "croptop" or "cropbottom")
+            {
+                var blipFillAdd = imgRun.GetFirstChild<Drawing>()
+                    ?.Descendants<DocumentFormat.OpenXml.Drawing.Pictures.BlipFill>().FirstOrDefault();
+                if (blipFillAdd != null) ApplyCropToBlipFill(blipFillAdd, key, value);
+                continue;
+            }
             imgRunRPr ??= imgRun.GetFirstChild<RunProperties>() ?? imgRun.PrependChild(new RunProperties());
             ApplyRunFormatting(imgRunRPr, key, value);
         }

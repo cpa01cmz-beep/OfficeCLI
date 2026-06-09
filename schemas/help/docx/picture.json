@@ -22,6 +22,59 @@
     "_shared/picture.docx-xlsx"
   ],
   "properties": {
+    "crop": {
+      "type": "string",
+      "description": "Crop rectangle in percent (0-100), 1 or 4 comma-separated values (left,top,right,bottom). Stored as <a:srcRect> inside <a:blipFill> (1000ths-of-a-percent). Get emits the canonical 4-value form (e.g. 12,6,18,9); the per-side keys (cropLeft/cropTop/cropRight/cropBottom) are accepted on add/set only.",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop crop=10",
+        "--prop crop=12,6,18,9"
+      ],
+      "readback": "left,top,right,bottom percent",
+      "enforcement": "report"
+    },
+    "cropLeft": {
+      "type": "string",
+      "description": "Crop from the left edge as percent (0-100). Set/add only — Get folds all sides into the canonical crop key.",
+      "aliases": ["cropleft"],
+      "add": true,
+      "set": true,
+      "get": false,
+      "examples": ["--prop cropLeft=10"],
+      "enforcement": "report"
+    },
+    "cropTop": {
+      "type": "string",
+      "description": "Crop from the top edge as percent (0-100). Set/add only — Get folds all sides into the canonical crop key.",
+      "aliases": ["croptop"],
+      "add": true,
+      "set": true,
+      "get": false,
+      "examples": ["--prop cropTop=10"],
+      "enforcement": "report"
+    },
+    "cropRight": {
+      "type": "string",
+      "description": "Crop from the right edge as percent (0-100). Set/add only — Get folds all sides into the canonical crop key.",
+      "aliases": ["cropright"],
+      "add": true,
+      "set": true,
+      "get": false,
+      "examples": ["--prop cropRight=10"],
+      "enforcement": "report"
+    },
+    "cropBottom": {
+      "type": "string",
+      "description": "Crop from the bottom edge as percent (0-100). Set/add only — Get folds all sides into the canonical crop key.",
+      "aliases": ["cropbottom"],
+      "add": true,
+      "set": true,
+      "get": false,
+      "examples": ["--prop cropBottom=10"],
+      "enforcement": "report"
+    },
     "anchor": {
       "type": "bool",
       "add": true,
