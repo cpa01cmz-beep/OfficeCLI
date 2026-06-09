@@ -150,6 +150,14 @@
       "readback": "section property-change date (read-only)",
       "enforcement": "report"
     },
+    "sectPrChange.id": {
+      "type": "string",
+      "description": "Stable w:id companion to sectPrChange.author; preserved across dump→batch so the marker's identity survives the round-trip.",
+      "add": false, "set": false, "get": true,
+      "examples": [],
+      "readback": "section property-change id (read-only)",
+      "enforcement": "report"
+    },
     "tblPrChange.author": {
       "type": "string",
       "description": "Author of a w:tblPrChange on a table (table-properties revision — borders/style/layout snapshot).",

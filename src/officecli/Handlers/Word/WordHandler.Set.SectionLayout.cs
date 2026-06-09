@@ -514,6 +514,49 @@ public partial class WordHandler
                 return true;
             }
 
+            // ==================== sectPrChange (format revision marker) ====================
+            // dump→batch round-trip: EmitSection folds a source <w:sectPrChange>
+            // into the `set /` op as revision.type=format + revision.author
+            // (+ .date / .id). The `set /` path routes through SetDocumentProperties
+            // (which has no BeginTrackChangeIfRequested decorator, unlike
+            // SetSectionPath / the generic SetElement), so handle the marker here.
+            // An EMPTY-snapshot <w:sectPrChange><w:sectPr/></w:sectPrChange> is
+            // written — the before-snapshot is intentionally NOT reconstructed,
+            // matching the empty-pPr pPrChange the paragraph round-trip produces
+            // (and tblPrChange/trPrChange/tcPrChange). InsertSectPrChildInOrder
+            // keeps it last per CT_SectPr regardless of which structural keys
+            // land before/after it within the same set op.
+            case "revision.type":
+            {
+                // Only the format-change kind is meaningful on a section's
+                // sectPrChange. ins/del/move have no section-level OOXML shape.
+                var k = value.Trim().ToLowerInvariant();
+                if (k is not ("format" or "formatchange" or "" or null))
+                    throw new ArgumentException(
+                        $"revision.type=`{value}` is not supported on a section; "
+                        + "only `format` (sectPrChange) is valid.");
+                EnsureSectPrChangeMarker();
+                return true;
+            }
+            case "revision.author":
+            {
+                EnsureSectPrChangeMarker().Author = value;
+                return true;
+            }
+            case "revision.date":
+            {
+                if (DateTime.TryParse(value, System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.AdjustToUniversal
+                        | System.Globalization.DateTimeStyles.AssumeUniversal, out var d))
+                    EnsureSectPrChangeMarker().Date = d;
+                return true;
+            }
+            case "revision.id":
+            {
+                EnsureSectPrChangeMarker().Id = value;
+                return true;
+            }
+
             // ==================== Footnote / endnote numbering ====================
             // BUG-DUMP-SECT-FOOTNOTE: footnotePr.* / endnotePr.* on the body-level
             // section (`set /`). Shared with the per-section and AddSection paths.
@@ -533,6 +576,25 @@ public partial class WordHandler
     {
         var sectPr = EnsureSectionProperties();
         return EnsureSectPrChild<Columns>(sectPr);
+    }
+
+    /// <summary>Get-or-create the body sectPr's <w:sectPrChange> format-revision
+    /// marker, with an EMPTY <w:sectPr/> before-snapshot. The revision.author /
+    /// .date / .id keys (folded from a source sectPrChange by EmitSection) overlay
+    /// their attributes onto this single shared element so a multi-key `set /`
+    /// accumulates one marker. The empty snapshot mirrors the empty-pPr pPrChange
+    /// the paragraph round-trip produces — the before-state can't be recovered
+    /// from a dump and is intentionally not reconstructed.</summary>
+    private SectionPropertiesChange EnsureSectPrChangeMarker()
+    {
+        var sectPr = EnsureSectionProperties();
+        var existing = sectPr.GetFirstChild<SectionPropertiesChange>();
+        if (existing != null) return existing;
+        var change = new SectionPropertiesChange();
+        // Empty before-snapshot: <w:sectPrChange><w:sectPr/></w:sectPrChange>.
+        change.AppendChild(new PreviousSectionProperties());
+        InsertSectPrChildInOrder(sectPr, change);
+        return change;
     }
 
     // Get-or-create the sectPr's <w:pgBorders> child. Per-side pgBorders.<side>

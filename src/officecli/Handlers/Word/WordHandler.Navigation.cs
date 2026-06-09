@@ -208,6 +208,22 @@ public partial class WordHandler
             ?? mainPart?.Document?.Body?.Descendants<SectionProperties>().LastOrDefault();
         if (sectPr != null)
         {
+            // CONSISTENCY(root-vs-section-readback): surface the section's
+            // <w:sectPrChange> format-revision marker (author/date) at "/" too,
+            // matching BuildSectionNode in WordHandler.Query.cs. Without it the
+            // dump→batch EmitSection path (which reads from Get("/")) could not
+            // fold the marker into the section op and it was dropped on
+            // round-trip — unlike tblPrChange/trPrChange/tcPrChange/pPrChange.
+            var sectPrChange = sectPr.GetFirstChild<SectionPropertiesChange>();
+            if (sectPrChange != null)
+            {
+                if (!string.IsNullOrEmpty(sectPrChange.Author?.Value))
+                    node.Format["sectPrChange.author"] = sectPrChange.Author!.Value!;
+                if (sectPrChange.Date?.Value is DateTime sDate)
+                    node.Format["sectPrChange.date"] = sDate.ToString("o");
+                if (sectPrChange.Id?.Value is { } sId)
+                    node.Format["sectPrChange.id"] = sId.ToString();
+            }
             var pageSize = sectPr.GetFirstChild<PageSize>();
             if (pageSize?.Width?.Value != null) node.Format["pageWidth"] = FormatTwipsToCm(pageSize.Width.Value);
             if (pageSize?.Height?.Value != null) node.Format["pageHeight"] = FormatTwipsToCm(pageSize.Height.Value);

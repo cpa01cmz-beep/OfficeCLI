@@ -1471,6 +1471,24 @@ public static partial class WordBatchEmitter
         var (hasPgSz, hasPgMar) = word.BodySectionPageGeometryPresence();
         if (!hasPgSz) props["pageSize"] = "none";
         if (!hasPgMar) props["pageMargin"] = "none";
+        // sectPrChange round-trip — fold the source's <w:sectPrChange>
+        // format-revision marker (author/date) into the section `set /` op as
+        // a revision.type=format + revision.author (+ .date) triplet, mirroring
+        // FoldRevisionIntoProps for tblPrChange/trPrChange/tcPrChange (see
+        // WordBatchEmitter.Table.cs). The before-snapshot is intentionally NOT
+        // reconstructed — Set's section path writes an EMPTY-snapshot
+        // <w:sectPrChange> (same shape as the table/paragraph markers whose
+        // baseline can't be recovered from a dump). Without this fold the
+        // marker was the only non-Run *PrChange dropped on round-trip.
+        if (FoldRevisionIntoProps(root.Format, "sectPrChange", props))
+        {
+            // Carry the stable w:id too (FoldRevisionIntoProps handles only
+            // author/date — shared with the table path, which doesn't surface
+            // an id). Section readback surfaces sectPrChange.id; preserving it
+            // keeps the marker's identity stable across the round-trip.
+            var sectChangeId = TryStringFormat(root.Format, "sectPrChange.id");
+            if (sectChangeId != null) props["revision.id"] = sectChangeId;
+        }
         if (props.Count == 0) return;
         items.Add(new BatchItem
         {

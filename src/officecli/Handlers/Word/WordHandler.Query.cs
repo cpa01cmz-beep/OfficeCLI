@@ -927,6 +927,8 @@ public partial class WordHandler
                 secNode.Format["sectPrChange.author"] = sectPrChange.Author!.Value!;
             if (sectPrChange.Date?.Value is DateTime sDate)
                 secNode.Format["sectPrChange.date"] = sDate.ToString("o");
+            if (sectPrChange.Id?.Value is { } sId)
+                secNode.Format["sectPrChange.id"] = sId.ToString();
         }
 
         var sectType = sectPr.GetFirstChild<SectionType>();
