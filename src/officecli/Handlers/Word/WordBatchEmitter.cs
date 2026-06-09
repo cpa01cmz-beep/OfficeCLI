@@ -318,9 +318,16 @@ public static partial class WordBatchEmitter
         "pgBorders",
         // BUG-DUMP11-03: <w:noEndnote/> section flag.
         "noEndnote",
+        // BUG-DUMP-SECT-FORMPROT: <w:formProt/> section form-protection flag.
+        // Set / accepts it; without inclusion here the body section's lock
+        // reverted to unprotected on round-trip.
+        "formProt",
         "lineNumbers", "lineNumberCountBy",
         // BUG-DUMP11-02: lnNumType/@w:start (first line number when counting).
         "lineNumberStart",
+        // BUG-DUMP-SECT-LNDIST: lnNumType/@w:distance (gutter twips between the
+        // line-number column and body text). Sibling to lineNumberStart.
+        "lineNumberDistance",
         // Multi-column section layout. Get exposes these as canonical keys
         // (columns, columnSpace, columns.equalWidth) and Set's case table
         // accepts all three (WordHandler.Set.SectionLayout.cs). Without them
@@ -377,6 +384,11 @@ public static partial class WordBatchEmitter
         // them through TrySetFootnoteEndnoteNumProps. Without this prefix the
         // trailing section's footnote numbering reverted to decimal/continuous.
         "footnotePr.", "endnotePr.",
+        // BUG-DUMP-SECT-PAPERSRC: printer paper-source bins (paperSrc.first /
+        // paperSrc.other). Get/Navigation surfaces these dotted keys; Set /
+        // routes them through TrySetSectionLayout's paperSrc.* case. Without
+        // this prefix the trailing section's printer tray config was dropped.
+        "paperSrc.",
     };
 
     // Captured once per process: blank doc's `Get("/")` root Format, normalized

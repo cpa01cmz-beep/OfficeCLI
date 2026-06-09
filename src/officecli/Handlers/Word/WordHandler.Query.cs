@@ -968,6 +968,19 @@ public partial class WordHandler
         if (sectPr.GetFirstChild<TitlePage>() != null)
             secNode.Format["titlePage"] = true;
 
+        // BUG-DUMP-SECT-PAPERSRC: printer paper-source bins (<w:paperSrc
+        // w:first/@w:other>) — first-page vs other-pages tray. Mirror the body
+        // sectPr readback in WordHandler.Navigation.cs so Get('/') and
+        // /section[N] surface the same paperSrc.first / paperSrc.other keys.
+        var secPaperSrc = sectPr.GetFirstChild<PaperSource>();
+        if (secPaperSrc != null)
+        {
+            if (secPaperSrc.First?.Value != null)
+                secNode.Format["paperSrc.first"] = secPaperSrc.First.Value;
+            if (secPaperSrc.Other?.Value != null)
+                secNode.Format["paperSrc.other"] = secPaperSrc.Other.Value;
+        }
+
         // Page borders — per-side detail + offsetFrom, mirroring the body
         // sectPr readback in WordHandler.Navigation.cs so Get('/') and
         // /section[N] surface the same pgBorders.<side>.* / pgBorders.offsetFrom
@@ -986,6 +999,12 @@ public partial class WordHandler
         // collection. On/off toggle — bare element, no val attribute.
         if (sectPr.GetFirstChild<NoEndnote>() != null)
             secNode.Format["noEndnote"] = true;
+
+        // BUG-DUMP-SECT-FORMPROT: <w:formProt/> locks section content except
+        // form fields. Bare on/off toggle. Mirror the body sectPr readback so
+        // Get('/') and /section[N] surface the same formProt=true key.
+        if (sectPr.GetFirstChild<FormProtection>() != null)
+            secNode.Format["formProt"] = true;
 
         // Header / footer references — expose so users can debug inheritance
         var mainPart = _doc.MainDocumentPart;
@@ -1045,19 +1064,28 @@ public partial class WordHandler
         if (lnNum != null)
         {
             var countBy = lnNum.CountBy?.Value ?? 1;
-            var restartVal = lnNum.Restart?.InnerText ?? "continuous";
-            var restart = restartVal switch
-            {
-                "newPage" => "restartPage",
-                "newSection" => "restartSection",
-                _ => "continuous"
-            };
-            secNode.Format["lineNumbers"] = restart;
+            // BUG-DUMP-SECT-LNDIST: only surface lineNumbers when @w:restart is
+            // actually present — defaulting to "continuous" made dump→batch
+            // fabricate a spurious restart="continuous" on a source carrying only
+            // @countBy/@distance. Mirror the body reader in Navigation.cs.
+            if (lnNum.Restart?.InnerText is string secLnRestart)
+                secNode.Format["lineNumbers"] = secLnRestart switch
+                {
+                    "newPage" => "restartPage",
+                    "newSection" => "restartSection",
+                    _ => "continuous"
+                };
             if (countBy != 1) secNode.Format["lineNumberCountBy"] = countBy;
             // BUG-DUMP11-02: surface w:lnNumType/@w:start so /section[N] readback
             // matches the root sectPr reader.
             if (lnNum.Start?.Value is short lnStart)
                 secNode.Format["lineNumberStart"] = (int)lnStart;
+            // BUG-DUMP-SECT-LNDIST: w:lnNumType/@w:distance (gutter twips between
+            // the line-number column and body text). Sibling attr to @start;
+            // mirror the body reader so /section[N] round-trips @distance.
+            if (lnNum.Distance?.Value is string secLnDistRaw
+                && int.TryParse(secLnDistRaw, out var secLnDist))
+                secNode.Format["lineNumberDistance"] = secLnDist;
         }
 
         // Column properties — dotted canonical keys mirror Set's input form

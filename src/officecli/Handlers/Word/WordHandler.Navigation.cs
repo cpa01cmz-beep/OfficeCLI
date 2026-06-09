@@ -248,6 +248,20 @@ public partial class WordHandler
             if (sectPr.GetFirstChild<TitlePage>() != null)
                 node.Format["titlePage"] = true;
 
+            // BUG-DUMP-SECT-PAPERSRC: <w:paperSrc w:first/@w:other> selects the
+            // printer paper-source bin for the first page vs the rest. Surfaced
+            // as dotted paperSrc.first / paperSrc.other so dump→batch round-trips
+            // the printer tray config (mirrors the /section[N] readback in
+            // WordHandler.Query.cs and the AddSection/Set replay path).
+            var bodyPaperSrc = sectPr.GetFirstChild<PaperSource>();
+            if (bodyPaperSrc != null)
+            {
+                if (bodyPaperSrc.First?.Value != null)
+                    node.Format["paperSrc.first"] = bodyPaperSrc.First.Value;
+                if (bodyPaperSrc.Other?.Value != null)
+                    node.Format["paperSrc.other"] = bodyPaperSrc.Other.Value;
+            }
+
             // Surface pgBorders per-side detail (val/sz/color/space) plus the
             // offsetFrom position. Mirrors the paragraph/table per-side border
             // convention (ReadBorder → key + key.sz/.color/.space), keyed under
@@ -271,22 +285,41 @@ public partial class WordHandler
             if (sectPr.GetFirstChild<NoEndnote>() != null)
                 node.Format["noEndnote"] = true;
 
+            // BUG-DUMP-SECT-FORMPROT: <w:formProt/> locks the section's content
+            // except form fields. Bare on/off toggle (no val attr) — surface as
+            // canonical formProt=true so dump→batch round-trips the flag.
+            if (sectPr.GetFirstChild<FormProtection>() != null)
+                node.Format["formProt"] = true;
+
             var lnNum = sectPr.GetFirstChild<LineNumberType>();
             if (lnNum != null)
             {
                 var countBy = lnNum.CountBy?.Value ?? 1;
-                var restartVal = lnNum.Restart?.InnerText ?? "continuous";
-                node.Format["lineNumbers"] = restartVal switch
-                {
-                    "newPage" => "restartPage",
-                    "newSection" => "restartSection",
-                    _ => "continuous"
-                };
+                // BUG-DUMP-SECT-LNDIST: only surface lineNumbers when the source
+                // actually carries a @w:restart attr. Defaulting to "continuous"
+                // made the emitter fabricate a spurious restart="continuous" on a
+                // source that had only @countBy/@distance — round-trip injected an
+                // attribute the original lacked. The countBy/distance/start sub-keys
+                // below carry the line-number intent independently.
+                if (lnNum.Restart?.InnerText is string bodyLnRestart)
+                    node.Format["lineNumbers"] = bodyLnRestart switch
+                    {
+                        "newPage" => "restartPage",
+                        "newSection" => "restartSection",
+                        _ => "continuous"
+                    };
                 if (countBy != 1) node.Format["lineNumberCountBy"] = countBy;
                 // BUG-DUMP11-02: w:lnNumType/@w:start was silently dropped.
                 // Surface as canonical lineNumberStart key.
                 if (lnNum.Start?.Value is short lnStart)
                     node.Format["lineNumberStart"] = (int)lnStart;
+                // BUG-DUMP-SECT-LNDIST: w:lnNumType/@w:distance (gutter twips
+                // between the line-number column and body text) was dropped —
+                // exact sibling-attr parallel to @start. Surface as canonical
+                // lineNumberDistance.
+                if (lnNum.Distance?.Value is string lnDistRaw
+                    && int.TryParse(lnDistRaw, out var lnDist))
+                    node.Format["lineNumberDistance"] = lnDist;
             }
 
             // BUG-DUMP11-04: header / footer references (default / first /
@@ -3360,6 +3393,23 @@ public partial class WordHandler
                 if (inlineSectPr.GetFirstChild<TitlePage>() != null)
                     node.Format["sectionBreak.titlePage"] = true;
 
+                // BUG-DUMP-SECT-PAPERSRC: printer paper-source bins on a
+                // mid-document section carrier. Surface as sectionBreak.paperSrc.*
+                // so the carrier sectPr round-trips the printer tray config.
+                var sbPaperSrc = inlineSectPr.GetFirstChild<PaperSource>();
+                if (sbPaperSrc != null)
+                {
+                    if (sbPaperSrc.First?.Value != null)
+                        node.Format["sectionBreak.paperSrc.first"] = sbPaperSrc.First.Value;
+                    if (sbPaperSrc.Other?.Value != null)
+                        node.Format["sectionBreak.paperSrc.other"] = sbPaperSrc.Other.Value;
+                }
+
+                // BUG-DUMP-SECT-FORMPROT: <w:formProt/> on a mid-document section
+                // carrier. Bare on/off toggle — surface as sectionBreak.formProt.
+                if (inlineSectPr.GetFirstChild<FormProtection>() != null)
+                    node.Format["sectionBreak.formProt"] = true;
+
                 // BUG-DUMP9-06: Columns / VerticalTextAlignmentOnPage on
                 // an inline sectPr carrier were silently dropped — only
                 // the root sectPr reader handled them. Surface as
@@ -3421,14 +3471,22 @@ public partial class WordHandler
                 var lnNum = inlineSectPr.GetFirstChild<LineNumberType>();
                 if (lnNum != null)
                 {
-                    node.Format["sectionBreak.lineNumbers"] = lnNum.Restart?.InnerText switch
-                    {
-                        "newPage" => "restartPage",
-                        "newSection" => "restartSection",
-                        _ => "continuous"
-                    };
+                    // BUG-DUMP-SECT-LNDIST: only surface lineNumbers when @w:restart
+                    // is present — defaulting to "continuous" fabricated a spurious
+                    // restart="continuous" on a carrier that had only @countBy/@distance.
+                    if (lnNum.Restart?.InnerText is string sbLnRestart)
+                        node.Format["sectionBreak.lineNumbers"] = sbLnRestart switch
+                        {
+                            "newPage" => "restartPage",
+                            "newSection" => "restartSection",
+                            _ => "continuous"
+                        };
                     if (lnNum.CountBy?.Value is short cb && cb > 1)
                         node.Format["sectionBreak.lineNumberCountBy"] = cb;
+                    // BUG-DUMP-SECT-LNDIST: w:lnNumType/@w:distance (gutter twips).
+                    if (lnNum.Distance?.Value is string sbLnDistRaw
+                        && int.TryParse(sbLnDistRaw, out var sbLnDist))
+                        node.Format["sectionBreak.lineNumberDistance"] = sbLnDist;
                 }
 
                 // BUG-DUMP-SECGRID: the document grid (<w:docGrid>) on a

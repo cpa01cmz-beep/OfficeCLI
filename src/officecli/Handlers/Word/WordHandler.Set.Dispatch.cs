@@ -1026,10 +1026,42 @@ public partial class WordHandler
                     var lnNum = sectPr.GetFirstChild<LineNumberType>();
                     if (lnNum == null)
                     {
-                        lnNum = new LineNumberType { Restart = LineNumberRestartValues.Continuous };
+                        // BUG-DUMP-SECT-LNDIST: mirror TrySetSectionLayout — do not
+                        // default Restart (its OOXML default is already continuous),
+                        // so countBy/distance-only sources don't gain a spurious
+                        // restart="continuous" on round-trip.
+                        lnNum = new LineNumberType();
                         InsertSectPrChildInOrder(sectPr, lnNum);
                     }
                     lnNum.CountBy = (short)ncb;
+                    break;
+                }
+                case "linenumberdistance":
+                {
+                    // BUG-DUMP-SECT-LNDIST: mirror TrySetSectionLayout's
+                    // lineNumberDistance case so /section[N] users can set the
+                    // line-number gutter spacing. Do NOT default Restart — see the
+                    // body-path case rationale.
+                    if (!int.TryParse(value, out var lnDist) || lnDist < 0)
+                        throw new ArgumentException(
+                            $"Invalid lineNumberDistance value: '{value}'. Must be a non-negative integer (twips).");
+                    var lnNum = sectPr.GetFirstChild<LineNumberType>();
+                    if (lnNum == null)
+                    {
+                        lnNum = new LineNumberType();
+                        InsertSectPrChildInOrder(sectPr, lnNum);
+                    }
+                    lnNum.Distance = lnDist.ToString();
+                    break;
+                }
+                case "formprot":
+                {
+                    // BUG-DUMP-SECT-FORMPROT: mirror TrySetSectionLayout's
+                    // formprot case so /section[N] users can lock the section's
+                    // content (except form fields). Bare on/off toggle.
+                    sectPr.RemoveAllChildren<FormProtection>();
+                    if (IsTruthy(value))
+                        InsertSectPrChildInOrder(sectPr, new FormProtection());
                     break;
                 }
                 case "valign":
