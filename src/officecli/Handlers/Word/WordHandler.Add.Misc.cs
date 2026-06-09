@@ -1034,7 +1034,81 @@ public partial class WordHandler
                 resultPath = $"{parentPath}/{BuildParaPathSegment(fNewPara, fIdx2 + 1)}";
             }
         }
+        // BUG-DUMP-DELFIELD: a field that was tracked-inserted/deleted in the
+        // source (its runs wrapped in <w:del>/<w:ins>) must round-trip the
+        // revision. CollapseFieldChains propagated revision.type/.author/.date/
+        // .id from the wrapper onto the field synth, and the emitter forwarded
+        // them here. Wrap each rebuilt field run in the matching marker —
+        // reusing the same WrapRunAs* helpers the run path uses, so a deleted
+        // HYPERLINK keeps its <w:del> + <w:delInstrText>/<w:delText> instead of
+        // resurrecting as live text. del converts FieldCode→DeletedFieldCode
+        // (delInstrText is the only valid field-code form inside <w:del>).
+        WrapFieldRunsInRevision(fieldRuns, properties);
         return resultPath;
+    }
+
+    // Wrap a freshly-built field's runs in a tracked-change marker when the
+    // caller supplied revision.type (= ins/del/moveFrom/moveTo) + attribution.
+    // Mirrors the per-run revision wrap used by Set/Add on plain runs; the only
+    // field-specific twist is that a <w:del>-wrapped instruction run must carry
+    // its code as <w:delInstrText> (DeletedFieldCode), not <w:instrText>
+    // (FieldCode) — ECMA-376 §17.16.23. format/paraMark* kinds don't apply to a
+    // run-level field wrap and are ignored here.
+    private void WrapFieldRunsInRevision(List<Run> fieldRuns, Dictionary<string, string> properties)
+    {
+        if (!properties.TryGetValue("revision.type", out var revType)
+            || string.IsNullOrWhiteSpace(revType))
+            return;
+        revType = revType.Trim();
+        if (revType is not ("ins" or "del" or "moveFrom" or "moveTo"))
+            return;
+
+        var author = properties.GetValueOrDefault("revision.author") ?? "";
+        DateTime date = DateTime.UtcNow;
+        if (properties.TryGetValue("revision.date", out var dateStr)
+            && DateTime.TryParse(dateStr, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.RoundtripKind, out var parsedDate))
+            date = parsedDate;
+        // moveFrom/moveTo: every run in the (contiguous) move shares ONE id so
+        // the moveFrom half pairs with its moveTo half — WrapRunAsMove* also
+        // brackets the range with the shared Name="Move_{id}". An explicit id is
+        // required to pair the two halves across separate AddField calls; fall
+        // back to a generated one (single-call moves can't pair anyway).
+        // ins/del: a single source <w:del>/<w:ins> is split into one wrapper per
+        // field run on this rebuild — each MUST get a UNIQUE w:id (ECMA-376
+        // requires w:id uniqueness; Word tolerates duplicates but strict
+        // validation rejects them). So we generate a fresh id per run rather
+        // than reusing revision.id (which addresses the source's single marker).
+        var explicitId = properties.GetValueOrDefault("revision.id");
+        var moveId = !string.IsNullOrEmpty(explicitId) ? explicitId : GenerateRevisionId();
+
+        foreach (var fr in fieldRuns)
+        {
+            if (fr.Parent == null) continue;
+            if (revType == "del")
+            {
+                // FieldCode (w:instrText) → DeletedFieldCode (w:delInstrText)
+                // before the w:t→w:delText conversion inside WrapRunAsDeleted.
+                foreach (var fc in fr.Elements<FieldCode>().ToList())
+                {
+                    var dfc = new DeletedFieldCode(fc.Text ?? "") { Space = fc.Space };
+                    fc.Parent?.ReplaceChild(dfc, fc);
+                }
+                WrapRunAsDeleted(fr, author, date, explicitId: null);
+            }
+            else if (revType == "ins")
+            {
+                WrapRunAsInserted(fr, author, date, explicitId: null);
+            }
+            else if (revType == "moveFrom")
+            {
+                WrapRunAsMoveFrom(fr, author, date, moveId);
+            }
+            else // moveTo
+            {
+                WrapRunAsMoveTo(fr, author, date, moveId);
+            }
+        }
     }
 
     // CONSISTENCY(canonical-keys): the raw field instruction can be passed
@@ -1094,6 +1168,11 @@ public partial class WordHandler
         // DATE/TIME and REF/PAGEREF/NOTEREF all now splice it, so it is
         // genuinely universal — promote it out of the per-type lists.
         "switches",
+        // BUG-DUMP-DELFIELD: a field can be tracked-inserted/deleted; the
+        // revision wrap applies to ANY fieldType. Consumed by
+        // WrapFieldRunsInRevision, not the per-type instruction builders.
+        "revision.type", "revision.author", "revision.date", "revision.id",
+        "noseparator", "noSeparator",
     };
 
     // Render today's DateTime for the result-run placeholder of a DATE/TIME

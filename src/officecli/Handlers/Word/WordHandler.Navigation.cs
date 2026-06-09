@@ -2093,6 +2093,17 @@ public partial class WordHandler
         if (node.Type == "run")
         {
             var instrEl = run.GetFirstChild<FieldCode>();
+            // BUG-DUMP-DELFIELD: a field instruction nested inside a <w:del>
+            // wrapper carries its code in <w:delInstrText> (DeletedFieldCode),
+            // not <w:instrText> (FieldCode). Without this fallback the deleted
+            // field code stays an opaque "run" node, CollapseFieldChains never
+            // sees the HYPERLINK/PAGE/… instruction, and the field collapses
+            // to a bare `add r` — losing both the field structure AND the
+            // enclosing deletion (tracked-deleted text resurrected as live).
+            // Treat DeletedFieldCode identically to FieldCode so the collapse
+            // pass parses the instruction; the run's revision.* attribution
+            // (set above from the DeletedRun ancestor) rides along.
+            var delInstrEl = instrEl == null ? run.GetFirstChild<DeletedFieldCode>() : null;
             if (instrEl != null)
             {
                 node.Type = "instrText";
@@ -2105,6 +2116,12 @@ public partial class WordHandler
                 // while Navigation hands callers an empty Text — the
                 // two surfaces disagreed on what the run "says".
                 node.Text = instrEl.Text ?? "";
+            }
+            else if (delInstrEl != null)
+            {
+                node.Type = "instrText";
+                node.Format["instruction"] = delInstrEl.Text ?? "";
+                node.Text = delInstrEl.Text ?? "";
             }
         }
         // CONSISTENCY(run-text-tab): the type-upgrade for tab/break runs

@@ -1002,6 +1002,25 @@ public static partial class WordBatchEmitter
                     Reason: $"cached field-result run formatting ({string.Join(", ", unsupportedFmt)}) cannot be expressed via add field; field instruction + bold/color/size/font preserved, extra emphasis dropped"));
             }
         }
+        // BUG-DUMP-DELFIELD: forward the revision attribution that
+        // CollapseFieldChains propagated from the <w:del>/<w:ins> wrapper onto
+        // the synth. AddField wraps the rebuilt field chain in the matching
+        // <w:del>/<w:ins> when it sees revision.type — so a deleted HYPERLINK
+        // round-trips as a deletion (delInstrText + delText inside <w:del>)
+        // rather than collapsing to live text. Forward to both the `add field`
+        // and the plain-text fallback below.
+        if (fieldProps != null)
+        {
+            foreach (var rk in new[] { "revision.type", "revision.author", "revision.date", "revision.id" })
+            {
+                if (fieldProps.ContainsKey(rk)) continue;
+                if (run.Format.TryGetValue(rk, out var rv) && rv != null)
+                {
+                    var s = rv.ToString();
+                    if (!string.IsNullOrEmpty(s)) fieldProps[rk] = s;
+                }
+            }
+        }
         var fldParent = paraTargetPath;
         string? candidateHlParent = null;
         if (!string.IsNullOrEmpty(run.Path))
