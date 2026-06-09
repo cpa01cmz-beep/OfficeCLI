@@ -193,6 +193,15 @@
       "readback": "integer",
       "enforcement": "strict"
     },
+    "lineNumberDistance": {
+      "type": "int",
+      "description": "gutter spacing in twips between the line-number column and the body text (<w:lnNumType w:distance>). Sibling attribute to lineNumberCountBy/lineNumberStart; surfaced independently so a section that carries only @distance round-trips. Does not by itself imply a restart mode.",
+      "aliases": ["linenumberdistance"],
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop lineNumberCountBy=2 --prop lineNumberDistance=288"],
+      "readback": "integer twips",
+      "enforcement": "report"
+    },
     "headerRef": { "type":"string", "add":false, "set":false, "get":true, "description":"path to primary (default) header part. Convenience shortcut equal to headerRef.default when present.", "readback":"OOXML part path", "enforcement":"report" },
     "headerRef.default": { "type":"string", "add":false, "set":false, "get":true, "description":"path to default-type header part.", "readback":"OOXML part path", "enforcement":"report" },
     "headerRef.first": { "type":"string", "add":false, "set":false, "get":true, "description":"path to first-page-only header part.", "readback":"OOXML part path", "enforcement":"report" },
@@ -210,6 +219,9 @@
     "pgBorders.bottom":   { "type":"string", "add":true,  "set":true,  "get":true, "description":"bottom page border, STYLE[;SIZE[;COLOR[;SPACE]]]. See pgBorders.top.", "readback":"STYLE on the key, SIZE/COLOR/SPACE on .sz/.color/.space sub-keys", "enforcement":"report" },
     "pgBorders.right":    { "type":"string", "add":true,  "set":true,  "get":true, "description":"right page border, STYLE[;SIZE[;COLOR[;SPACE]]]. See pgBorders.top.", "readback":"STYLE on the key, SIZE/COLOR/SPACE on .sz/.color/.space sub-keys", "enforcement":"report" },
     "pgBorders.offsetFrom":{ "type":"enum",  "add":true,  "set":true,  "get":true, "values":["page","text"], "description":"pgBorders @offsetFrom — whether the border is measured from the page edge ('page') or the text margin ('text', the OOXML default). Surfaced on get only when present.", "readback":"page|text", "enforcement":"report" },
+    "paperSrc.first":     { "type":"int",    "add":true,  "set":true,  "get":true, "description":"printer paper-source bin for the first page of the section (<w:paperSrc w:first>). Integer printer-tray id (0–65535). Sits after pgMar, before pgBorders in CT_SectPr order.", "examples":["--prop paperSrc.first=1"], "readback":"integer bin id", "enforcement":"report" },
+    "paperSrc.other":     { "type":"int",    "add":true,  "set":true,  "get":true, "description":"printer paper-source bin for the remaining pages of the section (<w:paperSrc w:other>). Integer printer-tray id (0–65535). Companion to paperSrc.first.", "examples":["--prop paperSrc.other=4"], "readback":"integer bin id", "enforcement":"report" },
+    "formProt":           { "type":"bool",   "add":true,  "set":true,  "get":true, "description":"section form-protection flag (<w:formProt>). When true the section's content is locked except for form fields. Bare on/off toggle; accepts none/off/false to clear. Sits after cols, before vAlign in CT_SectPr order.", "examples":["--prop formProt=true"], "readback":"true when set", "enforcement":"report" },
     "vAlign":             { "type":"enum",   "add":true,  "set":true,  "get":true, "values":["top","center","both","bottom"], "aliases":["valign"], "description":"vertical alignment of page content (<w:vAlign>). 'center' vertically centers the body; 'both' justifies top-to-bottom. Accepts none/off to clear.", "examples":["--prop vAlign=center"], "readback":"top|center|both|bottom", "enforcement":"report" },
     "textDirection":      { "type":"enum",   "add":true,  "set":true,  "get":true, "values":["lrTb","tbRl","btLr","lrTbV","tbRlV","tbLrV"], "aliases":["textdirection"], "description":"section page text flow direction (<w:textDirection>), East-Asian vertical layout. tbRl is the common vertical (top-to-bottom, columns right-to-left) page flow. Accepts none/off to clear. Distinct from the cell-level textDirection in tcPr.", "examples":["--prop textDirection=tbRl"], "readback":"lrTb|tbRl|btLr|lrTbV|tbRlV|tbLrV", "enforcement":"report" },
     "footnotePr.numFmt":  { "type":"enum",   "add":true,  "set":true,  "get":true, "values":["decimal","lowerRoman","upperRoman","lowerLetter","upperLetter","chicago"], "propAliases":["footnotePr.format"], "description":"section footnote number format (<w:footnotePr><w:numFmt>). Restarting footnote numbering per page/section requires footnotePr.numRestart.", "examples":["--prop footnotePr.numFmt=lowerRoman"], "readback":"innerText of NumberFormatValues", "enforcement":"report" },

@@ -253,10 +253,20 @@ public partial class WordHandler
                               properties.TryGetValue("linenumbers", out lnVal);
         bool hasCountBy = properties.TryGetValue("lineNumberCountBy", out var lnBy) ||
                           properties.TryGetValue("linenumbercountby", out lnBy);
-        if (hasLineNumbers || hasCountBy)
+        // BUG-DUMP-SECT-LNDIST: lnNumType/@w:distance (gutter twips) — sibling
+        // attr to countBy/start. Triggers LineNumberType creation on its own so a
+        // carrier that has only @distance round-trips.
+        bool hasLnDist = properties.TryGetValue("lineNumberDistance", out var lnDistVal) ||
+                         properties.TryGetValue("linenumberdistance", out lnDistVal);
+        if (hasLineNumbers || hasCountBy || hasLnDist)
         {
-            var restart = !hasLineNumbers ? LineNumberRestartValues.Continuous :
-                lnVal!.ToLowerInvariant() switch
+            // BUG-DUMP-SECT-LNDIST: only stamp @w:restart when the source
+            // actually carried lineNumbers — fabricating restart="continuous" on
+            // a countBy/distance-only carrier was the round-trip regression. The
+            // SDK omits the attr entirely when Restart is left null.
+            var lnType = new LineNumberType();
+            if (hasLineNumbers)
+                lnType.Restart = lnVal!.ToLowerInvariant() switch
                 {
                     "continuous" => LineNumberRestartValues.Continuous,
                     "restartpage" or "page" => LineNumberRestartValues.NewPage,
@@ -264,11 +274,17 @@ public partial class WordHandler
                     _ => throw new ArgumentException(
                         $"Invalid lineNumbers value: '{lnVal}'. Valid values: continuous, restartPage, restartSection.")
                 };
-            var lnType = new LineNumberType { Restart = restart };
             if (hasCountBy)
             {
                 var by = int.Parse(lnBy!);
                 if (by > 1) lnType.CountBy = (short)by;
+            }
+            if (hasLnDist)
+            {
+                if (!int.TryParse(lnDistVal, out var lnDist) || lnDist < 0)
+                    throw new ArgumentException(
+                        $"Invalid lineNumberDistance value: '{lnDistVal}'. Must be a non-negative integer (twips).");
+                lnType.Distance = lnDist.ToString();
             }
             InsertSectPrChildInOrder(sectPr, lnType);
         }
@@ -377,6 +393,17 @@ public partial class WordHandler
             var lower = tdVal.ToLowerInvariant().Trim();
             if (lower is not ("none" or "off" or "false"))
                 InsertSectPrChildInOrder(sectPr, new TextDirection { Val = ParseSectionTextDirection(tdVal) });
+        }
+
+        // BUG-DUMP-SECT-FORMPROT: <w:formProt/> section form-protection flag.
+        // CONSISTENCY(add-set-symmetry): mirror TrySetSectionLayout's formprot
+        // case so `add section --prop formProt=true` round-trips a mid-document
+        // section's <w:formProt>. Bare on/off toggle.
+        if (properties.TryGetValue("formProt", out var fpVal) ||
+            properties.TryGetValue("formprot", out fpVal))
+        {
+            if (IsTruthy(fpVal))
+                InsertSectPrChildInOrder(sectPr, new FormProtection());
         }
 
         // BUG-DUMP-SECT-FOOTNOTE: section-level footnote/endnote numbering.

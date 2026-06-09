@@ -349,7 +349,12 @@ public partial class WordHandler
                 var lnNum = sectPr.GetFirstChild<LineNumberType>();
                 if (lnNum == null)
                 {
-                    lnNum = new LineNumberType { Restart = LineNumberRestartValues.Continuous };
+                    // BUG-DUMP-SECT-LNDIST: do NOT default Restart here. @w:restart's
+                    // OOXML default is already "continuous", so stamping it explicitly
+                    // fabricated a restart="continuous" attribute on dump→batch replay
+                    // of a source that carried only @countBy/@distance (the readback
+                    // now omits lineNumbers unless @restart is genuinely present).
+                    lnNum = new LineNumberType();
                     InsertSectPrChildInOrder(sectPr, lnNum);
                 }
                 lnNum.CountBy = (short)ncb;
@@ -368,10 +373,33 @@ public partial class WordHandler
                 var lnNum = sectPr.GetFirstChild<LineNumberType>();
                 if (lnNum == null)
                 {
-                    lnNum = new LineNumberType { Restart = LineNumberRestartValues.Continuous };
+                    // BUG-DUMP-SECT-LNDIST: do not default Restart — see countBy case.
+                    lnNum = new LineNumberType();
                     InsertSectPrChildInOrder(sectPr, lnNum);
                 }
                 lnNum.Start = (short)lnStart;
+                return true;
+            }
+
+            // BUG-DUMP-SECT-LNDIST: w:lnNumType/@w:distance — the gutter spacing
+            // (in twips) between the line-number column and the body text. Sibling
+            // attr to @start; was silently dropped on dump round-trip. Auto-create
+            // LineNumberType if absent. Do NOT default Restart here — fabricating
+            // restart="continuous" on a source that omitted it was BUG-DUMP-SECT-LNDIST's
+            // companion regression (see the readback in WordHandler.Navigation.cs).
+            case "linenumberdistance":
+            {
+                var sectPr = EnsureSectionProperties();
+                if (!int.TryParse(value, out var lnDist) || lnDist < 0)
+                    throw new ArgumentException(
+                        $"Invalid lineNumberDistance value: '{value}'. Must be a non-negative integer (twips).");
+                var lnNum = sectPr.GetFirstChild<LineNumberType>();
+                if (lnNum == null)
+                {
+                    lnNum = new LineNumberType();
+                    InsertSectPrChildInOrder(sectPr, lnNum);
+                }
+                lnNum.Distance = lnDist.ToString();
                 return true;
             }
 
@@ -422,6 +450,45 @@ public partial class WordHandler
                 if (lower is "none" or "off" or "false")
                     return true;
                 InsertSectPrChildInOrder(sectPr, new TextDirection { Val = ParseSectionTextDirection(value) });
+                return true;
+            }
+
+            // ==================== Printer paper source (BUG-DUMP-SECT-PAPERSRC) ====================
+            // <w:paperSrc w:first="…" w:other="…"/> — the printer tray/bin used
+            // for the first page vs the remaining pages. Both attrs are
+            // CT_PaperSource ST_DecimalNumber. paperSrc sits after pgMar, before
+            // pgBorders in CT_SectPr order (rank 7). Get-or-create a single
+            // <w:paperSrc> so first/other accumulate onto one element.
+            case "papersrc.first" or "papersrc.other":
+            {
+                var sectPr = EnsureSectionProperties();
+                if (!int.TryParse(value, out var paperBin) || paperBin < 0 || paperBin > ushort.MaxValue)
+                    throw new ArgumentException(
+                        $"Invalid {key} value: '{value}'. Must be an integer 0–65535 (printer bin id).");
+                var paperSrc = sectPr.GetFirstChild<PaperSource>();
+                if (paperSrc == null)
+                {
+                    paperSrc = new PaperSource();
+                    InsertSectPrChildInOrder(sectPr, paperSrc);
+                }
+                if (key.EndsWith("first"))
+                    paperSrc.First = (ushort)paperBin;
+                else
+                    paperSrc.Other = (ushort)paperBin;
+                return true;
+            }
+
+            // ==================== Section form protection (BUG-DUMP-SECT-FORMPROT) ====================
+            // <w:formProt/> — when present (ST_OnOff, bare = true) the section's
+            // contents are locked except for form fields. Lives after cols,
+            // before vAlign in CT_SectPr order (rank 12). Bare on/off toggle;
+            // accepts none/off/false to clear.
+            case "formprot":
+            {
+                var sectPr = EnsureSectionProperties();
+                sectPr.RemoveAllChildren<FormProtection>();
+                if (IsTruthy(value))
+                    InsertSectPrChildInOrder(sectPr, new FormProtection());
                 return true;
             }
 
