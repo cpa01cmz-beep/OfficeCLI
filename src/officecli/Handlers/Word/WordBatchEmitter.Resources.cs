@@ -2059,8 +2059,13 @@ public static partial class WordBatchEmitter
             // parts[0]=pgBorders, parts[1]=side|offsetFrom
             if (parts.Length < 2) continue;
             // offsetFrom is a flat key — not a per-side border. Leave it alone.
+            // BUG-DUMP-R44-5: zOrder / display are likewise flat pgBorders attrs,
+            // not per-side borders — exclude them from the per-side fold so they
+            // pass through verbatim to the section set step.
             if (parts.Length == 2 &&
-                string.Equals(parts[1], "offsetFrom", StringComparison.OrdinalIgnoreCase))
+                (string.Equals(parts[1], "offsetFrom", StringComparison.OrdinalIgnoreCase)
+                 || string.Equals(parts[1], "zOrder", StringComparison.OrdinalIgnoreCase)
+                 || string.Equals(parts[1], "display", StringComparison.OrdinalIgnoreCase)))
                 continue;
             var side = $"{parts[0]}.{parts[1]}"; // pgBorders.top
             fold.TryGetValue(side, out var cur);

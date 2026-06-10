@@ -158,6 +158,37 @@ public partial class WordHandler
                 };
                 return true;
             }
+            // BUG-DUMP-R44-5: zOrder (front/back — border in front of vs behind
+            // text) and display (allPages/firstPage/notFirstPage — which pages the
+            // page border renders on). Both are meaning-changing and were dropped
+            // on round-trip; mirror offsetFrom's get-or-create overlay.
+            case "pgborders.zorder":
+            {
+                var sectPr = EnsureSectionProperties();
+                var pb = EnsurePageBorders(sectPr);
+                pb.ZOrder = value.ToLowerInvariant().Trim() switch
+                {
+                    "front" => PageBorderZOrderValues.Front,
+                    "back" => PageBorderZOrderValues.Back,
+                    _ => throw new ArgumentException(
+                        $"Invalid pgBorders.zOrder value: '{value}'. Valid: front, back.")
+                };
+                return true;
+            }
+            case "pgborders.display":
+            {
+                var sectPr = EnsureSectionProperties();
+                var pb = EnsurePageBorders(sectPr);
+                pb.Display = value.ToLowerInvariant().Trim() switch
+                {
+                    "allpages" => PageBorderDisplayValues.AllPages,
+                    "firstpage" => PageBorderDisplayValues.FirstPage,
+                    "notfirstpage" => PageBorderDisplayValues.NotFirstPage,
+                    _ => throw new ArgumentException(
+                        $"Invalid pgBorders.display value: '{value}'. Valid: allPages, firstPage, notFirstPage.")
+                };
+                return true;
+            }
             case "direction" or "dir" or "bidi":
             {
                 // CONSISTENCY(section-layout-fallback): mirrors the per-section

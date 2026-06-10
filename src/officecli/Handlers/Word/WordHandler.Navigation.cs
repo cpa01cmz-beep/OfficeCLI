@@ -5448,6 +5448,15 @@ public partial class WordHandler
         // present so a source that omits it round-trips without re-stamping.
         if (pgBorders.OffsetFrom?.InnerText is { } off)
             node.Format["pgBorders.offsetFrom"] = off;
+        // BUG-DUMP-R44-5: zOrder (front/back — border drawn IN FRONT of vs
+        // BEHIND text) and display (allPages/firstPage/notFirstPage — which
+        // pages the page border appears on) are meaning-changing attributes that
+        // were dropped on round-trip. Surface only when present so a source that
+        // omits them round-trips without re-stamping the OOXML defaults.
+        if (pgBorders.ZOrder?.InnerText is { } z)
+            node.Format["pgBorders.zOrder"] = z;
+        if (pgBorders.Display?.InnerText is { } disp)
+            node.Format["pgBorders.display"] = disp;
     }
 
     private static void ReadBorder(BorderType? border, string key, DocumentNode node)
