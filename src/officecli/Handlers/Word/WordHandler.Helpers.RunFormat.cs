@@ -494,6 +494,13 @@ public partial class WordHandler
     /// </summary>
     private static Shading ParseShadingValue(string value)
     {
+        // BUG-DUMP-R41-4: peel off any theme key=val tail
+        // (themeFill=…/themeFillShade=…/themeFillTint=… and
+        // themeColor/themeShade/themeTint) before positional VAL;FILL;COLOR
+        // parsing, then re-stamp the theme attrs via ApplyShadingTheme. A
+        // non-themed shading string contains no '=' and is parsed verbatim.
+        var (posValue, shdTheme) = ExtractThemeTail(value);
+        value = posValue;
         var shdParts = value.Split(';');
         var shd = new Shading();
         if (shdParts.Length == 1)
@@ -514,9 +521,11 @@ public partial class WordHandler
                 WarnIfShadingOrderWrong(shdParts[0]);
                 shd.Val = new ShadingPatternValues(shdParts[0]);
                 shd.Fill = SanitizeHex(shdParts[1]);
-                if (shdParts.Length >= 3) shd.Color = SanitizeHex(shdParts[2]);
+                if (shdParts.Length >= 3 && !string.IsNullOrEmpty(shdParts[2])) shd.Color = SanitizeHex(shdParts[2]);
             }
         }
+        // BUG-DUMP-R41-4: stamp the theme-linkage attrs harvested above.
+        ApplyShadingTheme(shd, shdTheme);
         return shd;
     }
 

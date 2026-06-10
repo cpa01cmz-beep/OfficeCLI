@@ -388,32 +388,11 @@ public partial class WordHandler
         if (!shadingHoistedToMarkRPr
             && (properties.TryGetValue("shd", out var pShdVal) || properties.TryGetValue("shading", out pShdVal) || properties.TryGetValue("fill", out pShdVal)))
         {
-            var shdParts = pShdVal.Split(';');
-            var shd = new Shading();
-            if (shdParts.Length == 1)
-            {
-                shd.Val = ShadingPatternValues.Clear;
-                shd.Fill = SanitizeHex(shdParts[0]);
-            }
-            else if (shdParts.Length >= 2)
-            {
-                // Check if the pattern/color order is reversed (hex color in pattern position)
-                var patternPart = shdParts[0].TrimStart('#');
-                if (patternPart.Length >= 6 && patternPart.All(char.IsAsciiHexDigit))
-                {
-                    // Auto-swap: treat as "clear;COLOR" (user put color first)
-                    Console.Error.WriteLine($"Warning: '{shdParts[0]}' looks like a color in the pattern position. Auto-swapping to: clear;{shdParts[0]}");
-                    shd.Val = ShadingPatternValues.Clear;
-                    shd.Fill = SanitizeHex(shdParts[0]);
-                }
-                else
-                {
-                    WarnIfShadingOrderWrong(shdParts[0]); shd.Val = new ShadingPatternValues(shdParts[0]);
-                    shd.Fill = SanitizeHex(shdParts[1]);
-                    if (shdParts.Length >= 3) shd.Color = SanitizeHex(shdParts[2]);
-                }
-            }
-            pProps.Shading = shd;
+            // BUG-DUMP-R41-4: route through the shared ParseShadingValue so the
+            // theme-linkage key=val tail (themeFill/themeColor/…) round-trips;
+            // it preserves the same VAL;FILL;COLOR positional semantics this
+            // block hand-rolled before.
+            pProps.Shading = ParseShadingValue(pShdVal);
         }
         if (properties.TryGetValue("leftindent", out var addLI) || properties.TryGetValue("leftIndent", out addLI) || properties.TryGetValue("indentleft", out addLI) || properties.TryGetValue("indent", out addLI))
         {
@@ -1902,30 +1881,10 @@ public partial class WordHandler
         }
         if (properties.TryGetValue("shd", out var rShd) || properties.TryGetValue("shading", out rShd))
         {
-            var shdParts = rShd.Split(';');
-            var shd = new Shading();
-            if (shdParts.Length == 1)
-            {
-                shd.Val = ShadingPatternValues.Clear;
-                shd.Fill = SanitizeHex(shdParts[0]);
-            }
-            else if (shdParts.Length >= 2)
-            {
-                var addRunPatternPart = shdParts[0].TrimStart('#');
-                if (addRunPatternPart.Length >= 6 && addRunPatternPart.All(char.IsAsciiHexDigit))
-                {
-                    Console.Error.WriteLine($"Warning: '{shdParts[0]}' looks like a color in the pattern position. Auto-swapping to: clear;{shdParts[0]}");
-                    shd.Val = ShadingPatternValues.Clear;
-                    shd.Fill = SanitizeHex(shdParts[0]);
-                }
-                else
-                {
-                    WarnIfShadingOrderWrong(shdParts[0]); shd.Val = new ShadingPatternValues(shdParts[0]);
-                    shd.Fill = SanitizeHex(shdParts[1]);
-                    if (shdParts.Length >= 3) shd.Color = SanitizeHex(shdParts[2]);
-                }
-            }
-            newRProps.Shading = shd;
+            // BUG-DUMP-R41-4: route through the shared ParseShadingValue so the
+            // run-level <w:shd> theme-linkage (themeFill=…/themeColor=…) tail
+            // round-trips; preserves the prior VAL;FILL;COLOR semantics.
+            newRProps.Shading = ParseShadingValue(rShd);
         }
 
         // w14 text effects
