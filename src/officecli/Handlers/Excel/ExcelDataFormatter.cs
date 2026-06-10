@@ -161,9 +161,47 @@ internal static class ExcelDataFormatter
 
     private static string FormatPercent(double value, string formatCode)
     {
-        // Count decimal places from format code (e.g. "0.00%" → 2)
-        var match = Regex.Match(formatCode, @"0\.(0+)%");
+        // Multi-section percent formats (positive;negative;zero). Excel picks the
+        // section by the value's sign, and that section's literal characters
+        // (parentheses, etc.) define the negative representation — there is no
+        // automatic '-' when an explicit negative section is present. The color
+        // code ([Red] etc.) is orthogonal and stripped here (it never affects the
+        // text). Without an explicit negative section, Excel reuses the positive
+        // section for negatives with a leading '-'.
+        if (formatCode.Contains(';'))
+        {
+            var sections = formatCode.Split(';');
+            if (value < 0 && sections.Length >= 2)
+                // Negative section owns its sign/literals; format the magnitude
+                // through it (no auto-minus).
+                return FormatPercentSection(Math.Abs(value), sections[1]);
+            if (value == 0 && sections.Length >= 3)
+                return FormatPercentSection(value, sections[2]);
+            return FormatPercentSection(value, sections[0]);
+        }
+        return FormatPercentSection(value, formatCode);
+    }
+
+    // Format a single percent section: emit the percentage with the section's
+    // decimal count, preserving any literal characters (e.g. parentheses) written
+    // in the section around the numeric placeholder. [Color] codes are dropped.
+    private static string FormatPercentSection(double value, string section)
+    {
+        section = BracketCodeRegex.Replace(section, "").Trim();
+        // Count decimal places from the section (e.g. "0.00%" → 2)
+        var match = Regex.Match(section, @"0\.(0+)%");
         int decimals = match.Success ? match.Groups[1].Value.Length : 0;
-        return (value * 100).ToString($"F{decimals}", System.Globalization.CultureInfo.InvariantCulture) + "%";
+        var num = (value * 100).ToString($"F{decimals}", System.Globalization.CultureInfo.InvariantCulture) + "%";
+        // Re-attach the section's literal prefix/suffix around the digit run by
+        // replacing the numeric placeholder token (the '#'/'0'/'.'/'%' span) with
+        // the rendered number. This carries '(' ... ')' accounting wrappers.
+        var placeholder = Regex.Match(section, @"[#0][#0,]*(?:\.[#0]+)?%");
+        if (placeholder.Success)
+        {
+            var prefix = section[..placeholder.Index];
+            var suffix = section[(placeholder.Index + placeholder.Length)..];
+            return prefix + num + suffix;
+        }
+        return num;
     }
 }
