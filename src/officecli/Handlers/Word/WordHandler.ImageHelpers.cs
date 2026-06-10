@@ -95,7 +95,7 @@ public partial class WordHandler
         string wrap, long hPos, long vPos,
         DW.HorizontalRelativePositionValues hRel, DW.VerticalRelativePositionValues vRel,
         bool behindText, uint docPropId, string? pictureName = null,
-        string? hAlign = null, string? vAlign = null)
+        string? hAlign = null, string? vAlign = null, uint relativeHeight = 1U)
     {
         OpenXmlElement wrapElement = wrap.ToLowerInvariant() switch
         {
@@ -171,7 +171,10 @@ public partial class WordHandler
             DistanceFromLeft = 114300U,
             DistanceFromRight = 114300U,
             SimplePos = false,
-            RelativeHeight = 1U,
+            // BUG-DUMP-R26-1: honour the captured z-order instead of the old
+            // hardcoded 1U, which collapsed every overlapping float to the same
+            // plane. Defaults to 1U when the caller has no relativeHeight prop.
+            RelativeHeight = relativeHeight,
             AllowOverlap = true,
             LayoutInCell = true,
             Locked = false
@@ -302,6 +305,13 @@ public partial class WordHandler
             node.Format["wrap"] = DetectWrapType(anchorEl);
             if (anchorEl.BehindDoc?.Value == true)
                 node.Format["behindText"] = true;
+            // BUG-DUMP-R26-1: capture the anchor's z-order (relativeHeight).
+            // Distinct values (251664384, 251665408, …) sequence overlapping
+            // floats front-to-back; dump never read it and the apply path
+            // hardcoded RelativeHeight=1U, collapsing every image to the same
+            // z-plane. Surface the raw uint so the Add path round-trips it.
+            if (anchorEl.RelativeHeight?.HasValue == true)
+                node.Format["relativeHeight"] = anchorEl.RelativeHeight.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
             var hPos = anchorEl.GetFirstChild<DW.HorizontalPosition>();
             if (hPos != null)

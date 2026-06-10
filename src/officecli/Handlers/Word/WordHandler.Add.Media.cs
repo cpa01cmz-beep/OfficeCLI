@@ -409,7 +409,12 @@ public partial class WordHandler
                 ? hAlignStr : null;
             var vAlign = properties.TryGetValue("valign", out var vAlignStr) && !string.IsNullOrEmpty(vAlignStr)
                 ? vAlignStr : null;
-            imgRun = CreateAnchorImageRun(relId, cxEmu, cyEmu, altText, wrapType, hPos, vPos, hRel, vRel, behind, imgDocPropId, pictureName, hAlign, vAlign);
+            // BUG-DUMP-R26-1: round-trip the anchor z-order. CreateImageNode now
+            // surfaces relativeHeight; honour it here so overlapping floats keep
+            // their distinct stacking order instead of collapsing to 1U.
+            uint relHeight = properties.TryGetValue("relativeHeight", out var relHeightStr)
+                && uint.TryParse(relHeightStr, out var rh) ? rh : 1U;
+            imgRun = CreateAnchorImageRun(relId, cxEmu, cyEmu, altText, wrapType, hPos, vPos, hRel, vRel, behind, imgDocPropId, pictureName, hAlign, vAlign, relHeight);
         }
         else
         {
