@@ -209,8 +209,9 @@ public static partial class WordBatchEmitter
     // falls back to its own <w:lvlText> glyph (already round-tripped). Lossy
     // for picture bullets only; mirrors the dangling footnote/endnote separator
     // ref strip and the external-rel SDT fallback.
-    private static string StripDanglingPicBullets(string numberingXml)
+    private static string StripDanglingPicBullets(string numberingXml, out bool stripped)
     {
+        stripped = false;
         if (string.IsNullOrEmpty(numberingXml) || !numberingXml.StartsWith("<")) return numberingXml;
         if (!numberingXml.Contains("PicBullet")) return numberingXml; // fast path
         try
@@ -226,6 +227,7 @@ public static partial class WordBatchEmitter
                 removed = true;
             }
             if (!removed) return numberingXml;
+            stripped = true;
             return doc.Root.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
         }
         catch
@@ -436,6 +438,9 @@ public static partial class WordBatchEmitter
     }
 
     private static void EmitNumberingRaw(WordHandler word, List<BatchItem> items)
+        => EmitNumberingRaw(word, items, null);
+
+    private static void EmitNumberingRaw(WordHandler word, List<BatchItem> items, List<DocxUnsupportedWarning>? warnings)
     {
         // Numbering models list templates (abstractNum + num pairs, each
         // abstractNum holds 9 levels with their own pPr / numFmt / lvlText).
@@ -451,8 +456,27 @@ public static partial class WordBatchEmitter
         // Skip when numbering is empty (just `<w:numbering/>` with no children).
         if (!xml.Contains("<w:abstractNum") && !xml.Contains("<w:num "))
             return;
-        xml = StripDanglingPicBullets(xml);
+        xml = StripDanglingPicBullets(xml, out var picBulletsStripped);
         xml = ReorderLvlChildren(xml);
+        // BUG-DUMP-R31-3: picture-bullet list templates reference an image part
+        // (word/media/*) through numbering.xml.rels; the dump round-trips the
+        // numbering XML wholesale via raw-set but carries neither the numbering
+        // part's rels nor the media binary, so the r:id in the numPicBullet's VML
+        // dangles on replay. StripDanglingPicBullets removes the <w:numPicBullet>
+        // definitions and each level's <w:lvlPicBulletId> opt-in to keep the
+        // rebuilt part valid (the level falls back to its own <w:lvlText> glyph).
+        // Previously this loss was SILENT — emit a deterministic warning so the
+        // dropped picture bullet (and its image) is visible, matching the
+        // theme-blip / external-rel warning convention. Full picture-bullet
+        // image-part round-trip (carry the media + recreate numbering.xml.rels
+        // with the VML's r:id) is a separate feature: no batch primitive exists
+        // to attach a binary part + relationship to the numbering part, so it is
+        // intentionally out of scope here.
+        if (picBulletsStripped)
+            warnings?.Add(new DocxUnsupportedWarning(
+                Element: "numbering.numPicBullet",
+                Path: "/numbering",
+                Reason: "picture list bullet (w:numPicBullet / w:lvlPicBulletId + its image part) dropped — numbering picture-bullet image round-trip is not supported; affected levels fall back to their w:lvlText glyph"));
 
         items.Add(new BatchItem
         {

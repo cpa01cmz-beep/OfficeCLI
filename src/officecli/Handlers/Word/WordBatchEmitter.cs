@@ -86,7 +86,7 @@ public static partial class WordBatchEmitter
         {
             case "/theme": EmitThemeRaw(word, items, warnings); return (items, warnings);
             case "/settings": EmitSettingsRaw(word, items); return (items, warnings);
-            case "/numbering": EmitNumberingRaw(word, items); return (items, warnings);
+            case "/numbering": EmitNumberingRaw(word, items, warnings); return (items, warnings);
             case "/styles": EmitStyles(word, items); return (items, warnings);
             case "/body":
                 EmitBody(word, items, warnings, new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase));
@@ -180,7 +180,7 @@ public static partial class WordBatchEmitter
         // Numbering must come BEFORE styles — list-style definitions
         // (Heading paragraphs with numPr) reference numId values, so style
         // adds that carry `numId=N` need /numbering to already hold N.
-        EmitNumberingRaw(word, items);
+        EmitNumberingRaw(word, items, warnings);
         EmitStyles(word, items);
         // docDefaults (inside styles.xml) round-trips verbatim via raw-set —
         // must follow EmitStyles so it overwrites the blank's stamped block
