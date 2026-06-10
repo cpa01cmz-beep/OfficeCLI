@@ -384,6 +384,7 @@ public static partial class WordBatchEmitter
             if (TryEmitPermRun(run, paraTargetPath, items)) continue;
             if (TryEmitPgNumRun(word, run, parentPath, items, ctx)) continue;
             if (TryEmitDateFieldRun(word, run, parentPath, items, ctx)) continue;
+            if (TryEmitHyphenRun(word, run, parentPath, items, ctx)) continue;
             if (TryEmitRubyRun(run, parentPath, paraTargetPath, items, ctx)) continue;
             if (TryEmitBreakRun(word, run, parentPath, paraTargetPath, items, ctx)) continue;
             if (TryEmitTabRun(run, paraTargetPath, items)) continue;
@@ -841,6 +842,11 @@ public static partial class WordBatchEmitter
             // GetRunText's "[dayLong]" sentinel as literal text, losing the
             // element Word substitutes the date against.
             || r.Format.ContainsKey("_hasDateField")
+            // BUG-DUMP-R40-3: a run containing <w:noBreakHyphen/>/<w:softHyphen/>
+            // must stay on the explicit-run path so TryEmitHyphenRun raw-passes
+            // the verbatim <w:r>. Collapsing to `add p text="…"` persists
+            // GetRunText's glyph as literal text and drops the structural hyphen.
+            || r.Format.ContainsKey("_hasHyphen")
             || r.Format.ContainsKey("sym")) return false;
         // BUG-RSHD-PROMOTE: a sole run carrying run-level character shading
         // (<w:rPr><w:shd>) must NOT collapse into `add p`. AddParagraph routes
@@ -1204,6 +1210,52 @@ public static partial class WordBatchEmitter
                 Element: "dateField",
                 Path: run.Path,
                 Reason: "date-component placeholder run carries an external relationship reference and could not be serialized verbatim for round-trip"));
+            return true;
+        }
+        items.Add(new BatchItem
+        {
+            Command = "raw-set",
+            Part = "/document",
+            Xpath = "/w:document/w:body/w:p[last()]",
+            Action = "append",
+            Xml = rawXml!
+        });
+        return true;
+    }
+
+    private static bool TryEmitHyphenRun(WordHandler word, DocumentNode run, string parentPath, List<BatchItem> items, BodyEmitContext? ctx)
+    {
+        // BUG-DUMP-R40-3: a run containing <w:noBreakHyphen/> (non-breaking
+        // hyphen) or <w:softHyphen/> (discretionary hyphen) — siblings of <w:t>
+        // inside the run — has no scalar add/set representation. The typed
+        // `add r`/`add p text=` path persists GetRunText's Unicode glyph
+        // (U+2011 / U+00AD) as literal <w:t> text and drops the structural hyphen
+        // element. Mirroring the pgNum/dateField raw-set fallback, re-insert the
+        // verbatim <w:r> via a raw-set append so the hyphen element — and any
+        // co-located <w:t> text in the same run — survive the round-trip.
+        // RunToNode stamps Format["_hasHyphen"].
+        if (!run.Format.ContainsKey("_hasHyphen")) return false;
+        // Only the /body host has the addressable last() paragraph anchor the
+        // raw-set targets; a header/footer/cell-hosted hyphen needs a different
+        // anchor (backlog, same conservatism as the pgNum/dateField fallback).
+        if (parentPath != "/body")
+        {
+            ctx?.Warnings.Add(new DocxUnsupportedWarning(
+                Element: "hyphen",
+                Path: run.Path,
+                Reason: "non-breaking/soft hyphen (w:noBreakHyphen/w:softHyphen) inside a header/footer/table cell could not be serialized for round-trip; the structural hyphen is lost from the replayed document (the run's text is preserved)"));
+            return true;
+        }
+        var rawXml = word.RawElementXml(run.Path);
+        if (string.IsNullOrEmpty(rawXml)) return true; // nothing to emit
+        // Same external-rel guard as the other raw-set fallbacks — a dangling
+        // r:id/r:embed would not resolve in the rebuilt document.
+        if (HasExternalRelRef(rawXml!))
+        {
+            ctx?.Warnings.Add(new DocxUnsupportedWarning(
+                Element: "hyphen",
+                Path: run.Path,
+                Reason: "hyphen run carries an external relationship reference and could not be serialized verbatim for round-trip"));
             return true;
         }
         items.Add(new BatchItem

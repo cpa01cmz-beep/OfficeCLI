@@ -1806,6 +1806,20 @@ public partial class WordHandler
         // to <w:br/>) rides along inside the same verbatim run XML.
         if (run.GetFirstChild<PageNumber>() != null)
             node.Format["_hasPgNum"] = true;
+        // BUG-DUMP-R40-3: a run containing <w:noBreakHyphen/> (non-breaking
+        // hyphen glyph) or <w:softHyphen/> (discretionary hyphen) — siblings of
+        // <w:t>/<w:tab>/<w:br> inside the run — has no scalar add/set
+        // representation. GetRunText surfaces the Unicode glyph (U+2011 / U+00AD)
+        // as Text, but the typed `add p text="…"`/`add r` path persists that
+        // glyph as literal <w:t> text and the structural hyphen element vanishes
+        // from the round-trip. Mirror the pgNum/dateField raw-set fallback: stamp
+        // a sentinel so the run stays on the explicit-run path and
+        // TryEmitHyphenRun re-inserts the verbatim <w:r> (the hyphen element AND
+        // any co-located <w:t> text) at its source position. node.Type/node.Text
+        // are untouched — the flag only routes the emitter.
+        if (run.GetFirstChild<NoBreakHyphen>() != null
+            || run.GetFirstChild<SoftHyphen>() != null)
+            node.Format["_hasHyphen"] = true;
         // BUG-DUMP-R40-2: surface <w:annotationRef/> (the comment-reference mark
         // that opens every Word-authored comment body). GetRunText emits no
         // glyph for it, so the run looked empty and the typed `add comment`/`add
