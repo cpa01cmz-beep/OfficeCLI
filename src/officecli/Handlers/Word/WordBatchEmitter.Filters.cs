@@ -90,7 +90,7 @@ public static partial class WordBatchEmitter
         // border on round-trip). Fold the 4 keys into one before validation.
         // BUG-DUMP-R36-1: fold tuple carries shadow/frame so the compound
         // string can append them as segments 5/6 (STYLE;SIZE;COLOR;SPACE;SHADOW;FRAME).
-        var pbdrFold = new Dictionary<string, (string? style, string? sz, string? color, string? space, string? shadow, string? frame)>(
+        var pbdrFold = new Dictionary<string, BorderFold>(
             StringComparer.OrdinalIgnoreCase);
         foreach (var (key, val) in raw)
         {
@@ -111,6 +111,11 @@ public static partial class WordBatchEmitter
                     case "space": cur.space = sval; break;
                     case "shadow": cur.shadow = sval; break;
                     case "frame": cur.frame = sval; break;
+                    // BUG-DUMP-R41-2: theme linkage sub-keys (ReadBorder emits
+                    // .themeColor / .themeShade / .themeTint).
+                    case "themecolor": cur.themeColor = sval; break;
+                    case "themeshade": cur.themeShade = sval; break;
+                    case "themetint": cur.themeTint = sval; break;
                 }
             }
             pbdrFold[side] = cur;
@@ -129,7 +134,7 @@ public static partial class WordBatchEmitter
         // partial spec here and prepend an explicit `border=none` wipe so
         // genuine three-line / banner-line tables round-trip with the same
         // visible result. CONSISTENCY(border-default-overlay).
-        var borderFold = new Dictionary<string, (string? style, string? sz, string? color, string? space, string? shadow, string? frame)>(
+        var borderFold = new Dictionary<string, BorderFold>(
             StringComparer.OrdinalIgnoreCase);
         foreach (var (key, val) in raw)
         {
@@ -150,6 +155,11 @@ public static partial class WordBatchEmitter
                     case "space": cur.space = sval; break;
                     case "shadow": cur.shadow = sval; break;
                     case "frame": cur.frame = sval; break;
+                    // BUG-DUMP-R41-2: theme linkage sub-keys (ReadBorder emits
+                    // .themeColor / .themeShade / .themeTint).
+                    case "themecolor": cur.themeColor = sval; break;
+                    case "themeshade": cur.themeShade = sval; break;
+                    case "themetint": cur.themeTint = sval; break;
                 }
             }
             borderFold[side] = cur;
@@ -165,12 +175,21 @@ public static partial class WordBatchEmitter
         bool shadingPresent = false;
         {
             string? sVal = null, sFill = null, sColor = null;
+            // BUG-DUMP-R41-4: theme-linkage attrs surfaced by ReadShadingTheme.
+            string? sThemeFill = null, sThemeFillShade = null, sThemeFillTint = null;
+            string? sThemeColor = null, sThemeShade = null, sThemeTint = null;
             foreach (var (k, v) in raw)
             {
                 if (v == null) continue;
                 if (string.Equals(k, "shading.val", StringComparison.OrdinalIgnoreCase)) sVal = v.ToString();
                 else if (string.Equals(k, "shading.fill", StringComparison.OrdinalIgnoreCase)) sFill = v.ToString();
                 else if (string.Equals(k, "shading.color", StringComparison.OrdinalIgnoreCase)) sColor = v.ToString();
+                else if (string.Equals(k, "shading.themeFill", StringComparison.OrdinalIgnoreCase)) sThemeFill = v.ToString();
+                else if (string.Equals(k, "shading.themeFillShade", StringComparison.OrdinalIgnoreCase)) sThemeFillShade = v.ToString();
+                else if (string.Equals(k, "shading.themeFillTint", StringComparison.OrdinalIgnoreCase)) sThemeFillTint = v.ToString();
+                else if (string.Equals(k, "shading.themeColor", StringComparison.OrdinalIgnoreCase)) sThemeColor = v.ToString();
+                else if (string.Equals(k, "shading.themeShade", StringComparison.OrdinalIgnoreCase)) sThemeShade = v.ToString();
+                else if (string.Equals(k, "shading.themeTint", StringComparison.OrdinalIgnoreCase)) sThemeTint = v.ToString();
             }
             // shading.val="clear" with no fill/color is OOXML's "no shading"
             // form (<w:shd w:val="clear" w:fill="auto"/>). Emitting bare
@@ -187,7 +206,9 @@ public static partial class WordBatchEmitter
             // the raw `shading.val=clear` etc. don't leak through as
             // UNSUPPORTED top-level props on Add. Only the real-shading
             // case populates shadingFolded; effectively-none emits nothing.
-            if (sVal != null || sFill != null || sColor != null)
+            bool anyTheme = sThemeFill != null || sThemeFillShade != null || sThemeFillTint != null
+                || sThemeColor != null || sThemeShade != null || sThemeTint != null;
+            if (sVal != null || sFill != null || sColor != null || anyTheme)
                 shadingPresent = true;
             if (!shadingIsEffectivelyNone && shadingPresent)
             {
@@ -200,6 +221,16 @@ public static partial class WordBatchEmitter
                     shadingFolded = $"{val};{sFill}";
                 else
                     shadingFolded = val;
+                // BUG-DUMP-R41-4: append theme-linkage as backward-compatible
+                // `key=val` tail segments. ParseShadingValue (Set side) strips
+                // any `=`-bearing segment via ExtractThemeTail, so a non-themed
+                // shading keeps the exact legacy VAL;FILL[;COLOR] shape.
+                if (sThemeFill != null) shadingFolded += $";themeFill={sThemeFill}";
+                if (sThemeFillShade != null) shadingFolded += $";themeFillShade={sThemeFillShade}";
+                if (sThemeFillTint != null) shadingFolded += $";themeFillTint={sThemeFillTint}";
+                if (sThemeColor != null) shadingFolded += $";themeColor={sThemeColor}";
+                if (sThemeShade != null) shadingFolded += $";themeShade={sThemeShade}";
+                if (sThemeTint != null) shadingFolded += $";themeTint={sThemeTint}";
             }
         }
 
@@ -412,9 +443,14 @@ public static partial class WordBatchEmitter
     // borders keep the legacy 4-field (or shorter) shape and never gain a
     // spurious shadow="false"/frame="false" on replay. Empty intermediates keep
     // positional alignment.
-    private static string FoldBorderValue(
-        (string? style, string? sz, string? color, string? space, string? shadow, string? frame) f)
+    // BUG-DUMP-R41-2: theme linkage (themeColor/themeShade/themeTint) is
+    // appended as backward-compatible `key=val` tail segments AFTER the
+    // positional fields. The Set-side ExtractThemeTail harvests any `=`-bearing
+    // segment, so a value with no theme keys keeps the exact legacy positional
+    // shape and a plain border round-trips byte-identically.
+    private static string FoldBorderValue(BorderFold f)
     {
+        bool hasTheme = f.themeColor != null || f.themeShade != null || f.themeTint != null;
         bool hasSz = f.sz != null, hasCol = f.color != null, hasSp = f.space != null,
              hasSh = f.shadow != null, hasFr = f.frame != null;
         var v = f.style!;
@@ -423,6 +459,17 @@ public static partial class WordBatchEmitter
         if (hasSp || hasSh || hasFr) v += ";" + (f.space ?? "");
         if (hasSh || hasFr) v += ";" + (f.shadow ?? "");
         if (hasFr) v += ";" + (f.frame ?? "");
+        if (f.themeColor != null) v += ";themeColor=" + f.themeColor;
+        if (f.themeShade != null) v += ";themeShade=" + f.themeShade;
+        if (f.themeTint != null) v += ";themeTint=" + f.themeTint;
         return v;
+    }
+
+    // BUG-DUMP-R41-2: border-side fold tuple. Promoted from an inline tuple
+    // type so the theme-linkage slots (themeColor/themeShade/themeTint) can be
+    // added without re-spelling the 9-field tuple at every use site.
+    private struct BorderFold
+    {
+        public string? style, sz, color, space, shadow, frame, themeColor, themeShade, themeTint;
     }
 }

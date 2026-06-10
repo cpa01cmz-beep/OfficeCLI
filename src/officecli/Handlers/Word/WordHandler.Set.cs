@@ -735,14 +735,90 @@ public partial class WordHandler
     // change rendering and were previously dropped on round-trip. Segments are
     // "true"/"false"/"" (empty = not specified). Back-compat: a 4-field string
     // returns (null, null) so MakeBorder stamps neither attribute.
+    //
+    // CONSISTENCY(border-shadow-frame): the positional SHADOW/FRAME segments are
+    // skipped if they contain '=' (a theme key=val tail — see
+    // ExtractThemeTail/BUG-DUMP-R41-2) so a string carrying only theme tails
+    // (e.g. "single;12;;;themeColor=accent1") never mis-reads the tail segment
+    // as a boolean shadow/frame value.
     private static (bool? shadow, bool? frame) ParseBorderShadowFrame(string value)
     {
         var parts = value.Split(';');
         bool? Slot(int i) =>
-            (parts.Length > i && !string.IsNullOrEmpty(parts[i].Trim()))
+            (parts.Length > i && !string.IsNullOrEmpty(parts[i].Trim())
+             && !parts[i].Contains('='))
                 ? IsTruthy(parts[i].Trim())
                 : (bool?)null;
         return (Slot(4), Slot(5));
+    }
+
+    // BUG-DUMP-R41-2 / BUG-DUMP-R41-4: theme-color/theme-fill linkage on a
+    // border or shading carries the document-theme slot (accent1, text1, …)
+    // plus an optional shade/tint, independent of the resolved hex. The
+    // compound border / shading strings are positional (STYLE;SIZE;COLOR;…
+    // resp. VAL;FILL[;COLOR]); to round-trip the theme attrs WITHOUT breaking
+    // the positional parse the emitter appends backward-compatible `key=val`
+    // tail segments (`;themeColor=accent1;themeShade=BF;themeTint=99` for
+    // borders, `;themeFill=text1;themeFillShade=..;themeFillTint=..` plus the
+    // same themeColor/Shade/Tint trio for shading). This helper splits the raw
+    // value into (positionalOnly, themeMap): every `;`-segment containing '='
+    // is harvested into themeMap (key lower-cased), and the remaining segments
+    // are rejoined with ';' so the legacy positional parser sees an unchanged
+    // 4-field (or shorter) string. A value with no theme tail returns the input
+    // verbatim and an empty map — plain borders/shading are untouched.
+    private static (string positional, Dictionary<string, string> theme) ExtractThemeTail(string value)
+    {
+        if (!value.Contains('=')) return (value, new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
+        var theme = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var kept = new List<string>();
+        foreach (var seg in value.Split(';'))
+        {
+            var eq = seg.IndexOf('=');
+            if (eq > 0)
+            {
+                var k = seg[..eq].Trim();
+                var v = seg[(eq + 1)..].Trim();
+                if (k.Length > 0) theme[k] = v;
+            }
+            else
+                kept.Add(seg);
+        }
+        return (string.Join(';', kept), theme);
+    }
+
+    // BUG-DUMP-R41-2: stamp w:themeColor / w:themeShade / w:themeTint on a
+    // <w:*Border> from the theme map produced by ExtractThemeTail. Only the
+    // keys actually present are written, so a plain border is unaffected.
+    private static void ApplyBorderTheme(BorderType border, Dictionary<string, string> theme)
+    {
+        if (theme.Count == 0) return;
+        if (theme.TryGetValue("themeColor", out var tc) && tc.Length > 0)
+            border.ThemeColor = new EnumValue<ThemeColorValues>(new ThemeColorValues(tc));
+        if (theme.TryGetValue("themeShade", out var tsh) && tsh.Length > 0)
+            border.ThemeShade = tsh;
+        if (theme.TryGetValue("themeTint", out var tt) && tt.Length > 0)
+            border.ThemeTint = tt;
+    }
+
+    // BUG-DUMP-R41-4: stamp the theme shading attrs (w:themeFill /
+    // w:themeFillShade / w:themeFillTint and the w:themeColor / w:themeShade /
+    // w:themeTint trio) on a <w:shd> from the ExtractThemeTail map. Only
+    // present keys are written.
+    private static void ApplyShadingTheme(Shading shd, Dictionary<string, string> theme)
+    {
+        if (theme.Count == 0) return;
+        if (theme.TryGetValue("themeFill", out var tf) && tf.Length > 0)
+            shd.ThemeFill = new EnumValue<ThemeColorValues>(new ThemeColorValues(tf));
+        if (theme.TryGetValue("themeFillShade", out var tfs) && tfs.Length > 0)
+            shd.ThemeFillShade = tfs;
+        if (theme.TryGetValue("themeFillTint", out var tft) && tft.Length > 0)
+            shd.ThemeFillTint = tft;
+        if (theme.TryGetValue("themeColor", out var tc) && tc.Length > 0)
+            shd.ThemeColor = new EnumValue<ThemeColorValues>(new ThemeColorValues(tc));
+        if (theme.TryGetValue("themeShade", out var tsh) && tsh.Length > 0)
+            shd.ThemeShade = tsh;
+        if (theme.TryGetValue("themeTint", out var tt) && tt.Length > 0)
+            shd.ThemeTint = tt;
     }
 
     // CONSISTENCY(border-size-roundtrip): expose whether the caller provided
@@ -752,6 +828,12 @@ public partial class WordHandler
     // use the legacy 4-tuple wrapper above.
     private static (BorderValues style, uint size, string? color, uint? space, bool sizeProvided) ParseBorderValueDetailed(string value)
     {
+        // BUG-DUMP-R41-2: strip any trailing theme key=val tail
+        // (themeColor=…/themeShade=…/themeTint=…) before positional parsing so
+        // it never lands in the COLOR/SPACE slots. The theme attrs are applied
+        // separately via ParseBorderTheme → ApplyBorderTheme at the call site.
+        var (value0, _) = ExtractThemeTail(value);
+        value = value0;
         var parts = value.Split(';');
         var style = ParseBorderStyle(parts[0]);
         uint size;
@@ -805,7 +887,7 @@ public partial class WordHandler
         return (style, size, color, space, sizeProvided);
     }
 
-    private static T MakeBorder<T>(BorderValues style, uint size, string? color, uint? space, bool? shadow = null, bool? frame = null) where T : BorderType, new()
+    private static T MakeBorder<T>(BorderValues style, uint size, string? color, uint? space, bool? shadow = null, bool? frame = null, Dictionary<string, string>? theme = null) where T : BorderType, new()
     {
         // BUG-R2-P2-7: only emit w:space attribute when the caller actually
         // provided one. Writing space=0 explicitly round-trips into a
@@ -827,6 +909,11 @@ public partial class WordHandler
         // spurious shadow="false"/frame="false" attribute.
         if (shadow.HasValue) b.Shadow = shadow.Value;
         if (frame.HasValue) b.Frame = frame.Value;
+        // BUG-DUMP-R41-2: stamp w:themeColor / w:themeShade / w:themeTint from
+        // the theme map (parsed out of the value's key=val tail) so the
+        // border's theme linkage round-trips. Null/empty map = plain border,
+        // untouched.
+        if (theme != null) ApplyBorderTheme(b, theme);
         return b;
     }
 
@@ -1168,33 +1255,36 @@ public partial class WordHandler
         }
         var (style, size, color, space) = ParseBorderValue(value);
         var sf = ParseBorderShadowFrame(value);
+        // BUG-DUMP-R41-2: harvest the theme key=val tail once; passed to every
+        // MakeBorder below so w:themeColor/Shade/Tint round-trip.
+        var (_, bTheme) = ExtractThemeTail(value);
 
         switch (key.ToLowerInvariant())
         {
             case "pbdr.all" or "pbdr" or "border.all" or "border":
-                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space, sf.shadow, sf.frame);
-                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space, sf.shadow, sf.frame);
-                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space, sf.shadow, sf.frame);
-                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space, sf.shadow, sf.frame);
-                borders.BetweenBorder = MakeBorder<BetweenBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
+                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
+                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
+                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
+                borders.BetweenBorder = MakeBorder<BetweenBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
                 break;
             case "pbdr.top" or "border.top":
-                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
                 break;
             case "pbdr.bottom" or "border.bottom":
-                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
                 break;
             case "pbdr.left" or "border.left":
-                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
                 break;
             case "pbdr.right" or "border.right":
-                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
                 break;
             case "pbdr.between" or "border.between":
-                borders.BetweenBorder = MakeBorder<BetweenBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.BetweenBorder = MakeBorder<BetweenBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
                 break;
             case "pbdr.bar" or "border.bar":
-                borders.BarBorder = MakeBorder<BarBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.BarBorder = MakeBorder<BarBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
                 break;
         }
     }
@@ -1214,33 +1304,36 @@ public partial class WordHandler
         }
         var (style, size, color, space) = ParseBorderValue(value);
         var sf = ParseBorderShadowFrame(value);
+        // BUG-DUMP-R41-2: harvest the theme key=val tail once; passed to every
+        // MakeBorder below so w:themeColor/Shade/Tint round-trip.
+        var (_, bTheme) = ExtractThemeTail(value);
 
         switch (key.ToLowerInvariant())
         {
             case "pbdr.all" or "pbdr" or "border.all" or "border":
-                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space, sf.shadow, sf.frame);
-                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space, sf.shadow, sf.frame);
-                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space, sf.shadow, sf.frame);
-                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space, sf.shadow, sf.frame);
-                borders.BetweenBorder = MakeBorder<BetweenBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
+                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
+                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
+                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
+                borders.BetweenBorder = MakeBorder<BetweenBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
                 break;
             case "pbdr.top" or "border.top":
-                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
                 break;
             case "pbdr.bottom" or "border.bottom":
-                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
                 break;
             case "pbdr.left" or "border.left":
-                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
                 break;
             case "pbdr.right" or "border.right":
-                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
                 break;
             case "pbdr.between" or "border.between":
-                borders.BetweenBorder = MakeBorder<BetweenBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.BetweenBorder = MakeBorder<BetweenBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
                 break;
             case "pbdr.bar" or "border.bar":
-                borders.BarBorder = MakeBorder<BarBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.BarBorder = MakeBorder<BarBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
                 break;
         }
     }
@@ -1250,34 +1343,37 @@ public partial class WordHandler
         var borders = tblPr.TableBorders ?? tblPr.AppendChild(new TableBorders());
         var (style, size, color, space) = ParseBorderValue(value);
         var sf = ParseBorderShadowFrame(value);
+        // BUG-DUMP-R41-2: harvest the theme key=val tail once; passed to every
+        // MakeBorder below so w:themeColor/Shade/Tint round-trip.
+        var (_, bTheme) = ExtractThemeTail(value);
 
         switch (key.ToLowerInvariant())
         {
             case "border.all" or "border":
-                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space, sf.shadow, sf.frame);
-                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space, sf.shadow, sf.frame);
-                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space, sf.shadow, sf.frame);
-                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space, sf.shadow, sf.frame);
-                borders.InsideHorizontalBorder = MakeBorder<InsideHorizontalBorder>(style, size, color, space, sf.shadow, sf.frame);
-                borders.InsideVerticalBorder = MakeBorder<InsideVerticalBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
+                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
+                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
+                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
+                borders.InsideHorizontalBorder = MakeBorder<InsideHorizontalBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
+                borders.InsideVerticalBorder = MakeBorder<InsideVerticalBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
                 break;
             case "border.top":
-                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
                 break;
             case "border.bottom":
-                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
                 break;
             case "border.left":
-                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
                 break;
             case "border.right":
-                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
                 break;
             case "border.insideh" or "border.horizontal":
-                borders.InsideHorizontalBorder = MakeBorder<InsideHorizontalBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.InsideHorizontalBorder = MakeBorder<InsideHorizontalBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
                 break;
             case "border.insidev" or "border.vertical":
-                borders.InsideVerticalBorder = MakeBorder<InsideVerticalBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.InsideVerticalBorder = MakeBorder<InsideVerticalBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
                 break;
         }
     }
@@ -1347,32 +1443,35 @@ public partial class WordHandler
         }
         var (style, size, color, space) = ParseBorderValue(value);
         var sf = ParseBorderShadowFrame(value);
+        // BUG-DUMP-R41-2: harvest the theme key=val tail once; passed to every
+        // MakeBorder below so w:themeColor/Shade/Tint round-trip.
+        var (_, bTheme) = ExtractThemeTail(value);
 
         switch (key.ToLowerInvariant())
         {
             case "border.all" or "border":
-                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space, sf.shadow, sf.frame);
-                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space, sf.shadow, sf.frame);
-                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space, sf.shadow, sf.frame);
-                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
+                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
+                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
+                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
                 break;
             case "border.top":
-                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
                 break;
             case "border.bottom":
-                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.BottomBorder = MakeBorder<BottomBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
                 break;
             case "border.left":
-                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.LeftBorder = MakeBorder<LeftBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
                 break;
             case "border.right":
-                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.RightBorder = MakeBorder<RightBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
                 break;
             case "border.tl2br":
-                borders.TopLeftToBottomRightCellBorder = MakeBorder<TopLeftToBottomRightCellBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.TopLeftToBottomRightCellBorder = MakeBorder<TopLeftToBottomRightCellBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
                 break;
             case "border.tr2bl":
-                borders.TopRightToBottomLeftCellBorder = MakeBorder<TopRightToBottomLeftCellBorder>(style, size, color, space, sf.shadow, sf.frame);
+                borders.TopRightToBottomLeftCellBorder = MakeBorder<TopRightToBottomLeftCellBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
                 break;
         }
     }

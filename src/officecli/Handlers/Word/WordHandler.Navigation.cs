@@ -2104,6 +2104,7 @@ public partial class WordHandler
             if (!string.IsNullOrEmpty(rShdVal)) node.Format["shading.val"] = rShdVal;
             if (!string.IsNullOrEmpty(rShdFill)) node.Format["shading.fill"] = ParseHelpers.FormatHexColor(rShdFill);
             if (!string.IsNullOrEmpty(rShdColor)) node.Format["shading.color"] = ParseHelpers.FormatHexColor(rShdColor);
+            ReadShadingTheme(run.RunProperties.Shading, node);
         }
         // w14 text effects
         ReadW14TextEffects(run.RunProperties, node);
@@ -2893,6 +2894,7 @@ public partial class WordHandler
                 if (!string.IsNullOrEmpty(tShdVal)) node.Format["shading.val"] = tShdVal;
                 if (!string.IsNullOrEmpty(tShdFill)) node.Format["shading.fill"] = ParseHelpers.FormatHexColor(tShdFill);
                 if (!string.IsNullOrEmpty(tShdColor)) node.Format["shading.color"] = ParseHelpers.FormatHexColor(tShdColor);
+                ReadShadingTheme(tp.Shading, node);
             }
 
             // BUG-R3-01: tblLook readback — Set wrote the XML correctly, but
@@ -3587,6 +3589,7 @@ public partial class WordHandler
                 if (!string.IsNullOrEmpty(shdVal)) node.Format["shading.val"] = shdVal;
                 if (!string.IsNullOrEmpty(shdFill)) node.Format["shading.fill"] = ParseHelpers.FormatHexColor(shdFill);
                 if (!string.IsNullOrEmpty(shdColor)) node.Format["shading.color"] = ParseHelpers.FormatHexColor(shdColor);
+                ReadShadingTheme(pProps.Shading, node);
             }
 
             var pBdr = pProps.ParagraphBorders;
@@ -4054,6 +4057,15 @@ public partial class WordHandler
                         folded = $"{v};{ParseHelpers.FormatHexColor(pmShdFill)}";
                     else
                         folded = v;
+                    // BUG-DUMP-R41-4: carry the ¶-mark shd theme linkage as
+                    // key=val tails (mirrors the run/paragraph/cell shading
+                    // fold); ParseShadingValue strips them on replay.
+                    if (pmShd.ThemeFill?.HasValue == true) folded += $";themeFill={pmShd.ThemeFill.InnerText}";
+                    if (pmShd.ThemeFillShade?.Value is { } pmTfs) folded += $";themeFillShade={pmTfs}";
+                    if (pmShd.ThemeFillTint?.Value is { } pmTft) folded += $";themeFillTint={pmTft}";
+                    if (pmShd.ThemeColor?.HasValue == true) folded += $";themeColor={pmShd.ThemeColor.InnerText}";
+                    if (pmShd.ThemeShade?.Value is { } pmTsh) folded += $";themeShade={pmTsh}";
+                    if (pmShd.ThemeTint?.Value is { } pmTt) folded += $";themeTint={pmTt}";
                     node.Format["markRPr.shading"] = folded;
                 }
             }
@@ -5068,6 +5080,7 @@ public partial class WordHandler
                     if (!string.IsNullOrEmpty(cShdVal)) node.Format["shading.val"] = cShdVal;
                     if (!string.IsNullOrEmpty(cShdFill)) node.Format["shading.fill"] = ParseHelpers.FormatHexColor(cShdFill);
                     if (!string.IsNullOrEmpty(cShdColor)) node.Format["shading.color"] = ParseHelpers.FormatHexColor(cShdColor);
+                    ReadShadingTheme(shd, node);
                 }
             }
             // Width
@@ -5262,6 +5275,36 @@ public partial class WordHandler
         // plain border round-trips without a spurious shadow="false".
         if (border.Shadow?.Value is bool sh) node.Format[$"{key}.shadow"] = sh;
         if (border.Frame?.Value is bool fr) node.Format[$"{key}.frame"] = fr;
+        // BUG-DUMP-R41-2: w:themeColor / w:themeShade / w:themeTint encode the
+        // border's link to the theme color slot (accent1, …) plus the
+        // shade/tint applied to it. The resolved w:color hex was kept, but the
+        // theme linkage was dropped on round-trip — Word would no longer
+        // recolor the border when the document theme changes. Emit each as a
+        // sub-key only when present so a plain (non-themed) border keeps the
+        // legacy shape. Mirrors the run/shading themeFill readback below.
+        if (border.ThemeColor?.HasValue == true) node.Format[$"{key}.themeColor"] = border.ThemeColor.InnerText ?? "";
+        if (border.ThemeShade?.Value is { } tsh) node.Format[$"{key}.themeShade"] = tsh;
+        if (border.ThemeTint?.Value is { } tt) node.Format[$"{key}.themeTint"] = tt;
+    }
+
+    // BUG-DUMP-R41-4: surface the theme-linkage attributes on a <w:shd> under
+    // the shading.* namespace so they round-trip alongside the resolved fill.
+    // <w:shd> carries TWO theme slots: w:themeFill/themeFillShade/themeFillTint
+    // (the linkage for the FILL color) and w:themeColor/themeShade/themeTint
+    // (the linkage for the pattern COLOR). The resolved w:fill / w:color hex was
+    // kept, but the theme linkage was dropped — Word would no longer recolor
+    // the shading when the document theme changes. Emit each sub-key only when
+    // present so a plain (non-themed) shading keeps the legacy 3-key shape.
+    // WordBatchEmitter's shading fold appends these as `key=val` tail segments;
+    // ParseShadingValue strips them and ApplyShadingTheme re-stamps them.
+    private static void ReadShadingTheme(Shading shd, DocumentNode node)
+    {
+        if (shd.ThemeFill?.HasValue == true) node.Format["shading.themeFill"] = shd.ThemeFill.InnerText ?? "";
+        if (shd.ThemeFillShade?.Value is { } tfs) node.Format["shading.themeFillShade"] = tfs;
+        if (shd.ThemeFillTint?.Value is { } tft) node.Format["shading.themeFillTint"] = tft;
+        if (shd.ThemeColor?.HasValue == true) node.Format["shading.themeColor"] = shd.ThemeColor.InnerText ?? "";
+        if (shd.ThemeShade?.Value is { } tsh) node.Format["shading.themeShade"] = tsh;
+        if (shd.ThemeTint?.Value is { } tt) node.Format["shading.themeTint"] = tt;
     }
 
     // OOXML localNames that curated style/paragraph/run readers already map
