@@ -24,6 +24,27 @@ fetch_with_fallback() {
     curl -fsSL --max-time 300 "$fallback" -o "$out" 2>/dev/null
 }
 
+# resolve_version
+# Discover the latest release tag (vX.Y.Z) by following the /releases/latest
+# redirect and reading the final tag URL. Mirror first, github fallback.
+# Prints the tag on success, empty on failure.
+# This lets us download from the IMMUTABLE versioned path instead of the
+# mutable /releases/latest/download/ path — see download section below.
+resolve_version() {
+    local url
+    url=$(curl -fsSL --max-time 30 --connect-timeout 5 -o /dev/null -w '%{url_effective}' \
+            "$MIRROR_BASE/releases/latest" 2>/dev/null)
+    case "$url" in
+        */releases/tag/v*) echo "${url##*/tag/}"; return 0 ;;
+    esac
+    url=$(curl -fsSL --max-time 30 -o /dev/null -w '%{url_effective}' \
+            "https://github.com/$REPO/releases/latest" 2>/dev/null)
+    case "$url" in
+        */releases/tag/v*) echo "${url##*/tag/}"; return 0 ;;
+    esac
+    return 1
+}
+
 # Detect platform
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m)
@@ -71,17 +92,35 @@ esac
 
 SOURCE=""
 
+# Resolve the latest tag up-front so we download from the IMMUTABLE versioned
+# path (/releases/download/vX.Y.Z/asset) instead of the mutable
+# /releases/latest/download/ path. The latter is CDN-cached for up to 4h, so
+# right after a release it can serve the PREVIOUS binary together with a
+# self-consistent stale SHA256SUMS — which passes checksum and installs an old
+# version despite printing success. The versioned URL is pinned + immutable,
+# so it never mismatches the freshly-published release.
+VERSION=$(resolve_version || true)
+if [ -n "$VERSION" ]; then
+    echo "Latest version: $VERSION"
+    MIRROR_ASSET_BASE="$MIRROR_BASE/releases/download/$VERSION"
+    GITHUB_ASSET_BASE="https://github.com/$REPO/releases/download/$VERSION"
+else
+    echo "Could not resolve latest version; falling back to 'latest' path."
+    MIRROR_ASSET_BASE="$MIRROR_BASE/releases/latest/download"
+    GITHUB_ASSET_BASE="$GITHUB_RELEASE_BASE"
+fi
+
 # Step 1: Try downloading (mirror first, github fallback)
 echo "Downloading OfficeCLI ($ASSET)..."
 if fetch_with_fallback \
-        "$MIRROR_BASE/releases/latest/download/$ASSET" \
-        "$GITHUB_RELEASE_BASE/$ASSET" \
+        "$MIRROR_ASSET_BASE/$ASSET" \
+        "$GITHUB_ASSET_BASE/$ASSET" \
         "/tmp/$BINARY_NAME"; then
     # Verify checksum if available
     CHECKSUM_OK=false
     if fetch_with_fallback \
-            "$MIRROR_BASE/releases/latest/download/SHA256SUMS" \
-            "$GITHUB_RELEASE_BASE/SHA256SUMS" \
+            "$MIRROR_ASSET_BASE/SHA256SUMS" \
+            "$GITHUB_ASSET_BASE/SHA256SUMS" \
             "/tmp/officecli-SHA256SUMS"; then
         EXPECTED=$(grep "$ASSET" "/tmp/officecli-SHA256SUMS" | awk '{print $1}')
         if [ -n "$EXPECTED" ]; then

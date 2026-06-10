@@ -26,16 +26,59 @@ function Fetch-WithFallback {
     }
 }
 
+# Resolve-Version
+# Discover the latest release tag (vX.Y.Z) by following the /releases/latest
+# redirect and reading the final tag URL. Mirror first, github fallback.
+# Returns the tag on success, $null on failure. This lets us download from the
+# IMMUTABLE versioned path instead of the mutable /releases/latest/download/
+# path — see download section below.
+function Resolve-Version {
+    foreach ($base in @("$mirrorBase/releases/latest", "https://github.com/$repo/releases/latest")) {
+        try {
+            $resp = Invoke-WebRequest -Uri $base -MaximumRedirection 5 -TimeoutSec 30 -ErrorAction Stop
+            $finalUrl = $resp.BaseResponse.ResponseUri.AbsoluteUri
+            if ($finalUrl -match '/releases/tag/(v[0-9]+\.[0-9]+\.[0-9]+)') {
+                return $matches[1]
+            }
+        } catch {
+            if ($_.Exception.Response -and $_.Exception.Response.ResponseUri) {
+                $finalUrl = $_.Exception.Response.ResponseUri.AbsoluteUri
+                if ($finalUrl -match '/releases/tag/(v[0-9]+\.[0-9]+\.[0-9]+)') {
+                    return $matches[1]
+                }
+            }
+        }
+    }
+    return $null
+}
+
 $source = $null
+
+# Resolve the latest tag up-front so we download from the IMMUTABLE versioned
+# path (/releases/download/vX.Y.Z/asset) instead of the mutable
+# /releases/latest/download/ path. The latter is CDN-cached for up to 4h, so
+# right after a release it can serve the PREVIOUS binary together with a
+# self-consistent stale SHA256SUMS — which passes checksum and installs an old
+# version despite printing success. The versioned URL is pinned + immutable.
+$version = Resolve-Version
+if ($version) {
+    Write-Host "Latest version: $version"
+    $mirrorAssetBase = "$mirrorBase/releases/download/$version"
+    $githubAssetBase = "https://github.com/$repo/releases/download/$version"
+} else {
+    Write-Host "Could not resolve latest version; falling back to 'latest' path."
+    $mirrorAssetBase = "$mirrorBase/releases/latest/download"
+    $githubAssetBase = $githubReleaseBase
+}
 
 # Step 1: Try downloading (mirror first, github fallback)
 $tempFile = "$env:TEMP\$binary"
 Write-Host "Downloading OfficeCLI..."
-if (Fetch-WithFallback "$mirrorBase/releases/latest/download/$asset" "$githubReleaseBase/$asset" $tempFile) {
+if (Fetch-WithFallback "$mirrorAssetBase/$asset" "$githubAssetBase/$asset" $tempFile) {
     # Verify checksum if available
     $checksumOk = $false
     $checksumFile = "$env:TEMP\officecli-SHA256SUMS"
-    if (Fetch-WithFallback "$mirrorBase/releases/latest/download/SHA256SUMS" "$githubReleaseBase/SHA256SUMS" $checksumFile) {
+    if (Fetch-WithFallback "$mirrorAssetBase/SHA256SUMS" "$githubAssetBase/SHA256SUMS" $checksumFile) {
         $checksumContent = Get-Content $checksumFile
         $expectedLine = $checksumContent | Where-Object { $_ -match $asset }
         if ($expectedLine) {
