@@ -307,7 +307,7 @@ public partial class WordHandler
                 && !string.Equals(paraFont, ReadDocDefaults().Font, StringComparison.Ordinal))
             {
                 var fallback = GetChineseFontFallback(paraFont);
-                var generic = IsLikelySerif(paraFont) ? "serif" : "sans-serif";
+                var generic = GenericFontFamily(paraFont);
                 parts.Add(fallback != null
                     ? $"font-family:'{CssSanitize(paraFont)}',{fallback},{generic}"
                     : $"font-family:'{CssSanitize(paraFont)}',{generic}");
@@ -1468,7 +1468,7 @@ public partial class WordHandler
             // Always append a generic family so the run still renders with the right
             // serif/sans-serif class when neither the primary nor the CJK fallback
             // is installed (matters in headless browsers like Playwright).
-            var generic = IsLikelySerif(font) ? "serif" : "sans-serif";
+            var generic = GenericFontFamily(font);
             parts.Add(fallback != null
                 ? $"font-family:'{CssSanitize(font)}',{fallback},{generic}"
                 : $"font-family:'{CssSanitize(font)}',{generic}");
@@ -2334,6 +2334,31 @@ public partial class WordHandler
             return true;
         return false;
     }
+
+    /// <summary>
+    /// Heuristic: does this typeface name belong to the monospace (fixed-width)
+    /// family? Picks the <c>monospace</c> generic fallback so code/columns stay
+    /// aligned when the named font is unavailable.
+    /// </summary>
+    private static bool IsLikelyMonospace(string font)
+    {
+        var f = font.ToLowerInvariant();
+        return f.Contains("courier") || f.Contains("consolas")
+            || f.Contains("lucida console") || f.Contains("monaco")
+            || f.Contains("menlo") || f.Contains("cascadia")
+            || f.Contains("mono") || f.Contains("sf mono")
+            || f.Contains("monospace");
+    }
+
+    /// <summary>
+    /// Pick the generic CSS family (monospace / serif / sans-serif) to terminate
+    /// a font-family list, so the run still renders in the right class when the
+    /// named font and any CJK fallback are unavailable.
+    /// </summary>
+    private static string GenericFontFamily(string font)
+        => IsLikelyMonospace(font) ? "monospace"
+            : IsLikelySerif(font) ? "serif"
+            : "sans-serif";
 
     /// <summary>
     /// Returns CSS fallback fonts for common Windows Chinese fonts that are unavailable on Mac.
