@@ -1274,13 +1274,18 @@ internal static partial class ChartHelper
             else series.PrependChild(spPr);
             return;
         }
-        var solidFill = new Drawing.SolidFill();
-        solidFill.AppendChild(BuildChartColorElement(color));
-        spPr.AppendChild(solidFill);
+        // Line-based series (line/scatter/radar) carry their color on the
+        // line stroke (<a:ln><a:solidFill>); real PowerPoint IGNORES a bare
+        // <a:solidFill> for the stroke and falls back to the theme color.
+        // Area-based series (bar/column/pie/area/doughnut) use the bare
+        // <a:solidFill> as an area fill. All series share LocalName "ser", so
+        // detect by the strongly-typed element class (works pre-append when
+        // Parent is still null) and fall back to the parent chart type for
+        // loosely-typed elements obtained from an already-parsed tree.
+        bool isLineBased = series is C.LineChartSeries or C.ScatterChartSeries or C.RadarChartSeries
+            || series.Parent?.LocalName is "lineChart" or "scatterChart" or "radarChart";
 
-        // For line/scatter series, also set a:ln so Excel uses the correct stroke color
-        var parentName = series.Parent?.LocalName;
-        if (parentName is "lineChart" or "scatterChart" or "radarChart")
+        if (isLineBased)
         {
             const int defaultStrokeWidthEmu = 25400; // 2pt × 12700 EMU/pt
             var outline = new Drawing.Outline { Width = defaultStrokeWidthEmu };
@@ -1288,6 +1293,12 @@ internal static partial class ChartHelper
             lnFill.AppendChild(BuildChartColorElement(color));
             outline.AppendChild(lnFill);
             spPr.AppendChild(outline);
+        }
+        else
+        {
+            var solidFill = new Drawing.SolidFill();
+            solidFill.AppendChild(BuildChartColorElement(color));
+            spPr.AppendChild(solidFill);
         }
 
         var serText = series.GetFirstChild<C.SeriesText>();

@@ -1002,7 +1002,16 @@ internal static partial class ChartHelper
                 // setter side re-applies NoFill.
                 if (serSpPr?.GetFirstChild<Drawing.NoFill>() != null)
                     seriesNode.Format["color"] = "none";
-                var serColor = serSpPr?.GetFirstChild<Drawing.SolidFill>();
+                // Line-based series (line/scatter/radar) carry their color on
+                // the line stroke (<a:ln><a:solidFill>). Read it FIRST; fall
+                // back to the bare <a:solidFill> for backward-compat with
+                // files authored before the stroke-color fix.
+                var serIsLineBased = serEl?.Parent?.LocalName
+                    is "lineChart" or "scatterChart" or "radarChart";
+                Drawing.SolidFill? serColor = null;
+                if (serIsLineBased)
+                    serColor = serSpPr?.GetFirstChild<Drawing.Outline>()?.GetFirstChild<Drawing.SolidFill>();
+                serColor ??= serSpPr?.GetFirstChild<Drawing.SolidFill>();
                 if (serColor != null)
                 {
                     var colorVal = ReadColorFromFill(serColor);
@@ -1039,9 +1048,11 @@ internal static partial class ChartHelper
                 var prstDash = outline?.GetFirstChild<Drawing.PresetDash>();
                 if (prstDash?.Val?.HasValue == true)
                     seriesNode.Format["lineDash"] = prstDash.Val.InnerText;
-                // Outline color
+                // Outline color. For line-based series the stroke solidFill is
+                // already surfaced as the series `color` above, so don't also
+                // emit it as `outlineColor` (would double-encode the same value).
                 var outlineFill = outline?.GetFirstChild<Drawing.SolidFill>();
-                if (outlineFill != null)
+                if (outlineFill != null && !serIsLineBased)
                 {
                     var outColor = ReadColorFromFill(outlineFill);
                     if (outColor != null) seriesNode.Format["outlineColor"] = outColor;
