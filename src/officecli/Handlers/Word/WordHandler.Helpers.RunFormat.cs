@@ -949,6 +949,14 @@ public partial class WordHandler
                 props.RemoveAllChildren<Shading>();
                 InsertRunPropInSchemaOrder(props, ParseShadingValue(value));
                 return true;
+            case "w" or "charscale":
+                // <w:w w:val="…"/> — horizontal character scale percentage.
+                props.RemoveAllChildren<CharacterScale>();
+                InsertRunPropInSchemaOrder(props, new CharacterScale
+                {
+                    Val = (int)Math.Round(ParseHelpers.SafeParseDouble(value.TrimEnd('%'), "charscale"), MidpointRounding.AwayFromZero),
+                });
+                return true;
             case "superscript":
                 props.RemoveAllChildren<VerticalTextAlignment>();
                 if (IsTruthy(value))

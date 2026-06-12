@@ -885,6 +885,20 @@ public partial class WordHandler
         {
             ApplyRunFormatting(hlRProps, "charSpacing", hlCharSp);
         }
+        // Theme font slots (<w:rFonts w:asciiTheme="…" …/>), run shading and
+        // character scale (<w:w/>): dump emits all of these on hyperlink runs
+        // (minorEastAsia-themed Korean links, shaded URLs); route through the
+        // shared run cases so batch replay keeps the source typography instead
+        // of falling back to the document default (serif) font.
+        foreach (var hlPassKey in new[]
+                 {
+                     "font.asciiTheme", "font.hAnsiTheme", "font.eaTheme",
+                     "font.csTheme", "shading", "w",
+                 })
+        {
+            if (properties.TryGetValue(hlPassKey, out var hlPassVal))
+                ApplyRunFormatting(hlRProps, hlPassKey, hlPassVal);
+        }
         if (properties.TryGetValue("size", out var hlSize))
             hlRProps.FontSize = new FontSize { Val = ((int)Math.Round(ParseFontSize(hlSize) * 2, MidpointRounding.AwayFromZero)).ToString() };
         if (properties.TryGetValue("bold", out var hlBold) && IsTruthy(hlBold))
