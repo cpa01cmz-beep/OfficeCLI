@@ -2572,7 +2572,7 @@ public partial class WordHandler
                     else
                     {
                         int cellIdxRC = 0;
-                        foreach (var cell in row.Elements<TableCell>())
+                        foreach (var cell in GetRowCellsFlattened(row))
                         {
                             cellIdxRC++;
                             var cellPath = $"/body/tbl[{tblIdxRC}]/tr[{rowIdxRC}]/tc[{cellIdxRC}]";
@@ -2634,7 +2634,7 @@ public partial class WordHandler
                     else
                     {
                         int cellIdxC = 0;
-                        foreach (var cell in row.Elements<TableCell>())
+                        foreach (var cell in GetRowCellsFlattened(row))
                         {
                             cellIdxC++;
                             var cellPath = $"/body/tbl[{tblIdxC}]/tr[{rowIdxC}]/tc[{cellIdxC}]";
@@ -2743,7 +2743,7 @@ public partial class WordHandler
                     {
                         rowIdx++;
                         int cellIdx = 0;
-                        foreach (var cell in row.Elements<TableCell>())
+                        foreach (var cell in GetRowCellsFlattened(row))
                         {
                             cellIdx++;
                             int cellParaIdx = 0;
@@ -2775,7 +2775,7 @@ public partial class WordHandler
                     {
                         rowIdx++;
                         int cellIdx = 0;
-                        foreach (var cell in row.Elements<TableCell>())
+                        foreach (var cell in GetRowCellsFlattened(row))
                         {
                             cellIdx++;
                             int cellParaIdx = 0;
@@ -2834,7 +2834,7 @@ public partial class WordHandler
                     {
                         rowIdxP++;
                         int cellIdxP = 0;
-                        foreach (var cell in row.Elements<TableCell>())
+                        foreach (var cell in GetRowCellsFlattened(row))
                         {
                             cellIdxP++;
                             int cellParaIdx = 0;
@@ -2873,7 +2873,7 @@ public partial class WordHandler
                     {
                         rowIdx++;
                         int cellIdx = 0;
-                        foreach (var cell in row.Elements<TableCell>())
+                        foreach (var cell in GetRowCellsFlattened(row))
                         {
                             cellIdx++;
                             int cellParaIdx = 0;
@@ -2907,7 +2907,7 @@ public partial class WordHandler
                     {
                         rowIdxPic++;
                         int cellIdxPic = 0;
-                        foreach (var cell in row.Elements<TableCell>())
+                        foreach (var cell in GetRowCellsFlattened(row))
                         {
                             cellIdxPic++;
                             int cellParaIdx = 0;

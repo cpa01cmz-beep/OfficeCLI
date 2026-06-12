@@ -775,6 +775,34 @@ public static partial class WordBatchEmitter
                 });
             }
         }
+
+        // Cell-level content controls: a <w:sdt> direct child of <w:tr> whose
+        // sdtContent wraps the <w:tc> (Word's dropdown-bound cell). Navigation
+        // flattens those to plain cells, and the inline-SDT emit demotes the
+        // control to a run-level sdt INSIDE the cell — dropping the binding
+        // from the other wrapped cells entirely. Patch each wrapped cell back
+        // to its verbatim <w:sdt> block after all typed cell content has been
+        // applied. Per row, replace in DESCENDING cell order: replacing
+        // w:tc[3] with w:sdt removes it from the w:tc axis, which would shift
+        // the index of every later w:tc in that row.
+        if (containerPath == "/body")
+        {
+            for (int r = 0; r < rows.Count; r++)
+            {
+                var wrapped = word.GetSdtWrappedCellsOfRow(rowNodes[r].Path);
+                for (int wi = wrapped.Count - 1; wi >= 0; wi--)
+                {
+                    items.Add(new BatchItem
+                    {
+                        Command = "raw-set",
+                        Part = "/document",
+                        Xpath = $"(//w:tbl)[{tableOrdinal}]/w:tr[{r + 1}]/w:tc[{wrapped[wi].CellOrdinal}]",
+                        Action = "replace",
+                        Xml = wrapped[wi].SdtXml,
+                    });
+                }
+            }
+        }
         // BUG-DUMP-R26-7: clear the cell-XPath context once this table is fully
         // emitted so body/header/footer content AFTER the table (or a parent
         // cell's content after a nested table) doesn't inherit a stale cell

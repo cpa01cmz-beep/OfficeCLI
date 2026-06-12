@@ -1333,7 +1333,9 @@ public partial class WordHandler
                         .Cast<OpenXmlElement>(),
                     "tbl" => current.Elements<Table>().Cast<OpenXmlElement>(),
                     "tr" => current.Elements<TableRow>().Cast<OpenXmlElement>(),
-                    "tc" => current.Elements<TableCell>().Cast<OpenXmlElement>(),
+                    "tc" => current is TableRow tcHostRow
+                        ? GetRowCellsFlattened(tcHostRow).Cast<OpenXmlElement>()
+                        : current.Elements<TableCell>().Cast<OpenXmlElement>(),
                     "sdt" => current.ChildElements
                         .Where(e => e is SdtBlock || e is SdtRun).Cast<OpenXmlElement>(),
                     // v5.7-cont: /body/textbox[N] → walk descendant drawings,
@@ -2670,7 +2672,7 @@ public partial class WordHandler
         // CONSISTENCY(format-stringy): user-facing numeric counts are
         // stored as strings to match other Word format keys (size "14pt",
         // spacing "12pt"). Avoids object-vs-int comparison surprises.
-        node.Format["cols"] = (gridColCount ?? firstRow?.Elements<TableCell>().Count() ?? 0).ToString();
+        node.Format["cols"] = (gridColCount ?? (firstRow != null ? GetRowCellsFlattened(firstRow).Count : 0)).ToString();
         node.Format["rows"] = node.ChildCount.ToString();
         // _gridCols: actual <w:gridCol> count (0 when TableGrid is missing
         // or empty), unbiased by the row-cell fallback that `cols` uses for
@@ -2999,13 +3001,13 @@ public partial class WordHandler
                 {
                     Path = $"{path}/tr[{rowIdx + 1}]",
                     Type = "row",
-                    ChildCount = row.Elements<TableCell>().Count()
+                    ChildCount = GetRowCellsFlattened(row).Count
                 };
                 ReadRowProps(row, rowNode);
                 if (depth > 1)
                 {
                     int cellIdx = 0;
-                    foreach (var cell in row.Elements<TableCell>())
+                    foreach (var cell in GetRowCellsFlattened(row))
                     {
                         var cellNode = new DocumentNode
                         {
@@ -3090,12 +3092,12 @@ public partial class WordHandler
     private DocumentNode TableRowToNode(TableRow directRow, DocumentNode node, string path, int depth)
     {
         node.Type = "row";
-        node.ChildCount = directRow.Elements<TableCell>().Count();
+        node.ChildCount = GetRowCellsFlattened(directRow).Count;
         ReadRowProps(directRow, node);
         if (depth > 0)
         {
             int cellIdx = 0;
-            foreach (var cell in directRow.Elements<TableCell>())
+            foreach (var cell in GetRowCellsFlattened(directRow))
             {
                 var cellNode = new DocumentNode
                 {
@@ -5441,7 +5443,7 @@ public partial class WordHandler
             var parentRow = cell.Parent as TableRow;
             if (parentTbl != null && parentRow != null)
             {
-                var cellIdx = parentRow.Elements<TableCell>().ToList().IndexOf(cell);
+                var cellIdx = GetRowCellsFlattened(parentRow).IndexOf(cell);
                 var gridCols = parentTbl.GetFirstChild<TableGrid>()?.Elements<GridColumn>().ToList();
                 if (gridCols != null && cellIdx >= 0 && cellIdx < gridCols.Count)
                 {

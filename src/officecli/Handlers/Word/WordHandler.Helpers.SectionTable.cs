@@ -259,4 +259,70 @@ public partial class WordHandler
         }
         return cm;
     }
+
+    /// <summary>
+    /// dump→batch: cells wrapped by a CELL-LEVEL content control — a
+    /// <c>&lt;w:sdt&gt;</c> that is a direct <c>&lt;w:tr&gt;</c> child whose
+    /// sdtContent holds the <c>&lt;w:tc&gt;</c> (Word's dropdown-in-a-cell
+    /// shape). Navigation flattens these to plain cells for the typed emit, so
+    /// EmitTable patches them back via raw-set replace. Returns
+    /// (1-based cell ordinal counting flattened cells, verbatim sdt XML) for
+    /// every single-cell wrapper in the row; multi-cell wrappers are skipped
+    /// (the existing flatten behavior stands for those).
+    /// </summary>
+    internal List<(int CellOrdinal, string SdtXml)> GetSdtWrappedCellsOfRow(string rowPath)
+    {
+        var result = new List<(int, string)>();
+        OpenXmlElement? element;
+        try { element = NavigateToElement(ParsePath(rowPath)); }
+        catch { return result; }
+        if (element is not TableRow row) return result;
+
+        int ordinal = 0;
+        foreach (var child in row.ChildElements)
+        {
+            if (child is TableCell)
+            {
+                ordinal++;
+            }
+            else if (child is SdtElement sdt)
+            {
+                var wrappedCells = sdt.Descendants<TableCell>()
+                    .Where(tc => ReferenceEquals(tc.Ancestors<TableRow>().FirstOrDefault(), row))
+                    .ToList();
+                if (wrappedCells.Count == 1)
+                {
+                    ordinal++;
+                    result.Add((ordinal, sdt.OuterXml));
+                }
+                else
+                {
+                    ordinal += wrappedCells.Count;
+                }
+            }
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// All cells of a row in document order, INCLUDING cells wrapped by a
+    /// cell-level content control (<c>&lt;w:sdt&gt;&lt;w:sdtContent&gt;&lt;w:tc&gt;</c>
+    /// as a direct <c>&lt;w:tr&gt;</c> child — Word's dropdown-bound-cell shape).
+    /// <c>Elements&lt;TableCell&gt;()</c> sees only direct children, so a row
+    /// with wrapped cells under-counted its columns: paths mis-resolved,
+    /// Get/Query reported missing cells, and dump→batch rebuilt the row short.
+    /// </summary>
+    internal static List<TableCell> GetRowCellsFlattened(TableRow row)
+    {
+        var cells = new List<TableCell>();
+        foreach (var child in row.ChildElements)
+        {
+            if (child is TableCell tc)
+                cells.Add(tc);
+            else if (child is SdtElement sdt)
+                cells.AddRange(sdt.Descendants<TableCell>()
+                    .Where(c => ReferenceEquals(c.Ancestors<TableRow>().FirstOrDefault(), row)));
+        }
+        return cells;
+    }
 }
