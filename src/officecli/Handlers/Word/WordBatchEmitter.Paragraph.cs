@@ -240,7 +240,15 @@ public static partial class WordBatchEmitter
         // text/format-bearing run exists (the genuine hoist source); a run-less
         // paragraph keeps its bare markRPr keys, same as the non-bookmark empty
         // paragraph that rides the collapse path with full markRPr.
-        bool hasFormatBearingRun = runs.Any(c => c.Type == "run" || c.Type == "r");
+        // BUG-DUMP-R26: a field chain swallows the paragraph's text runs in
+        // CollapseFieldChains, so a field-result paragraph has NO run-typed
+        // children left — yet the paragraph node's bare character keys were
+        // harvested (firstRun-fallback) from the field's RESULT runs, and the
+        // field emit (raw-set verbatim / add field) replays that formatting
+        // itself. Leaving the harvested keys on `add p` duplicates them onto
+        // the ¶ mark on rebuild (<w:b/> count 2). Field entries are therefore
+        // format-bearing hoist sources too.
+        bool hasFormatBearingRun = runs.Any(c => c.Type == "run" || c.Type == "r" || c.Type == "field");
         if (hasFormatBearingRun)
             StripRunCharacterPropsFromParagraph(props);
         if (autoPresent)
