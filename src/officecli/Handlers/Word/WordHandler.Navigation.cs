@@ -4198,7 +4198,23 @@ public partial class WordHandler
             // but Get used to drop it. Emit at the paragraph-level canonical
             // key (no markRPr prefix) to match the schema's declaration.
             var rs = pmrpForDump.GetFirstChild<RunStyle>();
-            if (rs?.Val?.Value != null) node.Format["rStyle"] = rs.Val.Value;
+            if (rs?.Val?.Value != null)
+            {
+                // Bare `rStyle` on add-paragraph styles BOTH the mark and the
+                // implicit text run (BUG-R6-03). When the source carries the
+                // style on the MARK ONLY (a quote paragraph whose runs stay
+                // on the paragraph style), echoing it bare would restyle the
+                // rebuilt text run and override the paragraph style's italic/
+                // color. Emit the mark-only shape under markRPr.rStyle, which
+                // targets ParagraphMarkRunProperties exclusively on replay.
+                var rsFirstTextRun = para.Elements<Run>()
+                    .FirstOrDefault(r => r.GetFirstChild<Text>() != null);
+                var rsRunVal = rsFirstTextRun?.RunProperties?.GetFirstChild<RunStyle>()?.Val?.Value;
+                if (string.Equals(rsRunVal, rs.Val.Value, StringComparison.Ordinal))
+                    node.Format["rStyle"] = rs.Val.Value;
+                else
+                    node.Format["markRPr.rStyle"] = rs.Val.Value;
+            }
         }
 
         // First-run formatting on the paragraph node (like PPTX does for shapes).

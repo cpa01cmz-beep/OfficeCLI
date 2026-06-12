@@ -954,6 +954,14 @@ public partial class WordHandler
                 props.RemoveAllChildren<Shading>();
                 InsertRunPropInSchemaOrder(props, ParseShadingValue(value));
                 return true;
+            case "rstyle":
+                // <w:rStyle w:val="…"/> — character style binding. Needed by
+                // the markRPr.* dispatch (markRPr.rStyle) and generic callers;
+                // run/hyperlink Adds keep their own explicit handling.
+                props.RemoveAllChildren<RunStyle>();
+                if (!string.IsNullOrEmpty(value))
+                    InsertRunPropInSchemaOrder(props, new RunStyle { Val = value });
+                return true;
             case "w" or "charscale":
                 // <w:w w:val="…"/> — horizontal character scale percentage.
                 props.RemoveAllChildren<CharacterScale>();
