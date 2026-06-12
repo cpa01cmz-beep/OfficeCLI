@@ -858,13 +858,18 @@ public partial class WordHandler
                 // accepts dotted form plus camelCase aliases. The OOXML
                 // shape is <w:u w:val="…" w:color="RRGGBB"/> — color is an
                 // attribute on the existing Underline element, not a child
-                // element. Preserve any existing val (default single when
-                // user is setting color without prior underline).
+                // element. Preserve any existing val — including its absence:
+                // <w:u w:color="…"/> with no w:val is a legal source shape
+                // that renders NO underline, and defaulting it to single here
+                // underlined entire documents on dump→batch replay. Callers
+                // that want a visible underline pass `underline=` alongside.
                 var existingUl = props.GetFirstChild<Underline>();
-                var ulVal = existingUl?.Val?.Value ?? UnderlineValues.Single;
+                var ulVal = existingUl?.Val;
                 props.RemoveAllChildren<Underline>();
                 var hex = OfficeCli.Core.ParseHelpers.SanitizeColorForOoxml(value).Rgb;
-                InsertRunPropInSchemaOrder(props, new Underline { Val = ulVal, Color = hex });
+                var ulEl = new Underline { Color = hex };
+                if (ulVal != null) ulEl.Val = ulVal;
+                InsertRunPropInSchemaOrder(props, ulEl);
                 return true;
             }
             case "strike" or "strikethrough" or "font.strike" or "font.strikethrough":
