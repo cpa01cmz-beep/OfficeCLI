@@ -2,7 +2,9 @@
   "$schema": "../_schema.json",
   "format": "docx",
   "element": "paragraph",
-  "elementAliases": ["p"],
+  "elementAliases": [
+    "p"
+  ],
   "operations": {
     "add": true,
     "set": true,
@@ -31,12 +33,20 @@
     "lineRule": {
       "type": "enum",
       "description": "line spacing rule paired with lineSpacing (Word-only: w:spacing@w:lineRule). 'auto' = multiplier (default for 1.5x/150%), 'exact' = exact fixed height (default for Npt), 'atLeast' = minimum height (Npt floor; lines may grow to fit tall content).",
-      "values": ["auto", "exact", "atLeast"],
-      "aliases": ["linerule"],
+      "values": [
+        "auto",
+        "exact",
+        "atLeast"
+      ],
+      "aliases": [
+        "linerule"
+      ],
       "add": true,
       "set": true,
       "get": true,
-      "examples": ["--prop lineSpacing=14pt --prop lineRule=atLeast"],
+      "examples": [
+        "--prop lineSpacing=14pt --prop lineRule=atLeast"
+      ],
       "readback": "auto | exact | atLeast",
       "enforcement": "report"
     },
@@ -1159,6 +1169,23 @@
       "set": true,
       "get": true,
       "readback": "true|false",
+      "enforcement": "report"
+    },
+    "markRPr.rtl": {
+      "type": "bool",
+      "description": "paragraph-mark run right-to-left flag (w:pPr/w:rPr/w:rtl).",
+      "add": true,
+      "set": true,
+      "get": true,
+      "readback": "true|false",
+      "enforcement": "report"
+    },
+    "markRPr.rStyle": {
+      "type": "string",
+      "description": "paragraph-mark run character style (w:pPr/w:rPr/w:rStyle). Emitted on Get when the style binds the mark only; bare rStyle covers the mark+implicit-run shape.",
+      "add": true,
+      "set": true,
+      "get": true,
       "enforcement": "report"
     },
     "markRPr.underline": {
