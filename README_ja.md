@@ -14,7 +14,7 @@
 [English](README.md) | [中文](README_zh.md) | **日本語** | [한국어](README_ko.md)
 
 <p align="center">
-  <strong>💬 コミュニティ:</strong> <a href="https://discord.gg/2QAwJn7Egx" target="_blank">Discord</a>
+  <strong>🌐 公式サイト:</strong> <a href="https://officecli.ai" target="_blank">officecli.ai</a> &nbsp;|&nbsp; <strong>💬 コミュニティ:</strong> <a href="https://discord.gg/2QAwJn7Egx" target="_blank">Discord</a>
 </p>
 
 <p align="center">
