@@ -60,7 +60,7 @@ public static class McpInstaller
                 UninstallLmStudio();
                 return true;
             case "claude" or "claude-code":
-                UninstallJson("claude", GetClaudeSettingsPath(), "mcpServers");
+                UninstallJson("claude", GetClaudeConfigPath(), "mcpServers");
                 return true;
             case "cursor":
                 UninstallJson("cursor", GetCursorMcpPath(), "mcpServers");
@@ -117,11 +117,16 @@ public static class McpInstaller
 
     // ==================== Claude Code ====================
 
-    private static string GetClaudeSettingsPath() =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", "settings.json");
+    // Claude Code reads user-scoped MCP servers from ~/.claude.json (top-level
+    // "mcpServers"), NOT from ~/.claude/settings.json — settings.json has no
+    // mcpServers key and Claude Code silently ignores it (the server never
+    // appears in `claude mcp list`). This is the same file `claude mcp add -s
+    // user` writes to.
+    private static string GetClaudeConfigPath() =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude.json");
 
     private static void InstallClaude() =>
-        InstallJson("Claude Code", GetClaudeSettingsPath(), "mcpServers");
+        InstallJson("Claude Code", GetClaudeConfigPath(), "mcpServers");
 
     // ==================== Cursor ====================
 
@@ -236,14 +241,17 @@ public static class McpInstaller
                 {
                     if (prop.Name == serversKey && prop.Value.ValueKind == JsonValueKind.Object)
                     {
+                        // Drop the serversKey entirely if officecli was the only
+                        // server — avoid leaving an empty "mcpServers": {} residue.
+                        var remaining = prop.Value.EnumerateObject()
+                            .Where(s => s.Name != "officecli").ToList();
+                        if (remaining.Count == 0)
+                            continue;
                         w.WriteStartObject(serversKey);
-                        foreach (var server in prop.Value.EnumerateObject())
+                        foreach (var server in remaining)
                         {
-                            if (server.Name != "officecli")
-                            {
-                                w.WritePropertyName(server.Name);
-                                server.Value.WriteTo(w);
-                            }
+                            w.WritePropertyName(server.Name);
+                            server.Value.WriteTo(w);
                         }
                         w.WriteEndObject();
                     }
@@ -274,7 +282,7 @@ public static class McpInstaller
         CheckStatus("LM Studio", Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".cache", "lm-studio", "extensions", "plugins", "mcp", "officecli", "manifest.json"));
-        CheckJsonStatus("Claude Code", GetClaudeSettingsPath());
+        CheckJsonStatus("Claude Code", GetClaudeConfigPath());
         CheckJsonStatus("Cursor", GetCursorMcpPath());
         CheckJsonStatus("VS Code", GetVsCodeMcpPath());
 
