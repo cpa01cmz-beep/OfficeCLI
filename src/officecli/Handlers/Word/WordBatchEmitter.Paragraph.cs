@@ -699,15 +699,19 @@ public static partial class WordBatchEmitter
                         EmitNoteReference(word, "endnote", idx, idx, carrierPath, items, run);
                         continue;
                     }
-                    // Drawing/pict-bearing carrier run: ship via the
-                    // inlined-parts carrier when it references parts
-                    // (rel ids rewritten on replay); a rel-less drawing
-                    // raw-sets verbatim into the section paragraph.
+                    // Drawing/pict-bearing carrier run: route through the
+                    // full picture pipeline first (charts, textboxes, wps
+                    // shapes, inline pictures all have typed/carrier paths
+                    // there); only a run the pipeline declines falls back to
+                    // the inlined-parts carriers or — for a drawing with no
+                    // relationship references — a verbatim raw-set.
                     var carrierRunXml = word.GetElementXml(run.Path);
                     if (!string.IsNullOrEmpty(carrierRunXml)
                         && (carrierRunXml.Contains("<w:drawing", StringComparison.Ordinal)
                             || carrierRunXml.Contains("<w:pict", StringComparison.Ordinal)))
                     {
+                        if (TryEmitPictureRun(word, run, carrierPath, "/body", 0, items, ctx))
+                            continue;
                         if (word.GetDrawingShapeEmitData(run.Path) is { } csData)
                         {
                             items.Add(new BatchItem
@@ -730,14 +734,24 @@ public static partial class WordBatchEmitter
                             });
                             continue;
                         }
-                        items.Add(new BatchItem
+                        if (!HasExternalRelRef(carrierRunXml))
                         {
-                            Command = "raw-set",
-                            Part = "/document",
-                            Xpath = "/w:document/w:body/w:p[last()]",
-                            Action = "append",
-                            Xml = carrierRunXml
-                        });
+                            items.Add(new BatchItem
+                            {
+                                Command = "raw-set",
+                                Part = "/document",
+                                Xpath = "/w:document/w:body/w:p[last()]",
+                                Action = "append",
+                                Xml = carrierRunXml
+                            });
+                        }
+                        else
+                        {
+                            ctx?.Warnings.Add(new DocxUnsupportedWarning(
+                                Element: "drawing",
+                                Path: run.Path,
+                                Reason: "section-paragraph drawing references relationships that cannot be reconstructed; it is dropped on replay"));
+                        }
                         continue;
                     }
                     var rProps = FilterEmittableProps(run.Format);

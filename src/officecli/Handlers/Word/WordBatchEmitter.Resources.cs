@@ -1821,6 +1821,43 @@ public static partial class WordBatchEmitter
         return result;
     }
 
+    // Enumerate a block SDT's DIRECT sdtContent children (top-level <w:p> /
+    // <w:tbl>) in document order from its raw XML, so the unwrap fallback can
+    // address each by ordinal (`/sdt[N]/p[K]`, `/sdt[N]/tbl[K]`). The scan
+    // anchors on the FIRST <w:sdtContent> open (the block content, after
+    // sdtPr/sdtEndPr) and depth-tracks so a NESTED sdt's own paragraphs are
+    // not counted as this SDT's block children. Mirrors EnumerateNoteDirectChildren.
+    private static List<string> EnumerateSdtContentDirectChildren(string? sdtXml)
+    {
+        var result = new List<string>();
+        if (string.IsNullOrEmpty(sdtXml)) return result;
+        int depth = -1; // becomes 0 when <w:sdtContent> opens
+        bool inContent = false;
+        foreach (System.Text.RegularExpressions.Match m in
+                 System.Text.RegularExpressions.Regex.Matches(
+                     sdtXml, @"<(/?)w:([A-Za-z]+)\b[^>]*?(/?)>"))
+        {
+            var closing = m.Groups[1].Value == "/";
+            var name = m.Groups[2].Value;
+            var selfClose = m.Groups[3].Value == "/";
+            if (!inContent)
+            {
+                if (!closing && name == "sdtContent") { inContent = true; depth = 0; }
+                continue;
+            }
+            if (closing)
+            {
+                depth--;
+                if (depth < 0) break; // </w:sdtContent>
+                continue;
+            }
+            if (depth == 0 && (name == "p" || name == "tbl"))
+                result.Add(name);
+            if (!selfClose) depth++;
+        }
+        return result;
+    }
+
     // BUG-DUMP-ENDNOTE-ID: map a 1-based document-order user-note ordinal to the
     // real OOXML note Id. `query footnote`/`query endnote` returns user notes
     // (id > 0, separators excluded) in document order with id-qualified paths
@@ -1919,10 +1956,48 @@ public static partial class WordBatchEmitter
                     });
                     return;
                 }
+                // Unreconstructable references (a header/footer rel inside an
+                // SDT-wrapped sectPr, a chart): UNWRAP — emit the SDT's inner
+                // block children through the normal body walk so the content,
+                // its drawings and any inline section break survive. Only the
+                // content-control wrapper itself is lost; warn deterministically
+                // (mirrors the customXml wrapper-flattening contract). The old
+                // flatten-to-text fallback dropped whole sections (a mid-
+                // document portrait/landscape boundary vanished and every page
+                // after it flipped orientation).
                 ctx.Warnings.Add(new DocxUnsupportedWarning(
                     Element: "sdt.richContent",
                     Path: sourcePath,
-                    Reason: "content control with rich block content AND external relationship references (hyperlinks/images) flattened to text on dump"));
+                    Reason: "content control wrapper dropped on dump (rich block content references parts the sdt carrier cannot ship); its inner content is emitted unwrapped"));
+                // Get on a block SDT surfaces NO children (the navigator does
+                // not descend into sdtContent), so walk the raw sdtContent
+                // block children by ordinal and emit each through its own
+                // navigable path (`/sdt[N]/p[K]`, `/sdt[N]/tbl[K]`). This
+                // preserves the inner paragraphs, their drawings AND any
+                // inline section break (the landscape boundary that was
+                // vanishing). Bail to the text emit only when the SDT exposes
+                // no addressable block children at all.
+                int sdtParaOrdinal = 0, sdtTblOrdinal = 0;
+                bool sdtEmittedAny = false;
+                foreach (var kind in EnumerateSdtContentDirectChildren(rawXml!))
+                {
+                    if (kind == "p")
+                    {
+                        sdtParaOrdinal++;
+                        EmitParagraph(word, $"{sourcePath}/p[{sdtParaOrdinal}]", "/body", 1,
+                                      items, autoPresent: false, ctx);
+                        sdtEmittedAny = true;
+                    }
+                    else if (kind == "tbl")
+                    {
+                        sdtTblOrdinal++;
+                        EmitTable(word, $"{sourcePath}/tbl[{sdtTblOrdinal}]", sdtTblOrdinal, items, ctx);
+                        sdtEmittedAny = true;
+                    }
+                }
+                if (!sdtEmittedAny)
+                    EmitSdtTyped(word, sourcePath, "/body", items);
+                return;
             }
             else
             {
