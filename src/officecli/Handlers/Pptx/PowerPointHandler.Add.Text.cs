@@ -701,25 +701,28 @@ public partial class PowerPointHandler
                         // rationale on SplitCompoundLineValue's positional tuple.
                         var (toWidthPart, toColorPart, _) = SplitCompoundLineValue(rTextOutline);
                         long? widthEmu = null;
-                        string? colorRgb = null;
+                        // Carry the full color string (incl. +shade/+alpha/+lumMod
+                        // transform chain and #RRGGBBAA alpha) through BuildSolidFill
+                        // so Get's emit form ("#4F81BD11+shade2") replays. Mirrors
+                        // the Set branch in ShapeProperties.cs.
+                        string? colorValue = null;
                         if (toColorPart != null)
                         {
                             widthEmu = Core.EmuConverter.ParseLineWidth(toWidthPart);
-                            colorRgb = toColorPart.Equals("none", StringComparison.OrdinalIgnoreCase)
-                                ? null : ParseHelpers.SanitizeColorForOoxml(toColorPart).Rgb;
+                            colorValue = toColorPart.Equals("none", StringComparison.OrdinalIgnoreCase)
+                                ? null : toColorPart;
                         }
                         else
                         {
                             try { widthEmu = Core.EmuConverter.ParseLineWidth(rTextOutline); }
                             catch { widthEmu = null; }
                             if (widthEmu == null && !rTextOutline.Equals("true", StringComparison.OrdinalIgnoreCase))
-                                colorRgb = ParseHelpers.SanitizeColorForOoxml(rTextOutline).Rgb;
+                                colorValue = rTextOutline;
                         }
                         var ln = new Drawing.Outline();
                         if (widthEmu.HasValue) ln.Width = (int)widthEmu.Value;
-                        if (colorRgb != null)
-                            ln.AppendChild(new Drawing.SolidFill(
-                                new Drawing.RgbColorModelHex { Val = colorRgb }));
+                        if (colorValue != null)
+                            ln.AppendChild(BuildSolidFill(colorValue));
                         rProps.PrependChild(ln);
                     }
                 }
@@ -738,7 +741,6 @@ public partial class PowerPointHandler
                 if (properties.TryGetValue("textOutline.color", out var rToColor)
                     || properties.TryGetValue("textoutline.color", out rToColor))
                 {
-                    var rgb = ParseHelpers.SanitizeColorForOoxml(rToColor).Rgb;
                     var ln = rProps.GetFirstChild<Drawing.Outline>();
                     if (ln == null)
                     {
@@ -746,8 +748,8 @@ public partial class PowerPointHandler
                         rProps.PrependChild(ln);
                     }
                     ln.RemoveAllChildren<Drawing.SolidFill>();
-                    ln.AppendChild(new Drawing.SolidFill(
-                        new Drawing.RgbColorModelHex { Val = rgb }));
+                    // BuildSolidFill carries the transform chain / alpha Get emits.
+                    ln.AppendChild(BuildSolidFill(rToColor));
                 }
                 if (properties.TryGetValue("strikethrough", out var rStrike) || properties.TryGetValue("strike", out rStrike))
                     rProps.Strike = rStrike.ToLowerInvariant() switch

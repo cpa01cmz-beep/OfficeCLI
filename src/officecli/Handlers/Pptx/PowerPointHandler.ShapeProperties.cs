@@ -532,12 +532,17 @@ public partial class PowerPointHandler
                     // split is position-only.
                     var (toWidthPart, toColorPart, _) = SplitCompoundLineValue(value);
                     long? widthEmu = null;
-                    string? colorRgb = null;
+                    // Carry the full color string (incl. +shade/+alpha/+lumMod
+                    // transform chain and #RRGGBBAA alpha) through BuildSolidFill
+                    // so the dump round-trip form survives. SanitizeColorForOoxml
+                    // only returns the bare RGB — it strips the transform suffix,
+                    // which made Get's emit form ("#4F81BD11+shade2") un-replayable.
+                    string? colorValue = null;
                     if (toColorPart != null)
                     {
                         widthEmu = Core.EmuConverter.ParseLineWidth(toWidthPart);
-                        colorRgb = toColorPart.Equals("none", System.StringComparison.OrdinalIgnoreCase)
-                            ? null : ParseHelpers.SanitizeColorForOoxml(toColorPart).Rgb;
+                        colorValue = toColorPart.Equals("none", System.StringComparison.OrdinalIgnoreCase)
+                            ? null : toColorPart;
                     }
                     else
                     {
@@ -546,7 +551,7 @@ public partial class PowerPointHandler
                         try { widthEmu = Core.EmuConverter.ParseLineWidth(value); }
                         catch { widthEmu = null; }
                         if (widthEmu == null && !value.Equals("true", System.StringComparison.OrdinalIgnoreCase))
-                            colorRgb = ParseHelpers.SanitizeColorForOoxml(value).Rgb;
+                            colorValue = value;
                     }
                     foreach (var run in runs)
                     {
@@ -554,9 +559,8 @@ public partial class PowerPointHandler
                         rProps.RemoveAllChildren<Drawing.Outline>();
                         var ln = new Drawing.Outline();
                         if (widthEmu.HasValue) ln.Width = (int)widthEmu.Value;
-                        if (colorRgb != null)
-                            ln.AppendChild(new Drawing.SolidFill(
-                                new Drawing.RgbColorModelHex { Val = colorRgb }));
+                        if (colorValue != null)
+                            ln.AppendChild(BuildSolidFill(colorValue));
                         rProps.AppendChild(ln);
                         ReorderDrawingRunProperties(rProps);
                     }
@@ -583,7 +587,9 @@ public partial class PowerPointHandler
 
                 case "textOutline.color" or "textoutline.color":
                 {
-                    var rgb = ParseHelpers.SanitizeColorForOoxml(value).Rgb;
+                    // BuildSolidFill carries the +shade/+alpha/+lumMod transform
+                    // chain and #RRGGBBAA alpha that Get emits; SanitizeColorForOoxml
+                    // returned the bare RGB only, dropping the round-trip suffix.
                     foreach (var run in runs)
                     {
                         var rProps = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
@@ -595,8 +601,7 @@ public partial class PowerPointHandler
                             ReorderDrawingRunProperties(rProps);
                         }
                         ln.RemoveAllChildren<Drawing.SolidFill>();
-                        ln.AppendChild(new Drawing.SolidFill(
-                            new Drawing.RgbColorModelHex { Val = rgb }));
+                        ln.AppendChild(BuildSolidFill(value));
                     }
                     break;
                 }
