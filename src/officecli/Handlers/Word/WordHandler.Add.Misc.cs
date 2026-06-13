@@ -331,11 +331,25 @@ public partial class WordHandler
         // after the wrapped content in document order.
         if (IsTruthy(properties.GetValueOrDefault("end", "")))
         {
-            var openStart = body.Descendants<BookmarkStart>()
+            var namedStarts = body.Descendants<BookmarkStart>()
                 .Where(bs => string.Equals(bs.Name?.Value, bkName, StringComparison.Ordinal)
-                    && bs.Id?.Value != null
-                    && !body.Descendants<BookmarkEnd>().Any(be => be.Id?.Value == bs.Id!.Value))
-                .LastOrDefault();
+                    && bs.Id?.Value != null)
+                .ToList();
+            // Prefer an un-closed start (no BookmarkEnd shares its id yet) so
+            // nested same-name bookmarks close LIFO. BUG-DUMP-R47-7: fall back to
+            // the last named start when that strict filter finds nothing. With
+            // span-open id forwarding (BUG-DUMP-R47-5) a start can carry a SOURCE
+            // id that transiently collides with another bookmark's end, so the
+            // strict "no end with this id" probe wrongly judges the start closed
+            // and the end=true op threw — dropping the end and leaving the
+            // bookmark range unclosed (every TOC PAGEREF to it then rendered
+            // "Error! Bookmark not defined"). Creating the end with a colliding id
+            // is safe: EnsureBookmarkIds renumbers the matched start+end pair as a
+            // unit at flush, so no duplicate survives.
+            var openStart = namedStarts
+                .Where(bs => !body.Descendants<BookmarkEnd>().Any(be => be.Id?.Value == bs.Id!.Value))
+                .LastOrDefault()
+                ?? namedStarts.LastOrDefault();
             if (openStart == null)
                 throw new ArgumentException(
                     $"bookmark end for '{bkName}' has no matching open bookmarkStart " +
