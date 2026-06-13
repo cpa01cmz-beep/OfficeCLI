@@ -163,10 +163,16 @@ internal static class SpacingConverter
             return ((uint)Math.Round(num / 100.0 * WordAutoLineSpacingUnit), true);
         }
 
-        // "18pt" → fixed (Exact)
+        // "18pt" → fixed (Exact). "0pt" is allowed: paired with
+        // lineRule=atLeast it round-trips Word's <w:spacing w:line="0"
+        // w:lineRule="atLeast"/> ("no minimum line height") — dropping it
+        // re-rendered those paragraphs at the style's default line height
+        // and reflowed the page. Negative still rejected.
         if (trimmed.EndsWith("pt", StringComparison.OrdinalIgnoreCase))
         {
-            var num = RequirePositive(ParseNumber(trimmed[..^2], "lineSpacing"), value);
+            var num = ParseNumber(trimmed[..^2], "lineSpacing");
+            if (num < 0)
+                throw new ArgumentException($"Invalid 'lineSpacing' value '{value}'. Line spacing must not be negative.");
             return ((uint)Math.Round(num * TwipsPerPoint), false);
         }
 

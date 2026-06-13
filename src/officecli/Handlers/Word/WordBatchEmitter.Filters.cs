@@ -278,11 +278,16 @@ public static partial class WordBatchEmitter
         // than 0". Drop the zero-value pair on emit so the replayed
         // paragraph/style inherits the carrier's default — same visible
         // result as the source's "no minimum" semantics.
+        // lineSpacing="0pt" (w:line=0) now round-trips: with
+        // lineRule=atLeast it means "no minimum line height" and dropping it
+        // re-rendered those paragraphs at the style default height. Only the
+        // degenerate multiplier forms (0x/0%) are still dropped — those have
+        // no defined rendering.
         bool dropLineSpacingZero = false;
         if (raw.TryGetValue("lineSpacing", out var lsVal) && lsVal is string lsStr)
         {
             var t = lsStr.Trim();
-            if (t == "0" || t == "0pt" || t == "0.0pt" || t == "0x" || t == "0%")
+            if (t == "0x" || t == "0%")
                 dropLineSpacingZero = true;
         }
 
