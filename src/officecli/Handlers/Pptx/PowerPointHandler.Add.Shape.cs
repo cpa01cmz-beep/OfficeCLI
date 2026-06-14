@@ -876,6 +876,9 @@ public partial class PowerPointHandler
                       "headend", "headEnd", "arrowstart", "arrowStart",
                       "tailend", "tailEnd", "arrowend", "arrowEnd",
                       "image", "imagefill",
+                      // blip-fill framing — consumed alongside image= so the
+                      // stretch insets / crop round-trip with the image fill.
+                      "fillRect", "fillrect", "srcRect", "srcrect",
                       // CONSISTENCY(rpr-attr-fallback / R21-fuzzer-1+2): drawingML
                       // run-property attributes must reach SetRunOrShapeProperties
                       // so the long-tail rPr-attribute branch routes them to the

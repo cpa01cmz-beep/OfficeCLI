@@ -1286,7 +1286,45 @@ public partial class PowerPointHandler
                 {
                     var spPr = shape.ShapeProperties;
                     if (spPr == null || part is not SlidePart slidePart) { unsupported.Add(key); break; }
-                    ApplyShapeImageFill(spPr, value, slidePart);
+                    // Pass any sibling fillRect= / srcRect= so the image fill's
+                    // framing (stretch insets / crop) round-trips with it.
+                    string? frSpec = properties.TryGetValue("fillRect", out var frv) ? frv
+                        : properties.TryGetValue("fillrect", out frv) ? frv : null;
+                    string? srSpec = properties.TryGetValue("srcRect", out var srv) ? srv
+                        : properties.TryGetValue("srcrect", out srv) ? srv : null;
+                    ApplyShapeImageFill(spPr, value, slidePart, frSpec, srSpec);
+                    break;
+                }
+
+                case "fillRect" or "fillrect" or "srcRect" or "srcrect":
+                {
+                    // Blip-fill framing. Normally consumed as a sibling of image=
+                    // (above). Handle the standalone case too — a Set that adjusts
+                    // the stretch insets / crop on a shape that already carries a
+                    // blip fill — by patching the existing <a:blipFill>. No image
+                    // fill present → nothing to frame, leave as a no-op rather than
+                    // a spurious unsupported_property.
+                    var spPr = shape.ShapeProperties;
+                    var existingBlip = spPr?.GetFirstChild<Drawing.BlipFill>();
+                    if (existingBlip == null) break;
+                    var rect = ParsePerMilleRect(value);
+                    if (!rect.HasValue) break;
+                    bool isSrc = key.Equals("srcRect", StringComparison.OrdinalIgnoreCase)
+                                 || key.Equals("srcrect", StringComparison.OrdinalIgnoreCase);
+                    if (isSrc)
+                    {
+                        existingBlip.RemoveAllChildren<Drawing.SourceRectangle>();
+                        var blipEl = existingBlip.GetFirstChild<Drawing.Blip>();
+                        var sr = new Drawing.SourceRectangle { Left = rect.Value.L, Top = rect.Value.T, Right = rect.Value.R, Bottom = rect.Value.B };
+                        if (blipEl != null) existingBlip.InsertAfter(sr, blipEl); else existingBlip.PrependChild(sr);
+                    }
+                    else
+                    {
+                        var stretch = existingBlip.GetFirstChild<Drawing.Stretch>();
+                        if (stretch == null) { stretch = new Drawing.Stretch(); existingBlip.AppendChild(stretch); }
+                        stretch.RemoveAllChildren<Drawing.FillRectangle>();
+                        stretch.AppendChild(new Drawing.FillRectangle { Left = rect.Value.L, Top = rect.Value.T, Right = rect.Value.R, Bottom = rect.Value.B });
+                    }
                     break;
                 }
 

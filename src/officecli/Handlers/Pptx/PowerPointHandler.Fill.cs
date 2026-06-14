@@ -475,7 +475,8 @@ public partial class PowerPointHandler
     /// Apply image (blip) fill to a shape.
     /// Format: file path to image, e.g. "/tmp/bg.png"
     /// </summary>
-    private static void ApplyShapeImageFill(ShapeProperties spPr, string imagePath, SlidePart part)
+    private static void ApplyShapeImageFill(ShapeProperties spPr, string imagePath, SlidePart part,
+        string? fillRectSpec = null, string? srcRectSpec = null)
     {
         var (stream, partType) = OfficeCli.Core.ImageSource.Resolve(imagePath);
         using var streamDispose = stream;
@@ -492,8 +493,35 @@ public partial class PowerPointHandler
 
         var blipFill = new Drawing.BlipFill();
         blipFill.Append(new Drawing.Blip { Embed = relId });
-        blipFill.Append(new Drawing.Stretch(new Drawing.FillRectangle()));
+        // CT_BlipFillProperties order: blip → srcRect → (tile|stretch). srcRect
+        // (crop) and the stretch fillRect carry the image's framing; honor both
+        // so dump→replay reproduces a banner image stretched past its shape
+        // bounds (negative fillRect insets) instead of snapping to exact-fit.
+        var sr = ParsePerMilleRect(srcRectSpec);
+        if (sr.HasValue)
+            blipFill.Append(new Drawing.SourceRectangle { Left = sr.Value.L, Top = sr.Value.T, Right = sr.Value.R, Bottom = sr.Value.B });
+        var fr = new Drawing.FillRectangle();
+        var frp = ParsePerMilleRect(fillRectSpec);
+        if (frp.HasValue)
+        { fr.Left = frp.Value.L; fr.Top = frp.Value.T; fr.Right = frp.Value.R; fr.Bottom = frp.Value.B; }
+        blipFill.Append(new Drawing.Stretch(fr));
         InsertFillElement(spPr, blipFill);
+    }
+
+    /// <summary>
+    /// Parse a "l,t,r,b" perMille rect spec (the form PictureToNode / shape
+    /// blipFill readback emit) into four nullable int insets, or null when the
+    /// spec is absent/malformed. Each component falls back to null (left unset)
+    /// when it doesn't parse, so a partial spec degrades cleanly.
+    /// </summary>
+    private static (int? L, int? T, int? R, int? B)? ParsePerMilleRect(string? spec)
+    {
+        if (string.IsNullOrWhiteSpace(spec)) return null;
+        var parts = spec.Split(',', StringSplitOptions.TrimEntries);
+        if (parts.Length != 4) return null;
+        static int? P(string s) => int.TryParse(s, System.Globalization.NumberStyles.Integer,
+            System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : (int?)null;
+        return (P(parts[0]), P(parts[1]), P(parts[2]), P(parts[3]));
     }
 
     /// <summary>

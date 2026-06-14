@@ -1080,7 +1080,33 @@ public partial class PowerPointHandler
 
         // Image (blip) fill on shape
         var blipFill = shape.ShapeProperties?.GetFirstChild<Drawing.BlipFill>();
-        if (blipFill != null) node.Format["image"] = "true";
+        if (blipFill != null)
+        {
+            node.Format["image"] = "true";
+            // Round-trip the blip fill's framing: the <a:srcRect> crop insets and
+            // the <a:stretch><a:fillRect> stretch insets. ApplyShapeImageFill
+            // formerly always wrote a child-less <a:fillRect/>, so an image
+            // stretched past the shape bounds (a banner skyline with negative
+            // fillRect t/b) snapped back to an exact-fit stretch and the framing
+            // shifted on round-trip. Mirrors the PictureToNode fillRect/srcRect
+            // readback so shape image fills frame identically.
+            var shSrcRect = blipFill.GetFirstChild<Drawing.SourceRectangle>();
+            if (shSrcRect != null)
+            {
+                var sl = shSrcRect.Left?.Value; var st = shSrcRect.Top?.Value;
+                var sr = shSrcRect.Right?.Value; var sb = shSrcRect.Bottom?.Value;
+                if (sl.HasValue || st.HasValue || sr.HasValue || sb.HasValue)
+                    node.Format["srcRect"] = $"{sl ?? 0},{st ?? 0},{sr ?? 0},{sb ?? 0}";
+            }
+            var shFr = blipFill.GetFirstChild<Drawing.Stretch>()?.GetFirstChild<Drawing.FillRectangle>();
+            if (shFr != null)
+            {
+                var fl = shFr.Left?.Value; var ft = shFr.Top?.Value;
+                var frv = shFr.Right?.Value; var fb = shFr.Bottom?.Value;
+                if (fl.HasValue || ft.HasValue || frv.HasValue || fb.HasValue)
+                    node.Format["fillRect"] = $"{fl ?? 0},{ft ?? 0},{frv ?? 0},{fb ?? 0}";
+            }
+        }
 
         // Pattern fill on shape — round-trip the input form "preset:fg:bg".
         var patternFill = shape.ShapeProperties?.GetFirstChild<Drawing.PatternFill>();
