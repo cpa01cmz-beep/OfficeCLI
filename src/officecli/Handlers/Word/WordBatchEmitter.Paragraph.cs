@@ -3471,6 +3471,25 @@ public static partial class WordBatchEmitter
         }
     }
 
+    // BUG-DUMP-R28-REWRITTEN: mirror AddHyperlink's accept logic
+    // (WordHandler.Add.Misc.cs): a url is emittable iff it is a fragment anchor
+    // (#name), a safe-scheme absolute URI, or a relative target. The SDK leaves a
+    // "rewritten://<guid>" placeholder when a Target is so malformed it cannot be
+    // parsed into a System.Uri at all (the canonical case is a mailto: whose
+    // address part is free text typed into the link field). Emitting `add
+    // hyperlink url=…` for such a value aborts the batch step (AddHyperlink
+    // throws "Invalid hyperlink URL"), dropping the run. Returns false so the
+    // caller drops the url and degrades to a plain run, preserving the text.
+    private static bool IsEmittableHyperlinkUrl(string? url)
+    {
+        if (string.IsNullOrEmpty(url)) return false;
+        if (url.StartsWith("rewritten:", StringComparison.OrdinalIgnoreCase)) return false;
+        if (url.StartsWith("#", StringComparison.Ordinal)) return true;
+        if (Uri.TryCreate(url, UriKind.Absolute, out _))
+            return Core.HyperlinkUriValidator.IsSafeScheme(url);
+        return Uri.TryCreate(url, UriKind.Relative, out _);
+    }
+
     private static void EmitPlainOrHyperlinkRun(DocumentNode run, string paraTargetPath, List<BatchItem> items, BodyEmitContext? ctx = null, int hlBaseline = 0)
     {
         // BUG-R12A(BUG1): a hyperlink wrapper with >1 run or any per-run rPr was
@@ -3549,6 +3568,21 @@ public static partial class WordBatchEmitter
                 hlUnderlineDropped = true;
             }
             rProps.Remove("isHyperlink");
+            // BUG-DUMP-R28-REWRITTEN: a malformed Target (SDK rewritten://
+            // placeholder, or a mailto whose address is free text) cannot be
+            // expressed as `add hyperlink` — the url fails AddHyperlink's
+            // validation and aborts the batch step, dropping the run. Drop the
+            // unusable url (+ warn) so the wrapper degrades to a plain run and the
+            // visible text survives. A tooltip/tgtFrame/history-only wrapper still
+            // emits (those don't need a parseable url).
+            if (rProps.TryGetValue("url", out var hlUrlCheck) && !IsEmittableHyperlinkUrl(hlUrlCheck))
+            {
+                rProps.Remove("url");
+                ctx?.Warnings.Add(new DocxUnsupportedWarning(
+                    Element: "hyperlink.url",
+                    Path: run.Path,
+                    Reason: $"hyperlink target '{hlUrlCheck}' is malformed (not a valid absolute/relative URI or anchor) and cannot round-trip; the link is dropped and its text is preserved as plain text"));
+            }
             // Bare <w:hyperlink> wrapper with no url/anchor/tooltip/tgtFrame
             // /history carries no round-trippable property — AddHyperlink
             // would reject it. Fall through and emit as a plain run.
