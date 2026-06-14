@@ -1235,6 +1235,43 @@ public partial class PowerPointHandler : IDocumentHandler
                     _ => ImagePartType.Png,
                 };
                 string? pinnedImgRid = properties.TryGetValue("rid", out var prid) && !string.IsNullOrEmpty(prid) ? prid : null;
+                // rId-collision guard. The blank scaffold ships a fixed set of
+                // slideLayout relationships on its master (rId1..rId5). A source
+                // master whose own bg-image relationship numerically lands inside
+                // that range (e.g. rId5 = master bg image, but the scaffold already
+                // wired rId5 = slideLayout5) cannot pin its source rId: AddImagePart
+                // with an occupied id throws, and even if it didn't, the master XML
+                // raw-set's <p:bg> r:embed="rId5" would resolve to a slideLayout
+                // (broken-link background → blank slide). Free the pinned id first
+                // by re-homing the colliding scaffold relationship onto a fresh id.
+                // For a scaffold-leftover SlideLayoutPart we additionally patch the
+                // master's sldLayoutIdLst entry so the re-homed layout stays
+                // referenced (mirrors GrowSlideLayoutParts' own collision fallback).
+                if (!string.IsNullOrEmpty(pinnedImgRid) && imageHost is OpenXmlPartContainer collHost)
+                {
+                    var occupant = collHost.Parts.FirstOrDefault(p => p.RelationshipId == pinnedImgRid);
+                    if (occupant.OpenXmlPart != null)
+                    {
+                        // Re-home the colliding scaffold relationship onto a fresh,
+                        // collision-free id so the pinned id is free for the image.
+                        var newRid = "Rimg" + Guid.NewGuid().ToString("N").Substring(0, 12);
+                        collHost.ChangeIdOfPart(occupant.OpenXmlPart, newRid);
+                        // If a master's sldLayoutIdLst still points at the old id,
+                        // repoint it so the re-homed layout remains declared.
+                        if (collHost is SlideMasterPart smHost && smHost.SlideMaster?.SlideLayoutIdList != null)
+                        {
+                            foreach (var lid in smHost.SlideMaster.SlideLayoutIdList.Elements<SlideLayoutId>())
+                            {
+                                if (lid.RelationshipId?.Value == pinnedImgRid)
+                                {
+                                    lid.RelationshipId = newRid;
+                                    smHost.SlideMaster.Save();
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
                 ImagePart imgPart = imageHost switch
                 {
                     SlidePart sp           => !string.IsNullOrEmpty(pinnedImgRid) ? sp.AddImagePart(imgPartType, pinnedImgRid) : sp.AddImagePart(imgPartType),
