@@ -145,6 +145,18 @@ public static partial class WordBatchEmitter
             // result-run formatting per segment is rare; we capture the first
             // formatted display run, matching AddField's single-rPr model.)
             DocumentNode? firstFormattedResult = null;
+            // A no-result field (e.g. ADVANCE \d12 — moves following content down,
+            // emits nothing) has no post-separate run to read formatting from, so
+            // firstFormattedResult stays null and the field-run rPr is dropped.
+            // The begin/instr marker runs still carry the rPr that sets the field
+            // paragraph's line metrics — most importantly the THEME font slot
+            // (font.asciiTheme/…), which survives RunToNode's TypographyOnlyKeys
+            // strip (only the literal font.ascii/bold/size are removed). Losing it
+            // re-rendered the field line in the docDefaults face, changing the
+            // empty paragraph's height enough to flip a borderline page break and
+            // cascade a whole-document pagination drift. Capture the markers'
+            // formatting as a fallback when no result formatting exists.
+            DocumentNode? firstFormattedMarker = c is not null && FieldRunHasFormatting(c) ? c : null;
             // BUG-DUMP-R26-2: collect EVERY post-separate result run so we can
             // detect a rich (multi-run, heterogeneously-formatted) cached result.
             // AddField's single-rPr model collapses such a result to one run and
@@ -183,6 +195,10 @@ public static partial class WordBatchEmitter
                             instruction += iv.ToString();
                         else if (!string.IsNullOrEmpty(k.Text))
                             instruction += k.Text;
+                        // Marker-run formatting fallback (see firstFormattedMarker):
+                        // the instrText run carries the field's theme-font slot.
+                        if (firstFormattedMarker == null && FieldRunHasFormatting(k))
+                            firstFormattedMarker = k;
                     }
                 }
                 else if (k.Type == "fieldChar"
@@ -418,9 +434,13 @@ public static partial class WordBatchEmitter
             // prefix so TryEmitFieldRun can map AddField-supported keys onto the
             // `add field` prop bag. Forwarded verbatim — TryEmitFieldRun decides
             // which keys AddField can honour and which need a raw-set fallback.
-            if (firstFormattedResult != null)
+            // Prefer the cached result run's formatting; fall back to the marker
+            // runs' formatting for a no-result field (ADVANCE) so its theme font
+            // (and thus line height) round-trips.
+            var fieldFmtSource = firstFormattedResult ?? firstFormattedMarker;
+            if (fieldFmtSource != null)
             {
-                foreach (var (fk, fv) in firstFormattedResult.Format)
+                foreach (var (fk, fv) in fieldFmtSource.Format)
                 {
                     if (fv == null) continue;
                     if (FieldResultFormatKeys.Contains(fk))
