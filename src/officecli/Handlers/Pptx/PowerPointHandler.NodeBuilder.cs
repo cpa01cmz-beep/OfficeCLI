@@ -2008,6 +2008,14 @@ public partial class PowerPointHandler
                         // (CONSISTENCY(pptx-bare-as-points) for pos units).
                         var paraTabs = ReadTabsFromPProps(paraPProps);
                         if (paraTabs != null) paraNode.Format["tabs"] = paraTabs;
+                        // Paragraph-level <a:defRPr> verbatim. Runs without their
+                        // own rPr inherit size/bold/font/color from here before
+                        // the layout/master bodyStyle cascade; the granular para
+                        // keys never captured it, so a bare-run paragraph rebuilt
+                        // at the master body size/weight instead of the authored
+                        // default (e.g. 40pt-bold-Helvetica → 52pt-regular).
+                        var paraDefRPr = paraPProps.GetFirstChild<Drawing.DefaultRunProperties>();
+                        if (paraDefRPr != null) paraNode.Format["defRPrRaw"] = paraDefRPr.OuterXml;
                     }
                     if (paraPProps?.RightToLeft?.HasValue == true)
                         paraNode.Format["direction"] = paraPProps.RightToLeft.Value ? "rtl" : "ltr";

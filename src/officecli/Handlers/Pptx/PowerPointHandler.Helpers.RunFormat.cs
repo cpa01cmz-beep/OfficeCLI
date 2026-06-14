@@ -594,6 +594,29 @@ public partial class PowerPointHandler
         }
     }
 
+    // Round-trip a paragraph's <a:pPr><a:defRPr> verbatim. The defRPr is the
+    // paragraph-level default run property: every run WITHOUT its own rPr (or
+    // whose rPr omits a slot) inherits size/bold/font/color from here, BEFORE
+    // falling back to the layout/master bodyStyle cascade. The granular
+    // paragraph keys (align/lineSpacing/…) never captured it, so a paragraph
+    // whose runs are bare <a:r> rendered at the master body size/weight instead
+    // of the authored defRPr (e.g. a 40pt-bold-Helvetica body collapsing to the
+    // master's 52pt-regular). Verbatim mirrors bulletRaw / lstStyleRaw.
+    private static void ApplyDefRPrRaw(Drawing.ParagraphProperties pProps, string rawXml)
+    {
+        pProps.RemoveAllChildren<Drawing.DefaultRunProperties>();
+        if (string.IsNullOrWhiteSpace(rawXml)) return;
+        const string aNs = "http://schemas.openxmlformats.org/drawingml/2006/main";
+        var wrapped = $"<a:pPr xmlns:a=\"{aNs}\">{rawXml}</a:pPr>";
+        Drawing.ParagraphProperties parsed;
+        try { parsed = new Drawing.ParagraphProperties(wrapped); }
+        catch { return; }
+        var defRPr = parsed.GetFirstChild<Drawing.DefaultRunProperties>();
+        if (defRPr == null) return;
+        defRPr.Remove();
+        InsertPPrChild(pProps, defRPr);
+    }
+
     internal static void InsertPPrChild(Drawing.ParagraphProperties pProps, OpenXmlElement child)
     {
         var newRank = PPrChildRank(child);

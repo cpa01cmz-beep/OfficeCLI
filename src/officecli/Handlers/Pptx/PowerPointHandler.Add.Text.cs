@@ -277,6 +277,10 @@ public partial class PowerPointHandler
                     ApplyBulletRaw(pProps, pBulletRaw);
                 else if (properties.TryGetValue("list", out var pList) || properties.TryGetValue("liststyle", out pList))
                     ApplyListStyle(pProps, pList);
+                // Paragraph-level default run properties (verbatim). Bare runs
+                // inherit size/bold/font from here; see ApplyDefRPrRaw.
+                if (properties.TryGetValue("defRPrRaw", out var pDefRPrRaw) || properties.TryGetValue("defrprraw", out pDefRPrRaw))
+                    ApplyDefRPrRaw(pProps, pDefRPrRaw);
                 if (properties.TryGetValue("level", out var pLevelStr))
                 {
                     if (!int.TryParse(pLevelStr, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var pLevelVal) || pLevelVal < 0 || pLevelVal > 8)

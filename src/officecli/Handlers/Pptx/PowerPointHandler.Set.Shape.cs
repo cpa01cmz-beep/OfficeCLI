@@ -259,6 +259,14 @@ public partial class PowerPointHandler
                     ApplyBulletRaw(pProps, value);
                     break;
                 }
+                case "defrprraw" or "defRPrRaw":
+                {
+                    // Paragraph-level <a:defRPr> verbatim — bare runs inherit
+                    // size/bold/font/color from it; see ApplyDefRPrRaw.
+                    var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
+                    ApplyDefRPrRaw(pProps, value);
+                    break;
+                }
                 case "marginleft" or "marl":
                 {
                     var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
