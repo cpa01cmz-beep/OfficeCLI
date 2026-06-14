@@ -183,6 +183,15 @@ public partial class PowerPointHandler
                     pProps.Level = lvl;
                     break;
                 }
+                case "bulletraw" or "bulletRaw":
+                {
+                    // Full bullet group (buClr/buFont/buSzPct/buChar/…) verbatim —
+                    // round-trips colored/sized/Wingdings bullets the `list`
+                    // keyword cannot represent.
+                    var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
+                    ApplyBulletRaw(pProps, value);
+                    break;
+                }
                 case "marginleft" or "marl":
                 {
                     var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());

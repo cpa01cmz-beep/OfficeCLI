@@ -704,6 +704,17 @@ public partial class PowerPointHandler
                     break;
                 }
 
+                case "bulletraw" or "bulletRaw":
+                {
+                    // Full bullet group (buClr/buFont/buSzPct/buChar/…) verbatim.
+                    foreach (var para in shape.TextBody?.Elements<Drawing.Paragraph>() ?? Enumerable.Empty<Drawing.Paragraph>())
+                    {
+                        var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
+                        ApplyBulletRaw(pProps, value);
+                    }
+                    break;
+                }
+
                 case "margin" or "inset":
                 {
                     var bodyPr = shape.TextBody?.Elements<Drawing.BodyProperties>().FirstOrDefault();

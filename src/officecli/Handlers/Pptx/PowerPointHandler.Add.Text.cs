@@ -271,7 +271,11 @@ public partial class PowerPointHandler
                     pProps.LeftMargin = (int)Math.Round(SpacingConverter.ParsePointsSigned(pMarL) * EmuConverter.EmuPerPointF);
                 if (properties.TryGetValue("marginRight", out var pMarR) || properties.TryGetValue("marr", out pMarR))
                     pProps.RightMargin = (int)Math.Round(SpacingConverter.ParsePointsSigned(pMarR) * EmuConverter.EmuPerPointF);
-                if (properties.TryGetValue("list", out var pList) || properties.TryGetValue("liststyle", out pList))
+                // bulletRaw (full bullet group) takes precedence over the lossy
+                // `list` keyword when both are present.
+                if (properties.TryGetValue("bulletRaw", out var pBulletRaw) || properties.TryGetValue("bulletraw", out pBulletRaw))
+                    ApplyBulletRaw(pProps, pBulletRaw);
+                else if (properties.TryGetValue("list", out var pList) || properties.TryGetValue("liststyle", out pList))
                     ApplyListStyle(pProps, pList);
                 if (properties.TryGetValue("level", out var pLevelStr))
                 {

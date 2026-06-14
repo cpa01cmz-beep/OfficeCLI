@@ -779,8 +779,17 @@ public partial class PowerPointHandler
                 // (presets render with no stroke) is the lesser harm; defer the
                 // default-outline UX to a caller-driven `line=default`/UI layer.
 
-                // List style (bullet/numbered)
-                if (properties.TryGetValue("list", out var listVal) || properties.TryGetValue("liststyle", out listVal))
+                // List style (bullet/numbered). bulletRaw (full bullet group)
+                // wins over the lossy `list` keyword when both are present.
+                if (properties.TryGetValue("bulletRaw", out var shBulletRaw) || properties.TryGetValue("bulletraw", out shBulletRaw))
+                {
+                    foreach (var para in newShape.TextBody?.Elements<Drawing.Paragraph>() ?? Enumerable.Empty<Drawing.Paragraph>())
+                    {
+                        var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
+                        ApplyBulletRaw(pProps, shBulletRaw);
+                    }
+                }
+                else if (properties.TryGetValue("list", out var listVal) || properties.TryGetValue("liststyle", out listVal))
                 {
                     foreach (var para in newShape.TextBody?.Elements<Drawing.Paragraph>() ?? Enumerable.Empty<Drawing.Paragraph>())
                     {

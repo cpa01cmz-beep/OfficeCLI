@@ -1086,8 +1086,13 @@ public partial class PowerPointHandler
         var firstParaBullet = shape.TextBody?.Elements<Drawing.Paragraph>().FirstOrDefault()?.ParagraphProperties;
         if (firstParaBullet != null)
         {
-            var firstList = ReadListStyleFromPProps(firstParaBullet);
-            if (firstList != null) node.Format["list"] = firstList;
+            var firstBulletRaw = ReadBulletRawFromPProps(firstParaBullet);
+            if (firstBulletRaw != null) node.Format["bulletRaw"] = firstBulletRaw;
+            else
+            {
+                var firstList = ReadListStyleFromPProps(firstParaBullet);
+                if (firstList != null) node.Format["list"] = firstList;
+            }
         }
 
         // Collect font info
@@ -1920,8 +1925,17 @@ public partial class PowerPointHandler
                     // AddParagraph/Set list= re-applies the per-paragraph marker.
                     if (paraPProps != null)
                     {
-                        var paraList = ReadListStyleFromPProps(paraPProps);
-                        if (paraList != null) paraNode.Format["list"] = paraList;
+                        // bulletRaw carries the full bullet group verbatim
+                        // (buFont/buClr/buSzPct/buChar/…) so colored/sized/
+                        // Wingdings bullets round-trip; the lossy `list` keyword
+                        // is emitted only as a fallback when there's no raw block.
+                        var paraBulletRaw = ReadBulletRawFromPProps(paraPProps);
+                        if (paraBulletRaw != null) paraNode.Format["bulletRaw"] = paraBulletRaw;
+                        else
+                        {
+                            var paraList = ReadListStyleFromPProps(paraPProps);
+                            if (paraList != null) paraNode.Format["list"] = paraList;
+                        }
                         // R65 bt-2: <a:tabLst>/<a:tab pos algn/> — custom tab
                         // stops were silently dropped on Get / dump, collapsing
                         // tab-aligned paragraphs after batch replay. Surface as
