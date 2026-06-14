@@ -620,7 +620,13 @@ public partial class PowerPointHandler
             "moon" => Drawing.ShapeTypeValues.Moon,
             "arc" => Drawing.ShapeTypeValues.Arc,
             "donut" => Drawing.ShapeTypeValues.Donut,
-            "nosmoking" or "blockarc" => Drawing.ShapeTypeValues.NoSmoking,
+            // blockArc is NOT noSmoking: blockArc (ST_ShapeType.blockArc) carries
+            // three adjust handles (adj1/adj2/adj3), noSmoking carries one (adj).
+            // Collapsing blockArc → NoSmoking emitted <a:prstGeom prst="noSmoking">
+            // with three <a:gd> children, which is schema-invalid for noSmoking and
+            // makes PowerPoint refuse the whole file. Let blockArc fall through to
+            // the reflection lookup, which resolves Drawing.ShapeTypeValues.BlockArc.
+            "nosmoking" => Drawing.ShapeTypeValues.NoSmoking,
             "cube" => Drawing.ShapeTypeValues.Cube,
             "can" or "cylinder" => Drawing.ShapeTypeValues.Can,
             "line" => Drawing.ShapeTypeValues.Line,
