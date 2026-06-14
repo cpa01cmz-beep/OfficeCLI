@@ -996,7 +996,25 @@ public partial class WordHandler
                     var pmrp = EnsureMarkRunProperties(pProps);
                     pmrp.RemoveAllChildren<RunStyle>();
                     pmrp.PrependChild(new RunStyle { Val = value });
-                    foreach (var pRun in para.Descendants<Run>())
+                    // BUG-DUMP-R28-RSTYLE-SEED: mirror the bare run-formatting
+                    // seed path. The dump collapses a single-run cell paragraph
+                    // into ONE `set` whose `rStyle` may be iterated BEFORE the
+                    // `text` key creates the run. On a still-empty paragraph the
+                    // Descendants<Run>() loop below then finds no run, so the
+                    // character-style binding reached only the ¶ mark and the
+                    // visible text rendered without the style (an italic table
+                    // placeholder bound via rStyle="…-Italics" lost its slant).
+                    // Seed an empty run when this Set will create one; the later
+                    // `text` case preserves the seeded run's rPr (RunStyle).
+                    var rStyleRuns = para.Descendants<Run>().ToList();
+                    if (rStyleRuns.Count == 0
+                        && (properties.ContainsKey("text") || properties.ContainsKey("formula")))
+                    {
+                        var seedRun = new Run(new RunProperties());
+                        para.AppendChild(seedRun);
+                        rStyleRuns.Add(seedRun);
+                    }
+                    foreach (var pRun in rStyleRuns)
                     {
                         var pRP = EnsureRunProperties(pRun);
                         pRP.RemoveAllChildren<RunStyle>();
