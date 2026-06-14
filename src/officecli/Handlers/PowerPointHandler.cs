@@ -315,6 +315,7 @@ public partial class PowerPointHandler : IDocumentHandler
             // can stamp the source notes master back in (mirrors GrowSlideLayoutParts
             // in the slideLayout branch above).
             var nmPart = presentationPart.NotesMasterPart;
+            bool nmCreated = nmPart == null;
             if (nmPart == null)
             {
                 nmPart = presentationPart.AddNewPart<NotesMasterPart>();
@@ -343,6 +344,29 @@ public partial class PowerPointHandler : IDocumentHandler
                         Hyperlink = DocumentFormat.OpenXml.Drawing.ColorSchemeIndexValues.Hyperlink,
                         FollowedHyperlink = DocumentFormat.OpenXml.Drawing.ColorSchemeIndexValues.FollowedHyperlink,
                     });
+            }
+            // Register <p:notesMasterIdLst> in presentation.xml. AddNewPart only
+            // wires the relationship; without the IdLst element the part is an
+            // orphan reference and PowerPoint refuses the file with a schema
+            // error ("unexpected child element in /p:presentation"). Schema order
+            // (CT_Presentation): sldMasterIdLst -> notesMasterIdLst ->
+            // handoutMasterIdLst -> sldIdLst -> sldSz -> notesSz -> ...
+            if (nmCreated)
+            {
+                var pres = presentationPart.Presentation
+                    ?? throw new InvalidOperationException("No presentation");
+                if (pres.NotesMasterIdList == null)
+                {
+                    var nmRelId = presentationPart.GetIdOfPart(nmPart);
+                    var nmIdLst = new NotesMasterIdList(
+                        new NotesMasterId { Id = nmRelId });
+                    // Insert after sldMasterIdLst if present, else prepend.
+                    var sldMasterIdLst = pres.SlideMasterIdList;
+                    if (sldMasterIdLst != null)
+                        pres.InsertAfter(nmIdLst, sldMasterIdLst);
+                    else
+                        pres.PrependChild(nmIdLst);
+                }
             }
             rootElement = nmPart.NotesMaster!;
         }
