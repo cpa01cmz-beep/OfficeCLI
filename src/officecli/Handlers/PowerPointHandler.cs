@@ -1403,6 +1403,8 @@ public partial class PowerPointHandler : IDocumentHandler
                 var hlSlMatch = hlSmMatch.Success ? null : Regex.Match(parentPartPath, @"^/slideLayout\[(\d+)\]$");
                 var hlSldMatch = (hlSmMatch.Success || (hlSlMatch?.Success ?? false))
                     ? null : Regex.Match(parentPartPath, @"^/slide\[(\d+)\]$");
+                var hlNsMatch = (hlSmMatch.Success || (hlSlMatch?.Success ?? false) || (hlSldMatch?.Success ?? false))
+                    ? null : Regex.Match(parentPartPath, @"^/noteSlide\[(\d+)\]$");
                 if (hlSmMatch.Success)
                 {
                     var i = int.Parse(hlSmMatch.Groups[1].Value);
@@ -1426,9 +1428,22 @@ public partial class PowerPointHandler : IDocumentHandler
                     if (i < 1 || i > parts.Count) throw new ArgumentException($"slide index {i} out of range");
                     hlHost = parts[i - 1];
                 }
+                else if (hlNsMatch != null && hlNsMatch.Success)
+                {
+                    // CONSISTENCY(notes-image-host): mirror the add-part image
+                    // /noteSlide[N] path — EmitNotes lands the typed `add notes`
+                    // row first, but on a blank target with no prior notes the
+                    // NotesSlidePart is still absent; create it on demand so the
+                    // external hyperlink relationship has a host to attach to.
+                    var i = int.Parse(hlNsMatch.Groups[1].Value);
+                    var parts = GetSlideParts().ToList();
+                    if (i < 1 || i > parts.Count) throw new ArgumentException($"noteSlide index {i} out of range");
+                    var hostSlide = parts[i - 1];
+                    hlHost = hostSlide.NotesSlidePart ?? hostSlide.AddNewPart<NotesSlidePart>();
+                }
                 else
                     throw new ArgumentException(
-                        "add-part hyperlink: parent must be /slideLayout[N], /slideMaster[N], or /slide[N]");
+                        "add-part hyperlink: parent must be /slideLayout[N], /slideMaster[N], /slide[N], or /noteSlide[N]");
 
                 // Idempotent: if a relationship with this id already exists, don't
                 // re-add (AddHyperlinkRelationship throws on a duplicate id).
@@ -1879,6 +1894,34 @@ public partial class PowerPointHandler : IDocumentHandler
             using var ms = new MemoryStream();
             s.CopyTo(ms);
             result.Add(new MasterImageInfo(rid, img.ContentType, Convert.ToBase64String(ms.ToArray())));
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// External (TargetMode="External") hyperlink relationships on a slide's
+    /// NotesSlidePart — same shape as <see cref="GetLayoutExternalHyperlinks"/>.
+    /// The notesSlide XML is replayed via raw-set carrying
+    /// <c>&lt;a:hlinkClick r:id="rIdN"/&gt;</c> (a URL in the speaker notes), but
+    /// the external relationship is not an embedded part, so the ImagePart carrier
+    /// never re-creates it — the rebuilt notesSlide's <c>r:id="rIdN"</c> dangled
+    /// and PowerPoint refused the whole deck (OPC corrupt). Surfaced as
+    /// (rId, target) pairs so EmitNotes can pin each id via an
+    /// <c>add-part hyperlink</c> row before the notes raw-set replace.
+    /// </summary>
+    internal IReadOnlyList<(string RelId, string Target)> GetNoteSlideExternalHyperlinks(int slideIdx)
+    {
+        var result = new List<(string, string)>();
+        var pp = _doc.PresentationPart;
+        if (pp == null) return result;
+        var slideParts = GetSlideParts().ToList();
+        if (slideIdx < 1 || slideIdx > slideParts.Count) return result;
+        var notesPart = slideParts[slideIdx - 1].NotesSlidePart;
+        if (notesPart == null) return result;
+        foreach (var rel in notesPart.HyperlinkRelationships)
+        {
+            if (rel.IsExternal)
+                result.Add((rel.Id, rel.Uri.OriginalString));
         }
         return result;
     }
