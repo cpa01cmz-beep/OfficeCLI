@@ -327,6 +327,32 @@ public partial class PowerPointHandler
                         ApplyTextMargin(bodyPr, marginVal);
                 }
 
+                // Verbatim shape-level <a:lstStyle> re-injection. The default
+                // txBody carries an empty <a:lstStyle/> stub; the source's
+                // per-level lnSpc/defTabSz/algn/fonts live only in the captured
+                // OuterXml (NodeBuilder lstStyleRaw). Replace the stub with the
+                // parsed verbatim element so text reflow off the source metrics
+                // is preserved. CT_TextBody order: bodyPr, lstStyle, p+ — replace
+                // in place keeps lstStyle after bodyPr and before the first p.
+                if (properties.TryGetValue("lstStyleRaw", out var lstStyleRawVal)
+                    && !string.IsNullOrWhiteSpace(lstStyleRawVal)
+                    && newShape.TextBody != null)
+                {
+                    var newLstStyle = new Drawing.ListStyle(lstStyleRawVal);
+                    var existingLstStyle = newShape.TextBody.GetFirstChild<Drawing.ListStyle>();
+                    if (existingLstStyle != null)
+                    {
+                        existingLstStyle.InsertAfterSelf(newLstStyle);
+                        existingLstStyle.Remove();
+                    }
+                    else
+                    {
+                        var anchorBodyPr = newShape.TextBody.GetFirstChild<Drawing.BodyProperties>();
+                        if (anchorBodyPr != null) anchorBodyPr.InsertAfterSelf(newLstStyle);
+                        else newShape.TextBody.InsertAt(newLstStyle, 0);
+                    }
+                }
+
                 // Text alignment (horizontal)
                 if (properties.TryGetValue("align", out var alignVal))
                 {
@@ -335,6 +361,21 @@ public partial class PowerPointHandler
                     {
                         var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
                         pProps.Alignment = alignment;
+                    }
+                }
+
+                // CJK / line-break pPr attributes on the shape's first-paragraph
+                // (eaLnBrk / latinLnBrk / fontAlgn / defTabSz). Shapes/textboxes
+                // built with an inline text= seed their first paragraph here, not
+                // through AddParagraph — without this the dropped attributes
+                // rewrapped CJK text on round-trip. Apply to every paragraph.
+                foreach (var pBreakKey in new[] { "eaLnBrk", "latinLnBrk", "fontAlgn", "defTabSz" })
+                {
+                    if (!properties.TryGetValue(pBreakKey, out var pBreakVal)) continue;
+                    foreach (var para in newShape.TextBody?.Elements<Drawing.Paragraph>() ?? Enumerable.Empty<Drawing.Paragraph>())
+                    {
+                        var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
+                        ApplyParagraphBreakProp(pProps, pBreakKey, pBreakVal);
                     }
                 }
 
@@ -499,7 +540,7 @@ public partial class PowerPointHandler
                     {
                         switch (afVal.ToLowerInvariant())
                         {
-                            case "true" or "normal": bodyPr.AppendChild(new Drawing.NormalAutoFit()); break;
+                            case "true" or "normal": bodyPr.AppendChild(ApplyNormalAutoFitScale(new Drawing.NormalAutoFit(), properties)); break;
                             case "shape": bodyPr.AppendChild(new Drawing.ShapeAutoFit()); break;
                             case "false" or "none": bodyPr.AppendChild(new Drawing.NoAutoFit()); break;
                         }
@@ -764,8 +805,17 @@ public partial class PowerPointHandler
                 // (presets render with no stroke) is the lesser harm; defer the
                 // default-outline UX to a caller-driven `line=default`/UI layer.
 
-                // List style (bullet/numbered)
-                if (properties.TryGetValue("list", out var listVal) || properties.TryGetValue("liststyle", out listVal))
+                // List style (bullet/numbered). bulletRaw (full bullet group)
+                // wins over the lossy `list` keyword when both are present.
+                if (properties.TryGetValue("bulletRaw", out var shBulletRaw) || properties.TryGetValue("bulletraw", out shBulletRaw))
+                {
+                    foreach (var para in newShape.TextBody?.Elements<Drawing.Paragraph>() ?? Enumerable.Empty<Drawing.Paragraph>())
+                    {
+                        var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
+                        ApplyBulletRaw(pProps, shBulletRaw);
+                    }
+                }
+                else if (properties.TryGetValue("list", out var listVal) || properties.TryGetValue("liststyle", out listVal))
                 {
                     foreach (var para in newShape.TextBody?.Elements<Drawing.Paragraph>() ?? Enumerable.Empty<Drawing.Paragraph>())
                     {
@@ -814,6 +864,8 @@ public partial class PowerPointHandler
                       "textfill", "textgradient", "geometry",
                       "baseline", "superscript", "subscript",
                       "textwarp", "wordart", "autofit",
+                      // shrink-on-overflow scale — consumed alongside autofit=normal
+                      "fontScale", "fontscale", "lnSpcReduction", "lnspcreduction",
                       "wrap", "wordwrap",
                       "lineopacity", "line.opacity",
                       "linegradient", "line.gradient",
@@ -826,6 +878,9 @@ public partial class PowerPointHandler
                       "headend", "headEnd", "arrowstart", "arrowStart",
                       "tailend", "tailEnd", "arrowend", "arrowEnd",
                       "image", "imagefill",
+                      // blip-fill framing — consumed alongside image= so the
+                      // stretch insets / crop round-trip with the image fill.
+                      "fillRect", "fillrect", "srcRect", "srcrect",
                       // CONSISTENCY(rpr-attr-fallback / R21-fuzzer-1+2): drawingML
                       // run-property attributes must reach SetRunOrShapeProperties
                       // so the long-tail rPr-attribute branch routes them to the

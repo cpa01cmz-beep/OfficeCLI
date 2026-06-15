@@ -224,9 +224,13 @@ internal static partial class ChartHelper
                             case "color":
                             {
                                 rPr.RemoveAllChildren<Drawing.SolidFill>();
-                                var (rgb, _) = ParseHelpers.SanitizeColorForOoxml(value);
+                                // Chart title text legitimately uses theme colors
+                                // (schemeClr tx1/accent1/…); BuildChartColorElement
+                                // accepts both scheme names and hex, where the bare
+                                // SanitizeColorForOoxml rejected scheme names and
+                                // aborted the whole chart add.
                                 DrawingEffectsHelper.InsertFillInRunProperties(rPr,
-                                    new Drawing.SolidFill(new Drawing.RgbColorModelHex { Val = rgb }));
+                                    new Drawing.SolidFill(BuildChartColorElement(value)));
                                 break;
                             }
                             case "bold":

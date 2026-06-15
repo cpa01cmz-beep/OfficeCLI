@@ -53,19 +53,67 @@ public static partial class PptxBatchEmitter
         }
     }
 
+    // Remove every <p:custDataLst> (programmability tag references) from a raw
+    // part XML. A UserDefinedTagsPart added to a slideMaster does not survive
+    // Save, so a master <p:tags r:id> reference left dangling makes PowerPoint
+    // refuse the deck; dropping the (invisible) reference keeps it openable.
+    private static string StripCustDataLst(string xml)
+    {
+        if (string.IsNullOrEmpty(xml) || xml.IndexOf("custDataLst", StringComparison.Ordinal) < 0)
+            return xml;
+        try
+        {
+            var doc = System.Xml.Linq.XDocument.Parse(xml);
+            if (doc.Root == null) return xml;
+            var pNs = System.Xml.Linq.XNamespace.Get(
+                "http://schemas.openxmlformats.org/presentationml/2006/main");
+            foreach (var el in doc.Root.DescendantsAndSelf(pNs + "custDataLst").ToList())
+                el.Remove();
+            return doc.Root.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
+        }
+        catch { return xml; }
+    }
+
     private static void EmitThemeRaw(PowerPointHandler ppt, List<BatchItem> items)
     {
-        // Pptx Raw("/theme") returns the presentation-level theme part (first
-        // master's theme). Multi-master decks have additional theme parts
-        // attached to each master, but the existing Raw/RawSet surface only
-        // addresses the primary one — keep parity until per-master theme
-        // raw-set lands. Skip silently when the source has none.
+        // The blank scaffold shares ONE theme part (/ppt/theme/theme1.xml)
+        // between the presentation and master1 — exactly the source topology for
+        // master1. So raw-set master1's theme content into that existing shared
+        // part here, and let EmitMasterRawOne emit DISTINCT theme parts only for
+        // masters 2..N (which the scaffold doesn't provide). This keeps the
+        // presentation<->master1 theme sharing intact while giving each extra
+        // master its own theme.
         string xml;
         try { xml = ppt.Raw("/theme"); }
         catch { return; }
         if (string.IsNullOrEmpty(xml) || !xml.StartsWith("<") || xml == "(no theme)")
             return;
         xml = CanonicalizeRawXml(xml);
+
+        // Carry texture images referenced by the theme's fmtScheme fillStyleLst
+        // blipFill BEFORE the raw-set, so the embed rId resolves on replay. The
+        // blank scaffold's theme has no such images, so a pinned source rId is
+        // free; without this the raw-set'd theme XML keeps a dangling r:embed and
+        // PowerPoint refuses to open the deck (mirrors the master/layout carrier).
+        try
+        {
+            foreach (var imageInfo in ppt.GetThemeImageParts())
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "add-part",
+                    Parent = "/theme",
+                    Type = "image",
+                    Props = new Dictionary<string, string>
+                    {
+                        ["rid"] = imageInfo.RelId,
+                        ["content-type"] = imageInfo.ContentType,
+                        ["data"] = imageInfo.Base64Data,
+                    },
+                });
+            }
+        }
+        catch { /* best-effort — theme raw replace still runs */ }
 
         items.Add(new BatchItem
         {
@@ -86,6 +134,9 @@ public static partial class PptxBatchEmitter
         if (string.IsNullOrEmpty(xml) || !xml.StartsWith("<")) return;
         xml = CanonicalizeRawXml(xml);
 
+        // Raw-set FIRST — it creates the notesMaster part on demand on a blank
+        // target. The add-part theme below then attaches the theme; ordering the
+        // theme after the part-create avoids "notesMaster does not exist yet".
         items.Add(new BatchItem
         {
             Command = "raw-set",
@@ -94,6 +145,33 @@ public static partial class PptxBatchEmitter
             Action = "replace",
             Xml = xml
         });
+
+        // The notes master is a theme-owning master too: source notesMaster.rels
+        // references its own theme part. The on-demand notesMaster create wired no
+        // theme relationship, so the rebuilt notesMaster had no .rels at all.
+        // Emit its theme part (distinct content + pinned rId).
+        try
+        {
+            var nmt = ppt.GetNotesMasterTheme();
+            if (nmt is { } nmtv)
+            {
+                var nmtProps = new Dictionary<string, string>
+                {
+                    ["rid"] = nmtv.RelId,
+                    ["data"] = nmtv.ThemeXml,
+                };
+                // Carry texture images the notes theme references (else r:embed dangles).
+                EmitDiagramImageProps(nmtProps, "themeImage", ppt.GetNotesMasterThemeImages());
+                items.Add(new BatchItem
+                {
+                    Command = "add-part",
+                    Parent = "/notesMaster",
+                    Type = "theme",
+                    Props = nmtProps,
+                });
+            }
+        }
+        catch { /* best-effort */ }
     }
 
     private static void EmitMasterRaw(PowerPointHandler ppt, List<BatchItem> items)
@@ -137,6 +215,96 @@ public static partial class PptxBatchEmitter
         }
         catch { /* best-effort — master raw replace still runs */ }
 
+        // Emit THIS master's own theme part for masters 2..N (distinct content).
+        // master1's theme is the shared /ppt/theme/theme1.xml that the scaffold
+        // already wires to BOTH the presentation and master1 — EmitThemeRaw
+        // raw-sets master1's content into it, so re-creating it here would break
+        // the presentation<->master1 sharing. Masters 2..N have no scaffold theme,
+        // so without this they collapse onto theme1, losing their own theme
+        // content and producing a deck PowerPoint refuses.
+        if (idx >= 2)
+        {
+            try
+            {
+                var mt = ppt.GetMasterTheme(idx);
+                if (mt is { } mtv)
+                {
+                    var mtProps = new Dictionary<string, string>
+                    {
+                        ["rid"] = mtv.RelId,
+                        ["data"] = mtv.ThemeXml,
+                    };
+                    // Carry texture images this master's theme references.
+                    EmitDiagramImageProps(mtProps, "themeImage", ppt.GetMasterThemeImages(idx));
+                    items.Add(new BatchItem
+                    {
+                        Command = "add-part",
+                        Parent = $"/slideMaster[{idx}]",
+                        Type = "theme",
+                        Props = mtProps,
+                    });
+                }
+            }
+            catch { /* best-effort */ }
+        }
+
+        // Non-image binary parts (HD Photo .wdp backup layer referenced by a
+        // master-level picture's <a14:imgLayer r:embed>). GetMasterImageParts
+        // above only carries typed ImageParts; the ExtendedPart would dangle.
+        try
+        {
+            foreach (var comp in ppt.GetMasterExtendedParts(idx))
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "add-part",
+                    Parent = $"/slideMaster[{idx}]",
+                    Type = "extpart",
+                    Props = new Dictionary<string, string>
+                    {
+                        ["rid"] = comp.RelId,
+                        ["rel-type"] = comp.RelType,
+                        ["content-type"] = comp.ContentType,
+                        ["ext"] = comp.TargetExt,
+                        ["data"] = comp.Base64Data,
+                    },
+                });
+            }
+        }
+        catch { /* best-effort */ }
+
+        // External image links on the master (<a:blip r:link="rIdN"> →
+        // TargetMode=External image). GetMasterImageParts covers only embedded
+        // images; without this the external rel dangles.
+        try
+        {
+            foreach (var (relId, relType, uri) in ppt.GetMasterExternalImageLinks(idx))
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "add-part",
+                    Parent = $"/slideMaster[{idx}]",
+                    Type = "extrel",
+                    Props = new Dictionary<string, string>
+                    {
+                        ["rid"] = relId,
+                        ["rel-type"] = relType,
+                        ["target"] = uri,
+                    },
+                });
+            }
+        }
+        catch { /* best-effort */ }
+
+        // Master <p:custDataLst><p:tags r:id="rIdN"/> (programmability tags) are
+        // NOT carried: a UserDefinedTagsPart added to a SlideMasterPart does not
+        // survive Save (the SDK prunes it — unlike a slide/layout tag part), so
+        // pinning the rId left the raw-set'd r:id dangling and PowerPoint refused
+        // the deck (0x80070570). Strip custDataLst from the master XML instead so
+        // there is no dangling reference. Tags are invisible programmability
+        // metadata; this mirrors how slides drop custDataLst on the typed emit.
+        xml = StripCustDataLst(xml);
+
         items.Add(new BatchItem
         {
             Command = "raw-set",
@@ -178,6 +346,103 @@ public static partial class PptxBatchEmitter
                         ["rid"] = imageInfo.RelId,
                         ["content-type"] = imageInfo.ContentType,
                         ["data"] = imageInfo.Base64Data,
+                    },
+                });
+            }
+        }
+        catch { /* best-effort */ }
+
+        // External hyperlink relationships on the layout — the raw-set XML below
+        // carries <a:hlinkClick r:id="rIdN">, but the relationship is external (a
+        // URL) so the ImagePart carrier above doesn't re-create it. Pin each id
+        // BEFORE the raw-set replace so the renumbered rebuilt layout's .rels
+        // resolves the reference. (mirrors the add-part image pattern)
+        try
+        {
+            foreach (var (relId, target) in ppt.GetLayoutExternalHyperlinks(idx))
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "add-part",
+                    Parent = $"/slideLayout[{idx}]",
+                    Type = "hyperlink",
+                    Props = new Dictionary<string, string>
+                    {
+                        ["rid"] = relId,
+                        ["target"] = target,
+                    },
+                });
+            }
+        }
+        catch { /* best-effort */ }
+
+        // External image links on the layout (<a:blip r:link> → external image) —
+        // same as the master external-image-link carrier; the embedded-image
+        // carrier above doesn't cover external links.
+        try
+        {
+            foreach (var (relId, relType, uri) in ppt.GetLayoutExternalImageLinks(idx))
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "add-part",
+                    Parent = $"/slideLayout[{idx}]",
+                    Type = "extrel",
+                    Props = new Dictionary<string, string>
+                    {
+                        ["rid"] = relId,
+                        ["rel-type"] = relType,
+                        ["target"] = uri,
+                    },
+                });
+            }
+        }
+        catch { /* best-effort */ }
+
+        // Non-image binary parts (HD Photo .wdp layer referenced by a
+        // layout-level picture's <a14:imgLayer r:embed>) — same as the master
+        // ExtendedPart carrier; GetLayoutImageParts covers only typed ImageParts.
+        try
+        {
+            foreach (var comp in ppt.GetLayoutExtendedParts(idx))
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "add-part",
+                    Parent = $"/slideLayout[{idx}]",
+                    Type = "extpart",
+                    Props = new Dictionary<string, string>
+                    {
+                        ["rid"] = comp.RelId,
+                        ["rel-type"] = comp.RelType,
+                        ["content-type"] = comp.ContentType,
+                        ["ext"] = comp.TargetExt,
+                        ["data"] = comp.Base64Data,
+                    },
+                });
+            }
+        }
+        catch { /* best-effort */ }
+
+        // UserDefinedTags parts referenced by the layout XML's
+        // <p:custDataLst><p:tags r:id="rIdN"/>. Like the external-hyperlink rel,
+        // the tags part lives in the layout's own .rels (enumerated separately),
+        // so the ImagePart carrier never re-creates it — without this the raw-set'd
+        // r:id="rIdN" dangles and PowerPoint refuses the whole deck (OPC corrupt).
+        // Pin each id + verbatim tag XML BEFORE the raw-set replace.
+        try
+        {
+            foreach (var (relId, tagXml) in ppt.GetLayoutTagParts(idx))
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "add-part",
+                    Parent = $"/slideLayout[{idx}]",
+                    Type = "tags",
+                    Props = new Dictionary<string, string>
+                    {
+                        ["rid"] = relId,
+                        ["data"] = tagXml,
                     },
                 });
             }
@@ -238,6 +503,34 @@ public static partial class PptxBatchEmitter
 
         var pNs = System.Xml.Linq.XNamespace.Get(
             "http://schemas.openxmlformats.org/presentationml/2006/main");
+
+        // Custom binary parts attached to the presentation part (e.g. Google
+        // Slides' ppt/metadata, referenced by <go:slidesCustomData r:id="rIdN">
+        // inside the extLst emitted below). The extLst raw-set carries the r:id;
+        // pin the part + its source rId here so the reference resolves instead
+        // of dangling (PowerPoint refuses the deck otherwise). Mirrors the
+        // master/layout extpart carrier.
+        try
+        {
+            foreach (var comp in ppt.GetPresentationExtendedParts())
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "add-part",
+                    Parent = "/presentation",
+                    Type = "extpart",
+                    Props = new Dictionary<string, string>
+                    {
+                        ["rid"] = comp.RelId,
+                        ["rel-type"] = comp.RelType,
+                        ["content-type"] = comp.ContentType,
+                        ["ext"] = comp.TargetExt,
+                        ["data"] = comp.Base64Data,
+                    },
+                });
+            }
+        }
+        catch { /* best-effort */ }
 
         // CT_Presentation child order (ECMA-376 §19.2.1.26) is significant —
         // PowerPoint's strict validator (and replay's OOXML validator) flags

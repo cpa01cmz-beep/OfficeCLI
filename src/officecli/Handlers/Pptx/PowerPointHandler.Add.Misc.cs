@@ -16,18 +16,14 @@ public partial class PowerPointHandler
 {
     private string AddConnector(string parentPath, int? index, Dictionary<string, string> properties)
     {
-                var cxnSlideMatch = Regex.Match(parentPath, @"^/slide\[(\d+)\]$");
-                if (!cxnSlideMatch.Success)
-                    throw new ArgumentException("Connectors must be added to a slide: /slide[N]");
-
-                var cxnSlideIdx = int.Parse(cxnSlideMatch.Groups[1].Value);
-                var cxnSlideParts = GetSlideParts().ToList();
-                if (cxnSlideIdx < 1 || cxnSlideIdx > cxnSlideParts.Count)
-                    throw new ArgumentException($"Slide {cxnSlideIdx} not found (total: {cxnSlideParts.Count})");
-
-                var cxnSlidePart = cxnSlideParts[cxnSlideIdx - 1];
-                var cxnShapeTree = GetSlide(cxnSlidePart).CommonSlideData?.ShapeTree
-                    ?? throw new InvalidOperationException("Slide has no shape tree");
+                // Accept a slide (/slide[N]) or a nested-group parent
+                // (/slide[N]/group[K]/…) so dump-emitted grouped connectors replay.
+                var cxnParent = ResolveSlideOrGroupAddParent(parentPath)
+                    ?? throw new ArgumentException("Connectors must be added to a slide: /slide[N]");
+                var cxnSlidePart = cxnParent.slidePart;
+                var cxnShapeTree = cxnParent.shapeTree;
+                var cxnInsertContainer = cxnParent.insertContainer;
+                var cxnReturnPrefix = cxnParent.returnPathPrefix;
 
                 var cxnId = AcquireShapeId(cxnShapeTree, properties);
                 var cxnName = properties.GetValueOrDefault("name", $"Connector {cxnShapeTree.Elements<ConnectionShape>().Count() + 1}");
@@ -224,14 +220,23 @@ public partial class PowerPointHandler
                             // Short canonical names + OOXML full names. "line" is the
                             // bare primitive (preserves prst="line" verbatim) — distinct
                             // from "straight"/"straightConnector1" which carries the
-                            // canonical connector adjust list. bent/curved accept either
-                            // the 2-segment or 3-segment OOXML variant (PowerPoint maps
-                            // both to the same drawing primitive set).
+                            // canonical connector adjust list. The bent/curved families
+                            // each have FOUR segment-count variants (2..5); map every
+                            // OOXML name to its EXACT ShapeTypeValues so dump→replay keeps
+                            // the source variant (collapsing e.g. curvedConnector4→3 would
+                            // change the rendered bend). The friendly "elbow"/"curve"
+                            // aliases default to the most common 3-segment form.
                             "straight" or "straightconnector1" => Drawing.ShapeTypeValues.StraightConnector1,
                             "line" => Drawing.ShapeTypeValues.Line,
-                            "elbow" or "bentconnector3" or "bentconnector2" => Drawing.ShapeTypeValues.BentConnector3,
-                            "curve" or "curvedconnector3" or "curvedconnector2" => Drawing.ShapeTypeValues.CurvedConnector3,
-                            _ => throw new ArgumentException($"Invalid connector shape: '{properties.GetValueOrDefault("shape") ?? properties.GetValueOrDefault("preset", "straightConnector1")}'. Valid values: straight, elbow, curve, line (or OOXML full names: straightConnector1, bentConnector3, curvedConnector3).")
+                            "elbow" or "bentconnector3" => Drawing.ShapeTypeValues.BentConnector3,
+                            "bentconnector2" => Drawing.ShapeTypeValues.BentConnector2,
+                            "bentconnector4" => Drawing.ShapeTypeValues.BentConnector4,
+                            "bentconnector5" => Drawing.ShapeTypeValues.BentConnector5,
+                            "curve" or "curvedconnector3" => Drawing.ShapeTypeValues.CurvedConnector3,
+                            "curvedconnector2" => Drawing.ShapeTypeValues.CurvedConnector2,
+                            "curvedconnector4" => Drawing.ShapeTypeValues.CurvedConnector4,
+                            "curvedconnector5" => Drawing.ShapeTypeValues.CurvedConnector5,
+                            _ => throw new ArgumentException($"Invalid connector shape: '{properties.GetValueOrDefault("shape") ?? properties.GetValueOrDefault("preset", "straightConnector1")}'. Valid values: straight, elbow, curve, line (or OOXML full names: straightConnector1, bentConnector2-5, curvedConnector2-5).")
                         }
                     }
                 );
@@ -448,14 +453,14 @@ public partial class PowerPointHandler
                     connector.AppendChild(cxnTxBody);
                 }
 
-                InsertAtPosition(cxnShapeTree, connector, index);
+                InsertAtPosition(cxnInsertContainer, connector, index);
                 if (properties.TryGetValue("zorder", out var cxnZ)
                     || properties.TryGetValue("z-order", out cxnZ)
                     || properties.TryGetValue("order", out cxnZ))
                     ApplyZOrder(cxnSlidePart, connector, cxnZ);
                 GetSlide(cxnSlidePart).Save();
 
-                return $"/slide[{cxnSlideIdx}]/{BuildElementPathSegment("connector", connector, cxnShapeTree.Elements<ConnectionShape>().Count())}";
+                return $"{cxnReturnPrefix}/{BuildElementPathSegment("connector", connector, cxnInsertContainer.Elements<ConnectionShape>().Count())}";
     }
 
     // R57 bt-4: Resolve a connector under a slide by either positional index
@@ -1006,7 +1011,19 @@ public partial class PowerPointHandler
         // the second Add — false positive against ECMA-376.
         bool phTypeIsTitleFamily = phTypeVal == PlaceholderValues.Title
             || phTypeVal == PlaceholderValues.CenteredTitle;
-        if (phTypeIsTitleFamily)
+        // dump→replay escape: a malformed-but-real source slide can carry two
+        // title/ctrTitle placeholders (PowerPoint keeps them — it only
+        // auto-dedups via the UI, not on load). The uniqueness guard below is a
+        // convenience for interactive `add`; for a faithful round-trip the
+        // emitter sets allowDuplicate so the second title placeholder replays
+        // instead of aborting (which also cascaded the slide's later shapes via
+        // the broken shape count). The flag is consumed here, never written to XML.
+        bool phAllowDuplicate = (properties.TryGetValue("allowDuplicate", out var phAdup)
+                                  || properties.TryGetValue("allowduplicate", out phAdup))
+                                 && IsTruthy(phAdup);
+        properties.Remove("allowDuplicate");
+        properties.Remove("allowduplicate");
+        if (phTypeIsTitleFamily && !phAllowDuplicate)
         {
             var existingTitle = phShapeTree.Elements<Shape>()
                 .FirstOrDefault(s =>

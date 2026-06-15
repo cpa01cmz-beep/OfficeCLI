@@ -896,13 +896,19 @@ public partial class PowerPointHandler
             "dkedge" or "darkedge" => Drawing.PresetMaterialTypeValues.DarkEdge,
             "softedge" => Drawing.PresetMaterialTypeValues.SoftEdge,
             "flat" => Drawing.PresetMaterialTypeValues.Flat,
-            "wire" or "wireframe" => Drawing.PresetMaterialTypeValues.LegacyWireframe,
+            "wire" or "wireframe" or "legacywireframe" => Drawing.PresetMaterialTypeValues.LegacyWireframe,
             "powder" => Drawing.PresetMaterialTypeValues.Powder,
             "translucentpowder" => Drawing.PresetMaterialTypeValues.TranslucentPowder,
             "clear" => Drawing.PresetMaterialTypeValues.Clear,
             "softmetal" => Drawing.PresetMaterialTypeValues.SoftMetal,
             "matte" => Drawing.PresetMaterialTypeValues.Matte,
-            _ => throw new ArgumentException($"Invalid material value: '{value}'. Valid values: warmmatte, plastic, metal, darkedge, flat, wire, powder, translucentpowder, clear, softmetal, matte.")
+            // Legacy 3D presets (ST_PresetMaterialType, the legacy* tokens). Get
+            // emits sp3d.PresetMaterial.InnerText verbatim, so these raw OOXML
+            // tokens must round-trip back through Set/Add.
+            "legacymatte" => Drawing.PresetMaterialTypeValues.LegacyMatte,
+            "legacyplastic" => Drawing.PresetMaterialTypeValues.LegacyPlastic,
+            "legacymetal" => Drawing.PresetMaterialTypeValues.LegacyMetal,
+            _ => throw new ArgumentException($"Invalid material value: '{value}'. Valid values: warmmatte, plastic, metal, darkedge, flat, wire, powder, translucentpowder, clear, softmetal, matte, legacymatte, legacyplastic, legacymetal, legacywireframe.")
         };
     }
 
@@ -925,7 +931,22 @@ public partial class PowerPointHandler
             "twopt" or "2pt" => Drawing.LightRigValues.TwoPoints,
             "glow" => Drawing.LightRigValues.Glow,
             "brightroom" => Drawing.LightRigValues.BrightRoom,
-            _ => throw new ArgumentException($"Invalid lighting value: '{value}'. Valid values: threept, balanced, soft, harsh, flood, contrasting, morning, sunrise, sunset, chilly, freezing, flat, twopt, glow, brightroom.")
+            // Legacy 3D light rigs (ST_LightRigType, the legacy* tokens). Get
+            // emits lightRig.Light.InnerText verbatim, so these raw OOXML tokens
+            // must round-trip back through Set/Add.
+            "legacyflat1" => Drawing.LightRigValues.LegacyFlat1,
+            "legacyflat2" => Drawing.LightRigValues.LegacyFlat2,
+            "legacyflat3" => Drawing.LightRigValues.LegacyFlat3,
+            "legacyflat4" => Drawing.LightRigValues.LegacyFlat4,
+            "legacynormal1" => Drawing.LightRigValues.LegacyNormal1,
+            "legacynormal2" => Drawing.LightRigValues.LegacyNormal2,
+            "legacynormal3" => Drawing.LightRigValues.LegacyNormal3,
+            "legacynormal4" => Drawing.LightRigValues.LegacyNormal4,
+            "legacyharsh1" => Drawing.LightRigValues.LegacyHarsh1,
+            "legacyharsh2" => Drawing.LightRigValues.LegacyHarsh2,
+            "legacyharsh3" => Drawing.LightRigValues.LegacyHarsh3,
+            "legacyharsh4" => Drawing.LightRigValues.LegacyHarsh4,
+            _ => throw new ArgumentException($"Invalid lighting value: '{value}'. Valid values: threept, balanced, soft, harsh, flood, contrasting, morning, sunrise, sunset, chilly, freezing, flat, twopt, glow, brightroom, legacyflat1-4, legacynormal1-4, legacyharsh1-4.")
         };
     }
 

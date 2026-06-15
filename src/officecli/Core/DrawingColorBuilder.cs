@@ -52,9 +52,23 @@ internal static class DrawingColorBuilder
 
         OpenXmlElement colorEl;
         var schemeColor = TryParseSchemeColor(baseColor);
+        var systemColor = TryParseSystemColor(baseColor);
         if (schemeColor.HasValue)
         {
             colorEl = new Drawing.SchemeColor { Val = schemeColor.Value };
+        }
+        else if (systemColor != null)
+        {
+            // <a:sysClr val="window"/> etc. — the gradient/Get readback emits the
+            // bare OOXML sysClr name, which the hex parser rejected ("Invalid
+            // color value: 'window'"). Rebuild a real a:sysClr element with its
+            // conventional lastClr so the value renders even if the consuming
+            // app doesn't resolve the live system color.
+            colorEl = new Drawing.SystemColor
+            {
+                Val = systemColor.Value.val,
+                LastColor = systemColor.Value.lastClr,
+            };
         }
         else
         {
@@ -83,63 +97,63 @@ internal static class DrawingColorBuilder
         var result = new List<(string Name, int Val)>();
         foreach (var token in chain.Split('+', StringSplitOptions.RemoveEmptyEntries))
         {
-            // OOXML ST_PositivePercentage / ST_PositiveFixedPercentage forbids
-            // negative values — every color transform child a:lumMod / a:lumOff
-            // / a:shade / a:tint / a:satMod / a:satOff / a:hueMod / a:hueOff /
-            // a:alpha takes a non-negative percent. Reject "lumMod-50" etc.
-            // explicitly instead of letting the digit-scan land on the digit
-            // after the sign and silently drop the token as "unknown transform".
-            if (token.Contains('-'))
-                throw new ArgumentException(
-                    $"Invalid color transform '{token}': negative percentages are not allowed (OOXML ST_PositivePercentage).");
             // Two accepted forms:
             //   "lumMod75"        — Get's canonical round-trip form, percent 0..100
-            //   "lumMod=75000"    — raw OOXML ST_PositivePercentage 0..100000
+            //   "lumMod=75000"    — raw OOXML percentage 0..100000
             //                       (matches the literal a:lumMod@val attribute,
             //                        what users see in PowerPoint XML / docs)
-            // Both end up encoded as @val="75000" on the OOXML child.
+            // Both end up encoded as @val="75000" on the OOXML child. The name is
+            // a leading run of letters; the remainder is '='?<signed-int>. Scan the
+            // name by letters (not "first digit") so a leading '-' on the value
+            // stays with the value instead of being folded into the name.
             int i = 0;
-            bool eqForm = false;
-            while (i < token.Length && !char.IsDigit(token[i]) && token[i] != '=') i++;
+            while (i < token.Length && char.IsLetter(token[i])) i++;
             if (i == 0 || i == token.Length) continue;
             var name = token.Substring(0, i);
             if (!KnownTransforms.Contains(name))
                 throw new ArgumentException(
                     $"Unknown color transform '{name}'. Valid: lumMod, lumOff, shade, tint, satMod, satOff, hueMod, hueOff, alpha.");
-            string numText;
-            if (token[i] == '=')
-            {
-                eqForm = true;
-                numText = token.Substring(i + 1);
-            }
-            else
-            {
-                numText = token.Substring(i);
-            }
+            bool eqForm = token[i] == '=';
+            string numText = eqForm ? token.Substring(i + 1) : token.Substring(i);
             if (!int.TryParse(numText, out var raw))
                 throw new ArgumentException(
-                    $"Invalid color transform '{token}': value must be a non-negative integer.");
+                    $"Invalid color transform '{token}': value must be an integer.");
+            // OOXML splits the transforms into two schema types:
+            //   shade / tint / alpha  → ST_PositiveFixedPercentage (0..100%),
+            //                           negatives forbidden.
+            //   lumMod / lumOff / satMod / satOff / hueMod / hueOff
+            //                         → ST_Percentage: SIGNED and may exceed 100%
+            //                           (e.g. satMod200% to over-saturate, or
+            //                           satOff-10% to desaturate). Rejecting
+            //                           negatives wrongly aborted replay of the
+            //                           round-trip form Get emits for these
+            //                           (satOff val="-10000" → "satOff-10").
+            // Only the fixed-percentage family stays clamped 0..100.
+            bool fixedPct = name.ToLowerInvariant() is "shade" or "tint" or "alpha";
+            int maxPct = fixedPct ? 100 : 1000;       // 1000% headroom for ST_Percentage
+            int minPct = fixedPct ? 0 : -1000;        // signed for the Mod/Off family
+            int maxRaw = fixedPct ? 100000 : 1000000;
+            int minRaw = fixedPct ? 0 : -1000000;
             int pct;
             if (eqForm)
             {
-                if (raw < 0 || raw > 100000)
+                if (raw < minRaw || raw > maxRaw)
                     throw new ArgumentException(
-                        $"Invalid color transform '{token}': raw value {raw} out of range 0-100000 (OOXML ST_PositivePercentage).");
+                        $"Invalid color transform '{token}': raw value {raw} out of range {minRaw}-{maxRaw}.");
                 // OOXML raw units are 1/1000 of a percent. Integer division
-                // truncates values 1..999 to 0 (lumMod=75 raw → 0 instead of
-                // 7.5%). Reject sub-1000 raw values so callers can't silently
-                // get a no-op; the percentage form (lumModN, N=0..100) covers
-                // that range with full precision.
-                if (raw > 0 && raw < 1000)
+                // truncates values whose magnitude is 1..999 to 0 (lumMod=75 raw
+                // → 0 instead of 7.5%). Reject sub-1000 magnitudes so callers
+                // can't silently get a no-op; the percentage form covers that range.
+                if (raw != 0 && Math.Abs(raw) < 1000)
                     throw new ArgumentException(
-                        $"Invalid color transform '{token}': raw value {raw} below 1000 truncates to 0%; use percentage form '{name}{raw / 1000}' or raw value >= 1000.");
+                        $"Invalid color transform '{token}': raw value {raw} below 1000 truncates to 0%; use percentage form '{name}{raw / 1000}' or raw magnitude >= 1000.");
                 pct = raw / 1000;
             }
             else
             {
-                if (raw < 0 || raw > 100)
+                if (raw < minPct || raw > maxPct)
                     throw new ArgumentException(
-                        $"Invalid color transform '{token}': percentage {raw} out of range 0-100.");
+                        $"Invalid color transform '{token}': percentage {raw} out of range {minPct}-{maxPct}.");
                 pct = raw;
             }
             // Canonicalize: lumMod → lumMod (lowercase first letter? OOXML uses
@@ -185,6 +199,30 @@ internal static class DrawingColorBuilder
         var solidFill = new Drawing.SolidFill();
         solidFill.Append(BuildColorElement(colorValue));
         return solidFill;
+    }
+
+    /// <summary>
+    /// Try to parse an OOXML system color name (<c>a:sysClr</c> @val). Returns the
+    /// enum value plus a conventional lastClr hex fallback, or null when the input
+    /// is not a recognised system color. Only the slots that appear in real decks
+    /// (window / windowText, plus the common UI chrome colors) are mapped — the
+    /// full ST_SystemColorVal vocabulary is large but rarely authored.
+    /// </summary>
+    internal static (Drawing.SystemColorValues val, string lastClr)? TryParseSystemColor(string value)
+    {
+        return value.ToLowerInvariant().Trim() switch
+        {
+            "window" => (Drawing.SystemColorValues.Window, "FFFFFF"),
+            "windowtext" => (Drawing.SystemColorValues.WindowText, "000000"),
+            "background" => (Drawing.SystemColorValues.Background, "FFFFFF"),
+            "windowframe" => (Drawing.SystemColorValues.WindowFrame, "000000"),
+            "highlight" => (Drawing.SystemColorValues.Highlight, "0078D7"),
+            "highlighttext" => (Drawing.SystemColorValues.HighlightText, "FFFFFF"),
+            "btnface" => (Drawing.SystemColorValues.ButtonFace, "F0F0F0"),
+            "btntext" => (Drawing.SystemColorValues.ButtonText, "000000"),
+            "graytext" => (Drawing.SystemColorValues.GrayText, "6D6D6D"),
+            _ => null
+        };
     }
 
     /// <summary>

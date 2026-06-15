@@ -15,6 +15,33 @@ public partial class PowerPointHandler
 {
 
     /// <summary>
+    /// True when a table cell's text body carries formatting that the plain
+    /// `set tc text=...` rebuild path would drop: a non-empty &lt;a:lstStyle&gt;,
+    /// any paragraph &lt;a:pPr&gt; with children (lnSpc/spc/bu*/tabLst/defRPr),
+    /// any run &lt;a:rPr&gt; with children (ea/latin/solidFill), or an
+    /// &lt;a:endParaRPr&gt; with children. Used to gate the verbatim txBodyRaw
+    /// capture so trivial empty-seed cells keep round-tripping through text=.
+    /// </summary>
+    private static bool CellTextBodyHasRichContent(Drawing.TextBody body)
+    {
+        var lstStyle = body.GetFirstChild<Drawing.ListStyle>();
+        if (lstStyle != null && lstStyle.HasChildren) return true;
+        foreach (var para in body.Elements<Drawing.Paragraph>())
+        {
+            var pPr = para.ParagraphProperties;
+            if (pPr != null && pPr.HasChildren) return true;
+            foreach (var run in para.Elements<Drawing.Run>())
+            {
+                var rPr = run.RunProperties;
+                if (rPr != null && rPr.HasChildren) return true;
+            }
+            var endRPr = para.GetFirstChild<Drawing.EndParagraphRunProperties>();
+            if (endRPr != null && endRPr.HasChildren) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
     /// Read table cell border properties.
     /// Maps a:lnL/lnR/lnT/lnB → border.left, border.right, border.top, border.bottom in Format.
     /// </summary>
@@ -26,6 +53,22 @@ public partial class PowerPointHandler
         ReadBorderLine(tcPr.BottomBorderLineProperties, "border.bottom", node);
         ReadBorderLine(tcPr.TopLeftToBottomRightBorderLineProperties, "border.tl2br", node);
         ReadBorderLine(tcPr.BottomLeftToTopRightBorderLineProperties, "border.tr2bl", node);
+
+        // Verbatim border-line passthrough. The granular border.<edge>.* keys
+        // model only color/width/dash/compound and SKIP a line entirely when it
+        // carries <a:noFill/> (invisible border) — so an intentional invisible
+        // border was dropped on rebuild and PowerPoint fell back to DEFAULT
+        // VISIBLE borders. The granular path also drops cap/algn attrs and the
+        // prstDash/custDash/round/headEnd/tailEnd children. Capture each present
+        // border line's OuterXml so the Add/Set border.<edge>.raw key can
+        // re-inject it verbatim (attrs + children + the noFill/solidFill choice).
+        // CONSISTENCY(border-line-raw-passthrough): mirrors lstStyleRaw / effectsRaw.
+        ReadBorderLineRaw(tcPr.LeftBorderLineProperties, "border.left.raw", node);
+        ReadBorderLineRaw(tcPr.RightBorderLineProperties, "border.right.raw", node);
+        ReadBorderLineRaw(tcPr.TopBorderLineProperties, "border.top.raw", node);
+        ReadBorderLineRaw(tcPr.BottomBorderLineProperties, "border.bottom.raw", node);
+        ReadBorderLineRaw(tcPr.TopLeftToBottomRightBorderLineProperties, "border.tl2br.raw", node);
+        ReadBorderLineRaw(tcPr.BottomLeftToTopRightBorderLineProperties, "border.tr2bl.raw", node);
         // border.all summary when all four edges are uniform — schema declares
         // it as a gettable convenience alongside the per-edge keys.
         if (node.Format.TryGetValue("border.top", out var bt)
@@ -99,6 +142,18 @@ public partial class PowerPointHandler
         else parts.Add("solid");
         if (color is not null) parts.Add(color);
         node.Format[prefix] = string.Join(" ", parts);
+    }
+
+    /// <summary>
+    /// Capture a border line element's full OuterXml verbatim (attrs + children)
+    /// into the given Format key, so the Add/Set border.&lt;edge&gt;.raw path can
+    /// re-inject it without the granular reducer dropping noFill / cap / algn /
+    /// prstDash / round / head-tail-end. Emits only when the element is present.
+    /// </summary>
+    private static void ReadBorderLineRaw(OpenXmlCompositeElement? lineProps, string key, DocumentNode node)
+    {
+        if (lineProps == null) return;
+        node.Format[key] = lineProps.OuterXml;
     }
 
     // BUG-R6-C: strict GUID format check for direct passthrough.

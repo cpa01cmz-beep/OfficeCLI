@@ -279,7 +279,7 @@ internal static class ImageSource
             "image/jpeg" or "image/jpg" => ImagePartType.Jpeg,
             "image/gif" => ImagePartType.Gif,
             "image/bmp" => ImagePartType.Bmp,
-            "image/tiff" => ImagePartType.Tiff,
+            "image/tiff" or "image/tif" => ImagePartType.Tiff,
             "image/svg+xml" => ImagePartType.Svg,
             "image/emf" or "image/x-emf" => ImagePartType.Emf,
             "image/wmf" or "image/x-wmf" => ImagePartType.Wmf,

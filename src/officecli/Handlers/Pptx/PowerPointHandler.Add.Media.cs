@@ -19,18 +19,15 @@ public partial class PowerPointHandler
                     && !properties.TryGetValue("src", out imgPath))
                     throw new ArgumentException("'src' property is required for picture type");
 
-                var imgSlideMatch = Regex.Match(parentPath, @"^/slide\[(\d+)\]$");
-                if (!imgSlideMatch.Success)
-                    throw new ArgumentException($"Pictures must be added to a slide: /slide[N]");
-
-                var imgSlideIdx = int.Parse(imgSlideMatch.Groups[1].Value);
-                var imgSlideParts = GetSlideParts().ToList();
-                if (imgSlideIdx < 1 || imgSlideIdx > imgSlideParts.Count)
-                    throw new ArgumentException($"Slide {imgSlideIdx} not found (total: {imgSlideParts.Count})");
-
-                var imgSlidePart = imgSlideParts[imgSlideIdx - 1];
-                var imgShapeTree = GetSlide(imgSlidePart).CommonSlideData?.ShapeTree
-                    ?? throw new InvalidOperationException("Slide has no shape tree");
+                // Accept a slide (/slide[N]) or a nested-group parent
+                // (/slide[N]/group[K]/…) so dump-emitted grouped pictures replay.
+                var imgParent = ResolveSlideOrGroupAddParent(parentPath)
+                    ?? throw new ArgumentException($"Pictures must be added to a slide: /slide[N]");
+                var imgSlideIdx = imgParent.slideIdx;
+                var imgSlidePart = imgParent.slidePart;
+                var imgShapeTree = imgParent.shapeTree;
+                var imgInsertContainer = imgParent.insertContainer;
+                var imgReturnPrefix = imgParent.returnPathPrefix;
 
                 // Resolve image from file/base64/URL and buffer for
                 // both embedding and dimension sniffing (aspect ratio).
@@ -533,7 +530,7 @@ public partial class PowerPointHandler
                     ApplyPictureHyperlink(imgSlidePart, picture, picLink, picTip);
                 }
 
-                InsertAtPosition(imgShapeTree, picture, index);
+                InsertAtPosition(imgInsertContainer, picture, index);
 
                 // CONSISTENCY(zorder-on-add): dump-emit carries zorder=N; without
                 // consuming it here every picture appended at the end of the tree.
@@ -546,7 +543,7 @@ public partial class PowerPointHandler
 
                 GetSlide(imgSlidePart).Save();
 
-                return $"/slide[{imgSlideIdx}]/{BuildElementPathSegment("picture", picture, imgShapeTree.Elements<Picture>().Count())}";
+                return $"{imgReturnPrefix}/{BuildElementPathSegment("picture", picture, imgInsertContainer.Elements<Picture>().Count())}";
     }
 
 
@@ -574,18 +571,15 @@ public partial class PowerPointHandler
 
     private string AddChart(string parentPath, int? index, Dictionary<string, string> properties)
     {
-                var chartSlideMatch = Regex.Match(parentPath, @"^/slide\[(\d+)\]$");
-                if (!chartSlideMatch.Success)
-                    throw new ArgumentException("Charts must be added to a slide: /slide[N]");
-
-                var chartSlideIdx = int.Parse(chartSlideMatch.Groups[1].Value);
-                var chartSlideParts = GetSlideParts().ToList();
-                if (chartSlideIdx < 1 || chartSlideIdx > chartSlideParts.Count)
-                    throw new ArgumentException($"Slide {chartSlideIdx} not found (total: {chartSlideParts.Count})");
-
-                var chartSlidePart = chartSlideParts[chartSlideIdx - 1];
-                var chartShapeTree = GetSlide(chartSlidePart).CommonSlideData?.ShapeTree
-                    ?? throw new InvalidOperationException("Slide has no shape tree");
+                // Accept a slide (/slide[N]) or a nested-group parent
+                // (/slide[N]/group[K]/…) so dump-emitted grouped charts replay.
+                var chartParent = ResolveSlideOrGroupAddParent(parentPath)
+                    ?? throw new ArgumentException("Charts must be added to a slide: /slide[N]");
+                var chartSlideIdx = chartParent.slideIdx;
+                var chartSlidePart = chartParent.slidePart;
+                var chartShapeTree = chartParent.shapeTree;
+                var chartInsertContainer = chartParent.insertContainer;
+                var chartReturnPrefix = chartParent.returnPathPrefix;
 
                 // Parse chart data. Use TryGetValue(case-insensitive) instead
                 // of LINQ FirstOrDefault to play well with TrackingPropertyDictionary.
@@ -624,7 +618,18 @@ public partial class PowerPointHandler
                 var categories = ChartHelper.ParseCategories(properties);
                 var seriesData = ChartHelper.ParseSeriesData(properties);
 
-                if (seriesData.Count == 0)
+                // allowEmpty: dump→replay of a genuinely dataless chart (0 series —
+                // an unpopulated template doughnut/pie the author never filled).
+                // PowerPoint keeps such charts; BuildChartSpace produces a valid
+                // empty chart frame (its series loops simply don't run). The
+                // data-required throw is an interactive-use convenience, so the
+                // emitter sets allowEmpty to round-trip the empty chart faithfully.
+                bool chartAllowEmpty = (properties.TryGetValue("allowEmpty", out var caE)
+                                         || properties.TryGetValue("allowempty", out caE))
+                                        && IsTruthy(caE);
+                properties.Remove("allowEmpty");
+                properties.Remove("allowempty");
+                if (seriesData.Count == 0 && !chartAllowEmpty)
                     throw new ArgumentException("Chart requires data. Use: data=\"Series1:1,2,3;Series2:4,5,6\" " +
                         "or series1=\"Revenue:100,200,300\"");
 
@@ -690,7 +695,7 @@ public partial class PowerPointHandler
 
                     var chartGfEx = BuildExtendedChartGraphicFrame(chartSlidePart, extChartPart,
                         chartId, chartName, chartX, chartY, chartCx, chartCy);
-                    InsertAtPosition(chartShapeTree, chartGfEx, index);
+                    InsertAtPosition(chartInsertContainer, chartGfEx, index);
                     if (properties.TryGetValue("zorder", out var cxZ)
                         || properties.TryGetValue("z-order", out cxZ)
                         || properties.TryGetValue("order", out cxZ))
@@ -698,9 +703,9 @@ public partial class PowerPointHandler
                     GetSlide(chartSlidePart).Save();
 
                     // Count all charts (both regular and extended)
-                    var totalCharts = chartShapeTree.Elements<GraphicFrame>()
+                    var totalCharts = chartInsertContainer.Elements<GraphicFrame>()
                         .Count(gf => gf.Descendants<C.ChartReference>().Any() || IsExtendedChartFrame(gf));
-                    return $"/slide[{chartSlideIdx}]/{BuildElementPathSegment("chart", chartGfEx, totalCharts)}";
+                    return $"{chartReturnPrefix}/{BuildElementPathSegment("chart", chartGfEx, totalCharts)}";
                 }
 
                 // Build chart content BEFORE adding part (invalid type throws, must not leave empty part)
@@ -737,16 +742,16 @@ public partial class PowerPointHandler
 
                 var chartGf = BuildChartGraphicFrame(chartSlidePart, chartPart, chartId, chartName,
                     chartX, chartY, chartCx, chartCy);
-                InsertAtPosition(chartShapeTree, chartGf, index);
+                InsertAtPosition(chartInsertContainer, chartGf, index);
                 if (properties.TryGetValue("zorder", out var stdZ)
                     || properties.TryGetValue("z-order", out stdZ)
                     || properties.TryGetValue("order", out stdZ))
                     ApplyZOrder(chartSlidePart, chartGf, stdZ);
                 GetSlide(chartSlidePart).Save();
 
-                var chartCount = chartShapeTree.Elements<GraphicFrame>()
+                var chartCount = chartInsertContainer.Elements<GraphicFrame>()
                     .Count(gf => gf.Descendants<C.ChartReference>().Any());
-                return $"/slide[{chartSlideIdx}]/{BuildElementPathSegment("chart", chartGf, chartCount)}";
+                return $"{chartReturnPrefix}/{BuildElementPathSegment("chart", chartGf, chartCount)}";
     }
 
 

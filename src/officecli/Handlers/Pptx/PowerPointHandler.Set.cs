@@ -351,6 +351,52 @@ public partial class PowerPointHandler
         var cxnMatch = Regex.Match(path, @"^/slide\[(\d+)\]/(?:connector|connection)\[(\d+)\]$");
         if (cxnMatch.Success) return SetConnectorByPath(cxnMatch, properties);
 
+        // Try group-inner connector path (any group depth, index or @id):
+        //   /slide[N]/group[K](/group[L])*/connector[M|@id=…]
+        // dump emits arrowhead/style sets on connectors nested in groups, often
+        // addressed by @id; without this route they hit the generic XML fallback
+        // (LocalName "group"/"connector" don't match p:grpSp/p:cxnSp) and errored.
+        var grpCxnMatch = Regex.Match(path,
+            @"^/slide\[(\d+)\]((?:/group\[[^\]]+\])+)/(?:connector|connection)\[([^\]]+)\]$");
+        if (grpCxnMatch.Success)
+        {
+            var (sp, cxn) = ResolveGroupInnerConnector(
+                int.Parse(grpCxnMatch.Groups[1].Value),
+                grpCxnMatch.Groups[2].Value,
+                grpCxnMatch.Groups[3].Value);
+            return ApplyConnectorProps(sp, cxn, properties);
+        }
+
+        // Try nested-depth group inner paragraph/run path:
+        //   /slide[N]/group[M](/group[L])+/shape[K]/paragraph[P][/run[R]]
+        // CONSISTENCY(group-inner-shape): the depth-1 routes below handle a single
+        // group; deeper nesting (group/group/group/shape/paragraph) fell through to
+        // the XML fallback and errored "Element not found". Walk arbitrary depth via
+        // ResolveGroupInnerShapeBySegments, then reuse the shape paragraph/run helpers.
+        var nestedGrpParaRunMatch = Regex.Match(path,
+            @"^/slide\[(\d+)\]/group\[(\d+)\]((?:/group\[\d+\])+)/shape\[(\d+)\]/(?:paragraph|p)\[(\d+)\]/(?:run|r)\[(\d+)\]$");
+        if (nestedGrpParaRunMatch.Success)
+        {
+            var slideIdx = int.Parse(nestedGrpParaRunMatch.Groups[1].Value);
+            var segs = "/group[" + nestedGrpParaRunMatch.Groups[2].Value + "]" + nestedGrpParaRunMatch.Groups[3].Value;
+            var shapeIdx = int.Parse(nestedGrpParaRunMatch.Groups[4].Value);
+            var paraIdx = int.Parse(nestedGrpParaRunMatch.Groups[5].Value);
+            var runIdx = int.Parse(nestedGrpParaRunMatch.Groups[6].Value);
+            var (sp, shp) = ResolveGroupInnerShapeBySegments(slideIdx, segs, shapeIdx);
+            return SetParagraphRunOnShape(sp, shp, paraIdx, runIdx, properties);
+        }
+        var nestedGrpParaMatch = Regex.Match(path,
+            @"^/slide\[(\d+)\]/group\[(\d+)\]((?:/group\[\d+\])+)/shape\[(\d+)\]/(?:paragraph|p)\[(\d+)\]$");
+        if (nestedGrpParaMatch.Success)
+        {
+            var slideIdx = int.Parse(nestedGrpParaMatch.Groups[1].Value);
+            var segs = "/group[" + nestedGrpParaMatch.Groups[2].Value + "]" + nestedGrpParaMatch.Groups[3].Value;
+            var shapeIdx = int.Parse(nestedGrpParaMatch.Groups[4].Value);
+            var paraIdx = int.Parse(nestedGrpParaMatch.Groups[5].Value);
+            var (sp, shp) = ResolveGroupInnerShapeBySegments(slideIdx, segs, shapeIdx);
+            return SetParagraphOnShape(sp, shp, paraIdx, properties);
+        }
+
         // Try group inner paragraph/run path: /slide[N]/group[M]/shape[K]/paragraph[P]/run[R]
         // CONSISTENCY(group-inner-shape): Get supports the nested paragraph/run
         // path on shapes inside a group; Set used to fall through to the
@@ -380,6 +426,18 @@ public partial class PowerPointHandler
         // CONSISTENCY(group-inner-shape): Get supports this; Set must too.
         var grpInnerShapeMatch = Regex.Match(path, @"^/slide\[(\d+)\]/group\[(\d+)\]/shape\[(\d+)\]$");
         if (grpInnerShapeMatch.Success) return SetGroupInnerShapeByPath(grpInnerShapeMatch, properties);
+
+        // Try group inner picture path: /slide[N]/group[M]/picture[K] (or pic[K]).
+        // CONSISTENCY(group-inner-shape): Get/Add support a picture nested in a
+        // group; Set fell through to the XML fallback (LocalName "group" ≠
+        // p:grpSp) and errored "Element not found". EmitPicture defers picture
+        // effects (shadow/glow/brightness/contrast — schema add:false set:true)
+        // as `set /slide[N]/group[K]/picture[M]`, so a grouped picture with any
+        // such effect failed on replay. Route to the same picture-prop core.
+        // Match any group depth — group 2 captures the full /group[..] chain so a
+        // picture in a nested group (group[3]/group[1]/picture[1]) also routes.
+        var grpInnerPicMatch = Regex.Match(path, @"^/slide\[(\d+)\]((?:/group\[\d+\])+)/(?:picture|pic)\[(\d+)\]$");
+        if (grpInnerPicMatch.Success) return SetGroupInnerPictureByPath(grpInnerPicMatch, properties);
 
         // Try group path: /slide[N]/group[M]
         var grpMatch = Regex.Match(path, @"^/slide\[(\d+)\]/group\[(\d+)\]$");

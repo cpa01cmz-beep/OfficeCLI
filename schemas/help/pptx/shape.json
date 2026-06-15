@@ -363,6 +363,36 @@
       "readback": "\"true\" when shape has an image (blipFill) fill",
       "enforcement": "report"
     },
+    "fillRect": {
+      "type": "string",
+      "description": "image-fill stretch insets as \"l,t,r,b\" in thousandths of a percent (perMille). Positive insets letterbox the image inside the shape; negative insets oversize it (cover-style framing). Applies to an image (blipFill) shape; consumed alongside image=.",
+      "aliases": [
+        "fillrect"
+      ],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop image=/path/photo.png --prop fillRect=0,-36364,0,-85860"
+      ],
+      "readback": "\"l,t,r,b\" perMille when the shape's blipFill stretch carries non-zero insets",
+      "enforcement": "report"
+    },
+    "srcRect": {
+      "type": "string",
+      "description": "image-fill source crop as \"l,t,r,b\" in thousandths of a percent (perMille) — the fraction trimmed from each edge of the source image before it fills the shape. Applies to an image (blipFill) shape; consumed alongside image=.",
+      "aliases": [
+        "srcrect"
+      ],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop image=/path/photo.png --prop srcRect=10000,0,10000,0"
+      ],
+      "readback": "\"l,t,r,b\" perMille when the shape's blipFill carries a srcRect crop",
+      "enforcement": "report"
+    },
     "lineWidth": {
       "type": "length",
       "description": "outline width.",

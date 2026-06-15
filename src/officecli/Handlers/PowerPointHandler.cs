@@ -315,6 +315,7 @@ public partial class PowerPointHandler : IDocumentHandler
             // can stamp the source notes master back in (mirrors GrowSlideLayoutParts
             // in the slideLayout branch above).
             var nmPart = presentationPart.NotesMasterPart;
+            bool nmCreated = nmPart == null;
             if (nmPart == null)
             {
                 nmPart = presentationPart.AddNewPart<NotesMasterPart>();
@@ -343,6 +344,29 @@ public partial class PowerPointHandler : IDocumentHandler
                         Hyperlink = DocumentFormat.OpenXml.Drawing.ColorSchemeIndexValues.Hyperlink,
                         FollowedHyperlink = DocumentFormat.OpenXml.Drawing.ColorSchemeIndexValues.FollowedHyperlink,
                     });
+            }
+            // Register <p:notesMasterIdLst> in presentation.xml. AddNewPart only
+            // wires the relationship; without the IdLst element the part is an
+            // orphan reference and PowerPoint refuses the file with a schema
+            // error ("unexpected child element in /p:presentation"). Schema order
+            // (CT_Presentation): sldMasterIdLst -> notesMasterIdLst ->
+            // handoutMasterIdLst -> sldIdLst -> sldSz -> notesSz -> ...
+            if (nmCreated)
+            {
+                var pres = presentationPart.Presentation
+                    ?? throw new InvalidOperationException("No presentation");
+                if (pres.NotesMasterIdList == null)
+                {
+                    var nmRelId = presentationPart.GetIdOfPart(nmPart);
+                    var nmIdLst = new NotesMasterIdList(
+                        new NotesMasterId { Id = nmRelId });
+                    // Insert after sldMasterIdLst if present, else prepend.
+                    var sldMasterIdLst = pres.SlideMasterIdList;
+                    if (sldMasterIdLst != null)
+                        pres.InsertAfter(nmIdLst, sldMasterIdLst);
+                    else
+                        pres.PrependChild(nmIdLst);
+                }
             }
             rootElement = nmPart.NotesMaster!;
         }
@@ -524,17 +548,71 @@ public partial class PowerPointHandler : IDocumentHandler
             );
             newPart.SlideMaster.Save();
 
-            // Every SlideMasterPart must reference a ThemePart. The replay's
-            // raw-set replaces only the master XML, not the package
-            // relationships — without a theme link here the package fails
-            // validation. Share the presentation's primary theme; a richer
-            // multi-theme deck can later raw-set its own theme parts.
-            if (presentationPart.ThemePart != null)
-                newPart.AddPart(presentationPart.ThemePart);
+            // Every SlideMasterPart must reference a ThemePart. Give each grown
+            // master its OWN distinct (placeholder) theme part rather than sharing
+            // the presentation's primary theme: `add-part theme` overwrites it
+            // with the source's per-master theme content, and a later
+            // delete-of-its-own-theme must not orphan a theme another master
+            // shares. Seed minimal valid theme content (replaced on replay when
+            // the deck carries per-master themes).
+            var grownTheme = newPart.AddNewPart<ThemePart>();
+            if (presentationPart.ThemePart?.Theme != null)
+                grownTheme.Theme = (DocumentFormat.OpenXml.Drawing.Theme)presentationPart.ThemePart.Theme.CloneNode(true);
+            else
+                grownTheme.Theme = new DocumentFormat.OpenXml.Drawing.Theme();
+            grownTheme.Theme.Save();
 
             sldMasterIdLst.AppendChild(new SlideMasterId { Id = nextId++, RelationshipId = rId });
         }
         presentation.Save();
+    }
+
+    // PowerPoint requires every <p:sldMasterId>/@id AND every
+    // <p:sldLayoutId>/@id (across all masters) to be unique within one shared
+    // id space — PowerPoint's own decks number them as a single monotonic run
+    // (master=N, its layouts=N+1.., next master continues after the last
+    // layout). The SDK and our GrowSlideMasterParts pick master ids starting at
+    // 2147483648 while only avoiding existing *master* ids, so a grown master
+    // can land on a value a source master's sldLayoutIdLst already uses
+    // (e.g. master2 id 2147483649 == master1 layout1 id 2147483649). The SDK
+    // schema-validates this duplicate fine, but PowerPoint rejects the package
+    // with 0x80070570 ("file or directory corrupted"). Reconcile at save: keep
+    // layout ids fixed (slides never reference them), reassign only colliding
+    // master ids to fresh unused values. Runs once per save cycle, after every
+    // raw-set has landed the masters' real sldLayoutIdLst.
+    private void ReconcileSlideMasterIds()
+    {
+        var presentation = _doc.PresentationPart?.Presentation;
+        var sldMasterIdLst = presentation?.SlideMasterIdList;
+        if (presentation == null || sldMasterIdLst == null) return;
+
+        // Collect every layout id (these stay put) plus seed with the values
+        // we will keep for masters as we walk them.
+        var used = new HashSet<uint>();
+        foreach (var mp in _doc.PresentationPart!.SlideMasterParts)
+        {
+            var layoutIds = mp.SlideMaster?.SlideLayoutIdList?.Elements<SlideLayoutId>();
+            if (layoutIds == null) continue;
+            foreach (var lid in layoutIds)
+                if (lid.Id?.Value is uint v) used.Add(v);
+        }
+
+        bool changed = false;
+        foreach (var smId in sldMasterIdLst.Elements<SlideMasterId>())
+        {
+            uint id = smId.Id?.Value ?? 2147483648u;
+            if (used.Contains(id))
+            {
+                uint repl = 2147483648u;
+                while (used.Contains(repl)) repl++;
+                smId.Id = repl;
+                id = repl;
+                changed = true;
+            }
+            used.Add(id);
+        }
+
+        if (changed) presentation.Save();
     }
 
     public (string RelId, string PartPath) AddPart(string parentPartPath, string partType, Dictionary<string, string>? properties = null)
@@ -600,6 +678,23 @@ public partial class PowerPointHandler : IDocumentHandler
                 string? colorsRid   = properties != null && properties.TryGetValue("colors", out var cv) ? cv : null;
                 string? qsRid       = properties != null && properties.TryGetValue("quickStyle", out var qv) ? qv : null;
 
+                // Inline diagram part content. The dump emitter carries each
+                // sub-part's verbatim XML here so add-part writes it directly
+                // into the freshly-created part. This supersedes the legacy
+                // "create seed + separate raw-set replace" flow: the SDK
+                // allocates the diagram parts under /ppt/graphics/dataN.xml
+                // (its own naming base, N incrementing package-globally),
+                // NOT the source's /ppt/diagrams/data1.xml, so a raw-set
+                // pre-targeted at the source URI never resolved (FindPartByZipUri
+                // miss) and the parts persisted EMPTY → blank/broken SmartArt.
+                // Writing content at creation time is URI-agnostic and robust.
+                string? dataXml     = properties != null && properties.TryGetValue("dataXml", out var dxv) ? dxv : null;
+                string? layoutXml   = properties != null && properties.TryGetValue("layoutXml", out var lxv) ? lxv : null;
+                string? colorsXml   = properties != null && properties.TryGetValue("colorsXml", out var cxv) ? cxv : null;
+                string? qsXml       = properties != null && properties.TryGetValue("quickStyleXml", out var qxv) ? qxv : null;
+                string? drawingXml  = properties != null && properties.TryGetValue("drawingXml", out var drxv) ? drxv : null;
+                string? drawingRelId = properties != null && properties.TryGetValue("drawingRelId", out var drrv) ? drrv : null;
+
                 DiagramDataPart   dataPart   = !string.IsNullOrEmpty(dataRid)
                     ? saSlidePart.AddNewPart<DiagramDataPart>(dataRid)
                     : saSlidePart.AddNewPart<DiagramDataPart>();
@@ -613,17 +708,47 @@ public partial class PowerPointHandler : IDocumentHandler
                     ? saSlidePart.AddNewPart<DiagramStylePart>(qsRid)
                     : saSlidePart.AddNewPart<DiagramStylePart>();
 
-                // Minimal typed roots — raw-set replace immediately overwrites.
-                dataPart.DataModelRoot = new DocumentFormat.OpenXml.Drawing.Diagrams.DataModelRoot(
-                    new DocumentFormat.OpenXml.Drawing.Diagrams.PointList(),
-                    new DocumentFormat.OpenXml.Drawing.Diagrams.ConnectionList());
-                dataPart.DataModelRoot.Save(dataPart);
-                layoutPart.LayoutDefinition = new DocumentFormat.OpenXml.Drawing.Diagrams.LayoutDefinition();
-                layoutPart.LayoutDefinition.Save(layoutPart);
-                colorsPart.ColorsDefinition = new DocumentFormat.OpenXml.Drawing.Diagrams.ColorsDefinition();
-                colorsPart.ColorsDefinition.Save(colorsPart);
-                stylePart.StyleDefinition = new DocumentFormat.OpenXml.Drawing.Diagrams.StyleDefinition();
-                stylePart.StyleDefinition.Save(stylePart);
+                // Write the real content when supplied; else seed a minimal
+                // typed root (keeps direct CLI `add-part smartart` usable).
+                WriteDiagramPartXml(dataPart, dataXml, () =>
+                    new DocumentFormat.OpenXml.Drawing.Diagrams.DataModelRoot(
+                        new DocumentFormat.OpenXml.Drawing.Diagrams.PointList(),
+                        new DocumentFormat.OpenXml.Drawing.Diagrams.ConnectionList()));
+                // Pictures embedded in the diagram are referenced from the data
+                // part's own .rels; re-attach them with pinned rIds.
+                AttachDiagramImages(dataPart, properties, "dataImage");
+                // External hyperlinks on diagram nodes (<a:hlinkClick r:id>) live
+                // on the data part's own .rels; re-add with pinned rIds.
+                AttachDiagramHyperlinks(dataPart, properties, "dataHlink");
+                WriteDiagramPartXml(layoutPart, layoutXml,
+                    () => new DocumentFormat.OpenXml.Drawing.Diagrams.LayoutDefinition());
+                WriteDiagramPartXml(colorsPart, colorsXml,
+                    () => new DocumentFormat.OpenXml.Drawing.Diagrams.ColorsDefinition());
+                WriteDiagramPartXml(stylePart, qsXml,
+                    () => new DocumentFormat.OpenXml.Drawing.Diagrams.StyleDefinition());
+
+                // The DSP cached-drawing part is referenced from the data XML
+                // via <dsp:dataModelExt relId="...">. That relId resolves
+                // against the SLIDE part's relationships (the drawing part is
+                // a slide-level part of type .../2007/relationships/diagramDrawing,
+                // sibling to the data/layout/colors/qs rels — NOT a child of
+                // the data part). Create it on saSlidePart with the pinned
+                // relId so the reference resolves; otherwise PowerPoint
+                // refuses the file (0x80070570).
+                if (!string.IsNullOrEmpty(drawingXml) && !string.IsNullOrEmpty(drawingRelId))
+                {
+                    var drawingPart = saSlidePart.AddNewPart<DiagramPersistLayoutPart>(
+                        "application/vnd.ms-office.drawingml.diagramDrawing+xml", drawingRelId);
+                    // drawingXml is always present on this branch; the seed
+                    // fallback is unreachable here but supplied for the typed
+                    // signature.
+                    WriteDiagramPartXml(drawingPart, drawingXml,
+                        () => new DocumentFormat.OpenXml.Drawing.Diagrams.DataModelRoot());
+                    // The DSP cached drawing re-references the same pictures for
+                    // rendering via its own .rels; re-attach with pinned rIds.
+                    AttachDiagramImages(drawingPart, properties, "drawingImage");
+                    AttachDiagramHyperlinks(drawingPart, properties, "drawingHlink");
+                }
 
                 // Encode all four rIds in the RelId field — callers (batch
                 // emit / replay) need to know each part's id to write the
@@ -796,7 +921,7 @@ public partial class PowerPointHandler : IDocumentHandler
                     thumbType = thumbCT switch {
                         "image/png" => ImagePartType.Png, "image/jpeg" => ImagePartType.Jpeg,
                         "image/gif" => ImagePartType.Gif, "image/bmp" => ImagePartType.Bmp,
-                        "image/tiff" => ImagePartType.Tiff, _ => ImagePartType.Png };
+                        "image/tiff" or "image/tif" => ImagePartType.Tiff, _ => ImagePartType.Png };
                 }
                 else
                 {
@@ -909,7 +1034,7 @@ public partial class PowerPointHandler : IDocumentHandler
                     m3dThumbType = m3dThumbCT switch {
                         "image/png" => ImagePartType.Png, "image/jpeg" => ImagePartType.Jpeg,
                         "image/gif" => ImagePartType.Gif, "image/bmp" => ImagePartType.Bmp,
-                        "image/tiff" => ImagePartType.Tiff, _ => ImagePartType.Png };
+                        "image/tiff" or "image/tif" => ImagePartType.Tiff, _ => ImagePartType.Png };
                 }
                 else
                 {
@@ -1057,7 +1182,7 @@ public partial class PowerPointHandler : IDocumentHandler
                     oleThumbType = oleThumbCT switch {
                         "image/png" => ImagePartType.Png, "image/jpeg" => ImagePartType.Jpeg,
                         "image/gif" => ImagePartType.Gif, "image/bmp" => ImagePartType.Bmp,
-                        "image/tiff" => ImagePartType.Tiff,
+                        "image/tiff" or "image/tif" => ImagePartType.Tiff,
                         "image/x-emf" => ImagePartType.Emf, "image/x-wmf" => ImagePartType.Wmf,
                         _ => ImagePartType.Png };
                 }
@@ -1104,6 +1229,13 @@ public partial class PowerPointHandler : IDocumentHandler
                     "/" => presentationPart,
                     "/notesMaster" => (OpenXmlPart?)presentationPart.NotesMasterPart
                         ?? throw new ArgumentException("add-part image /notesMaster: no notes master in deck"),
+                    // A theme's <a:fmtScheme>/<a:fillStyleLst>/<a:blipFill> can
+                    // reference a texture image via r:embed; the raw-set'd theme
+                    // XML carries that reference but the ImagePart lives in the
+                    // theme's own .rels, enumerated separately. Without carrying
+                    // it the rId dangles and PowerPoint refuses to open the deck.
+                    "/theme" => (OpenXmlPart?)presentationPart.ThemePart
+                        ?? throw new ArgumentException("add-part image /theme: presentation has no theme part"),
                     _ => null!,
                 };
                 if (imageHost == null)
@@ -1199,12 +1331,49 @@ public partial class PowerPointHandler : IDocumentHandler
                     "image/jpg" => ImagePartType.Jpeg,
                     "image/gif" => ImagePartType.Gif,
                     "image/bmp" => ImagePartType.Bmp,
-                    "image/tiff" => ImagePartType.Tiff,
+                    "image/tiff" or "image/tif" => ImagePartType.Tiff,
                     "image/x-emf" => ImagePartType.Emf,
                     "image/x-wmf" => ImagePartType.Wmf,
                     _ => ImagePartType.Png,
                 };
                 string? pinnedImgRid = properties.TryGetValue("rid", out var prid) && !string.IsNullOrEmpty(prid) ? prid : null;
+                // rId-collision guard. The blank scaffold ships a fixed set of
+                // slideLayout relationships on its master (rId1..rId5). A source
+                // master whose own bg-image relationship numerically lands inside
+                // that range (e.g. rId5 = master bg image, but the scaffold already
+                // wired rId5 = slideLayout5) cannot pin its source rId: AddImagePart
+                // with an occupied id throws, and even if it didn't, the master XML
+                // raw-set's <p:bg> r:embed="rId5" would resolve to a slideLayout
+                // (broken-link background → blank slide). Free the pinned id first
+                // by re-homing the colliding scaffold relationship onto a fresh id.
+                // For a scaffold-leftover SlideLayoutPart we additionally patch the
+                // master's sldLayoutIdLst entry so the re-homed layout stays
+                // referenced (mirrors GrowSlideLayoutParts' own collision fallback).
+                if (!string.IsNullOrEmpty(pinnedImgRid) && imageHost is OpenXmlPartContainer collHost)
+                {
+                    var occupant = collHost.Parts.FirstOrDefault(p => p.RelationshipId == pinnedImgRid);
+                    if (occupant.OpenXmlPart != null)
+                    {
+                        // Re-home the colliding scaffold relationship onto a fresh,
+                        // collision-free id so the pinned id is free for the image.
+                        var newRid = "Rimg" + Guid.NewGuid().ToString("N").Substring(0, 12);
+                        collHost.ChangeIdOfPart(occupant.OpenXmlPart, newRid);
+                        // If a master's sldLayoutIdLst still points at the old id,
+                        // repoint it so the re-homed layout remains declared.
+                        if (collHost is SlideMasterPart smHost && smHost.SlideMaster?.SlideLayoutIdList != null)
+                        {
+                            foreach (var lid in smHost.SlideMaster.SlideLayoutIdList.Elements<SlideLayoutId>())
+                            {
+                                if (lid.RelationshipId?.Value == pinnedImgRid)
+                                {
+                                    lid.RelationshipId = newRid;
+                                    smHost.SlideMaster.Save();
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
                 ImagePart imgPart = imageHost switch
                 {
                     SlidePart sp           => !string.IsNullOrEmpty(pinnedImgRid) ? sp.AddImagePart(imgPartType, pinnedImgRid) : sp.AddImagePart(imgPartType),
@@ -1212,6 +1381,7 @@ public partial class PowerPointHandler : IDocumentHandler
                     SlideLayoutPart sllp   => !string.IsNullOrEmpty(pinnedImgRid) ? sllp.AddImagePart(imgPartType, pinnedImgRid) : sllp.AddImagePart(imgPartType),
                     NotesMasterPart nmp    => !string.IsNullOrEmpty(pinnedImgRid) ? nmp.AddImagePart(imgPartType, pinnedImgRid) : nmp.AddImagePart(imgPartType),
                     NotesSlidePart nsp     => !string.IsNullOrEmpty(pinnedImgRid) ? nsp.AddImagePart(imgPartType, pinnedImgRid) : nsp.AddImagePart(imgPartType),
+                    ThemePart tp           => !string.IsNullOrEmpty(pinnedImgRid) ? tp.AddImagePart(imgPartType, pinnedImgRid) : tp.AddImagePart(imgPartType),
                     _ => throw new ArgumentException($"add-part image: unsupported host part type {imageHost.GetType().Name}"),
                 };
                 using (var imgStream = new MemoryStream(imgBytes))
@@ -1219,9 +1389,503 @@ public partial class PowerPointHandler : IDocumentHandler
                 var imgActualRid = imageHost.GetIdOfPart(imgPart);
                 return (imgActualRid, parentPartPath);
 
+            case "hyperlink":
+            {
+                // Re-create an EXTERNAL hyperlink relationship on a host part with
+                // a pinned relationship id. Layouts/masters are emitted via raw-set
+                // (wholesale XML carrying <a:hlinkClick r:id="rIdN">), but the
+                // referenced external relationship is not an embedded part, so the
+                // ImagePart carrier path never re-created it — the renumbered
+                // rebuilt layout's .rels lost rIdN and PowerPoint rejected the file
+                // ("rIdN referenced by hlinkClick does not exist"). Pinning the id
+                // here makes the raw-set'd r:id="rIdN" resolve again. The host path
+                // is the SOURCE-index /slideLayout[N] (or master/slide); on replay
+                // GrowSlideLayoutParts maps it to the renumbered part, so the rel
+                // lands on the same part the raw-set replaces.
+                if (properties == null
+                    || !properties.TryGetValue("target", out var hlTarget) || string.IsNullOrEmpty(hlTarget))
+                    throw new ArgumentException("add-part hyperlink requires property 'target' (the external URI)");
+                if (!properties.TryGetValue("rid", out var hlRid) || string.IsNullOrEmpty(hlRid))
+                    throw new ArgumentException("add-part hyperlink requires property 'rid' (the relationship id to pin)");
+
+                OpenXmlPartContainer hlHost;
+                var hlSmMatch = Regex.Match(parentPartPath, @"^/slideMaster\[(\d+)\]$");
+                var hlSlMatch = hlSmMatch.Success ? null : Regex.Match(parentPartPath, @"^/slideLayout\[(\d+)\]$");
+                var hlSldMatch = (hlSmMatch.Success || (hlSlMatch?.Success ?? false))
+                    ? null : Regex.Match(parentPartPath, @"^/slide\[(\d+)\]$");
+                var hlNsMatch = (hlSmMatch.Success || (hlSlMatch?.Success ?? false) || (hlSldMatch?.Success ?? false))
+                    ? null : Regex.Match(parentPartPath, @"^/noteSlide\[(\d+)\]$");
+                if (hlSmMatch.Success)
+                {
+                    var i = int.Parse(hlSmMatch.Groups[1].Value);
+                    var parts = presentationPart.SlideMasterParts.ToList();
+                    if (i > parts.Count) { GrowSlideMasterParts(i); parts = presentationPart.SlideMasterParts.ToList(); }
+                    if (i < 1 || i > parts.Count) throw new ArgumentException($"slideMaster index {i} out of range");
+                    hlHost = parts[i - 1];
+                }
+                else if (hlSlMatch != null && hlSlMatch.Success)
+                {
+                    var i = int.Parse(hlSlMatch.Groups[1].Value);
+                    var parts = presentationPart.SlideMasterParts.SelectMany(m => m.SlideLayoutParts).ToList();
+                    if (i > parts.Count) { GrowSlideLayoutParts(i); parts = presentationPart.SlideMasterParts.SelectMany(m => m.SlideLayoutParts).ToList(); }
+                    if (i < 1 || i > parts.Count) throw new ArgumentException($"slideLayout index {i} out of range");
+                    hlHost = parts[i - 1];
+                }
+                else if (hlSldMatch != null && hlSldMatch.Success)
+                {
+                    var i = int.Parse(hlSldMatch.Groups[1].Value);
+                    var parts = GetSlideParts().ToList();
+                    if (i < 1 || i > parts.Count) throw new ArgumentException($"slide index {i} out of range");
+                    hlHost = parts[i - 1];
+                }
+                else if (hlNsMatch != null && hlNsMatch.Success)
+                {
+                    // CONSISTENCY(notes-image-host): mirror the add-part image
+                    // /noteSlide[N] path — EmitNotes lands the typed `add notes`
+                    // row first, but on a blank target with no prior notes the
+                    // NotesSlidePart is still absent; create it on demand so the
+                    // external hyperlink relationship has a host to attach to.
+                    var i = int.Parse(hlNsMatch.Groups[1].Value);
+                    var parts = GetSlideParts().ToList();
+                    if (i < 1 || i > parts.Count) throw new ArgumentException($"noteSlide index {i} out of range");
+                    var hostSlide = parts[i - 1];
+                    hlHost = hostSlide.NotesSlidePart ?? hostSlide.AddNewPart<NotesSlidePart>();
+                }
+                else
+                    throw new ArgumentException(
+                        "add-part hyperlink: parent must be /slideLayout[N], /slideMaster[N], /slide[N], or /noteSlide[N]");
+
+                // Idempotent: if a relationship with this id already exists, don't
+                // re-add (AddHyperlinkRelationship throws on a duplicate id).
+                if (hlHost.HyperlinkRelationships.Any(r => r.Id == hlRid))
+                    return (hlRid, parentPartPath);
+                hlHost.AddHyperlinkRelationship(new Uri(hlTarget, UriKind.RelativeOrAbsolute), isExternal: true, hlRid);
+                return (hlRid, parentPartPath);
+            }
+
+            case "tags":
+            {
+                // Re-create a UserDefinedTags part (programmability metadata,
+                // <p:tagLst>) on a host part with a pinned relationship id and the
+                // source tag XML. Layouts/masters are emitted via raw-set (wholesale
+                // XML carrying <p:custDataLst><p:tags r:id="rIdN"/>), but the tags
+                // part lives in the host's own .rels enumerated separately, so the
+                // ImagePart/hyperlink carriers never re-created it — the renumbered
+                // rebuilt layout's r:id="rIdN" dangled and PowerPoint rejected the
+                // whole deck (0x80070570 OPC corrupt). Pinning the id here makes the
+                // raw-set'd reference resolve. The host path is the SOURCE-index
+                // /slideLayout[N] (or master); on replay GrowSlideLayoutParts maps
+                // it to the renumbered part, so the tags rel lands on the same part
+                // the raw-set replaces. (mirrors the add-part hyperlink pattern)
+                if (properties == null
+                    || !properties.TryGetValue("data", out var tagXml) || string.IsNullOrEmpty(tagXml))
+                    throw new ArgumentException("add-part tags requires property 'data' (the <p:tagLst> XML)");
+                if (!properties.TryGetValue("rid", out var tagRid) || string.IsNullOrEmpty(tagRid))
+                    throw new ArgumentException("add-part tags requires property 'rid' (the relationship id to pin)");
+
+                OpenXmlPartContainer tagHost;
+                var tgSmMatch = Regex.Match(parentPartPath, @"^/slideMaster\[(\d+)\]$");
+                var tgSlMatch = tgSmMatch.Success ? null : Regex.Match(parentPartPath, @"^/slideLayout\[(\d+)\]$");
+                var tgSldMatch = (tgSmMatch.Success || (tgSlMatch?.Success ?? false))
+                    ? null : Regex.Match(parentPartPath, @"^/slide\[(\d+)\]$");
+                if (tgSmMatch.Success)
+                {
+                    var i = int.Parse(tgSmMatch.Groups[1].Value);
+                    var parts = presentationPart.SlideMasterParts.ToList();
+                    if (i > parts.Count) { GrowSlideMasterParts(i); parts = presentationPart.SlideMasterParts.ToList(); }
+                    if (i < 1 || i > parts.Count) throw new ArgumentException($"slideMaster index {i} out of range");
+                    tagHost = parts[i - 1];
+                }
+                else if (tgSlMatch != null && tgSlMatch.Success)
+                {
+                    var i = int.Parse(tgSlMatch.Groups[1].Value);
+                    var parts = presentationPart.SlideMasterParts.SelectMany(m => m.SlideLayoutParts).ToList();
+                    if (i > parts.Count) { GrowSlideLayoutParts(i); parts = presentationPart.SlideMasterParts.SelectMany(m => m.SlideLayoutParts).ToList(); }
+                    if (i < 1 || i > parts.Count) throw new ArgumentException($"slideLayout index {i} out of range");
+                    tagHost = parts[i - 1];
+                }
+                else if (tgSldMatch != null && tgSldMatch.Success)
+                {
+                    var i = int.Parse(tgSldMatch.Groups[1].Value);
+                    var parts = GetSlideParts().ToList();
+                    if (i < 1 || i > parts.Count) throw new ArgumentException($"slide index {i} out of range");
+                    tagHost = parts[i - 1];
+                }
+                else
+                    throw new ArgumentException(
+                        "add-part tags: parent must be /slideLayout[N], /slideMaster[N], or /slide[N]");
+
+                // The blank scaffold's master ships rId1..rId5 as slideLayout
+                // relationships, so a master/layout <p:tags r:id="rId5"> collides
+                // with a scaffold layout. Re-home the colliding part onto a fresh
+                // id (repointing the master's sldLayoutIdLst) so the pinned tag id
+                // is free — otherwise the tag part would silently not be created
+                // and the raw-set'd r:id dangled. Mirrors the add-part image /
+                // extpart collision path. (A genuine same-rId re-run is a no-op
+                // since AddNewPart would then create a duplicate — but per batch
+                // each tag rId is emitted once.)
+                if (tagHost is OpenXmlPartContainer tagColl)
+                {
+                    var occ = tagColl.Parts.FirstOrDefault(p => p.RelationshipId == tagRid);
+                    if (occ.OpenXmlPart is UserDefinedTagsPart)
+                        return (tagRid, parentPartPath); // already the tag part — idempotent
+                    ReHomeCollidingRel(tagColl, tagRid);
+                }
+                var newTagPart = tagHost switch
+                {
+                    SlidePart sp        => sp.AddNewPart<UserDefinedTagsPart>(tagRid),
+                    SlideLayoutPart slp => slp.AddNewPart<UserDefinedTagsPart>(tagRid),
+                    SlideMasterPart smp => smp.AddNewPart<UserDefinedTagsPart>(tagRid),
+                    _ => throw new ArgumentException($"add-part tags: unsupported host part type {tagHost.GetType().Name}"),
+                };
+                using (var sw = new StreamWriter(newTagPart.GetStream(FileMode.Create, FileAccess.Write), new System.Text.UTF8Encoding(false)))
+                    sw.Write(tagXml);
+                return (tagHost.GetIdOfPart(newTagPart), parentPartPath);
+            }
+
+            case "sliderel":
+            {
+                // Pin an internal slide-jump relationship (type .../slide) so a
+                // raw-carried <a:hlinkClick r:id="rIdN" action="…hlinksldjump">
+                // (e.g. inside a table cell's txBodyRaw) resolves to the rebuilt
+                // target slide. Must replay AFTER every slide exists — the
+                // emitter defers it. Props: rid (pinned), target (1-based ordinal
+                // of the target slide).
+                if (properties == null
+                    || !properties.TryGetValue("rid", out var srRid) || string.IsNullOrEmpty(srRid))
+                    throw new ArgumentException("add-part sliderel requires property 'rid'");
+                if (!properties.TryGetValue("target", out var srTgt)
+                    || !int.TryParse(srTgt, out var srTgtOrd))
+                    throw new ArgumentException("add-part sliderel requires property 'target' (1-based slide ordinal)");
+                var srMatch = Regex.Match(parentPartPath, @"^/slide\[(\d+)\]$");
+                if (!srMatch.Success)
+                    throw new ArgumentException("add-part sliderel: parent must be /slide[N]");
+                var srParts = GetSlideParts().ToList();
+                var srHostIdx = int.Parse(srMatch.Groups[1].Value);
+                if (srHostIdx < 1 || srHostIdx > srParts.Count)
+                    throw new ArgumentException($"slide index {srHostIdx} out of range");
+                if (srTgtOrd < 1 || srTgtOrd > srParts.Count)
+                    throw new ArgumentException($"sliderel target ordinal {srTgtOrd} out of range (total {srParts.Count})");
+                var srHost = srParts[srHostIdx - 1];
+                // Idempotent: skip if the rId is already wired.
+                if (srHost.Parts.Any(p => p.RelationshipId == srRid)
+                    || srHost.ExternalRelationships.Any(r => r.Id == srRid))
+                    return (srRid, parentPartPath);
+                srHost.AddPart(srParts[srTgtOrd - 1], srRid);
+                return (srRid, parentPartPath);
+            }
+
+            case "extpart":
+            {
+                // Re-create an arbitrary binary part with a CUSTOM relationship
+                // type + pinned relationship id. Used to carry a picture's blip
+                // companion parts — the HD Photo backup layer (.wdp, rel type
+                // .../hdphoto) and SVG companion — that the typed `add picture`
+                // path doesn't reproduce. The blip's extLst is re-appended
+                // verbatim (passthrough), keeping <... r:embed="rIdN">, so the
+                // companion part must exist with the SAME rId or the rebuilt
+                // picture carries a dangling relationship (lost effects layer;
+                // strict consumers reject the package). Mirrors add-part image
+                // but preserves the source relationship type via AddExtendedPart.
+                if (properties == null
+                    || !properties.TryGetValue("data", out var epB64) || string.IsNullOrEmpty(epB64))
+                    throw new ArgumentException("add-part extpart requires property 'data' (base64 binary)");
+                if (!properties.TryGetValue("rid", out var epRid) || string.IsNullOrEmpty(epRid))
+                    throw new ArgumentException("add-part extpart requires property 'rid'");
+                if (!properties.TryGetValue("rel-type", out var epRelType) || string.IsNullOrEmpty(epRelType))
+                    throw new ArgumentException("add-part extpart requires property 'rel-type' (the relationship type URI)");
+                var epContentType = properties.TryGetValue("content-type", out var epct) && !string.IsNullOrEmpty(epct)
+                    ? epct : "application/octet-stream";
+                var epExt = properties.TryGetValue("ext", out var epe) && !string.IsNullOrEmpty(epe) ? epe : ".bin";
+                byte[] epBytes;
+                try { epBytes = Convert.FromBase64String(epB64); }
+                catch (FormatException) { throw new ArgumentException("add-part extpart: 'data' is not valid base64"); }
+
+                OpenXmlPartContainer epHost;
+                // Presentation-level custom binary part (e.g. Google Slides'
+                // ppt/metadata, reached by <go:slidesCustomData r:id="rIdN"> inside
+                // the presentation extLst). The extLst is replayed via raw-set, so
+                // the part + relationship must be re-pinned on the presentation
+                // part or the r:id dangles and PowerPoint refuses the deck.
+                if (parentPartPath == "/presentation")
+                {
+                    epHost = presentationPart;
+                    if (epHost.ExternalRelationships.Any(r => r.Id == epRid)
+                        || epHost.HyperlinkRelationships.Any(r => r.Id == epRid)
+                        || epHost.Parts.Any(p => p.RelationshipId == epRid))
+                        return (epRid, parentPartPath);
+                    var epPresPart = epHost.AddExtendedPart(epRelType, epContentType, epExt, epRid);
+                    using (var epStream = new MemoryStream(epBytes))
+                        epPresPart.FeedData(epStream);
+                    return (epRid, parentPartPath);
+                }
+                var epSmMatch = Regex.Match(parentPartPath, @"^/slideMaster\[(\d+)\]$");
+                var epSlMatch = epSmMatch.Success ? null : Regex.Match(parentPartPath, @"^/slideLayout\[(\d+)\]$");
+                var epSldMatch = (epSmMatch.Success || (epSlMatch?.Success ?? false))
+                    ? null : Regex.Match(parentPartPath, @"^/slide\[(\d+)\]$");
+                if (epSmMatch.Success)
+                {
+                    var i = int.Parse(epSmMatch.Groups[1].Value);
+                    var ps = presentationPart.SlideMasterParts.ToList();
+                    if (i > ps.Count) { GrowSlideMasterParts(i); ps = presentationPart.SlideMasterParts.ToList(); }
+                    if (i < 1 || i > ps.Count) throw new ArgumentException($"slideMaster index {i} out of range");
+                    epHost = ps[i - 1];
+                }
+                else if (epSlMatch != null && epSlMatch.Success)
+                {
+                    var i = int.Parse(epSlMatch.Groups[1].Value);
+                    var ps = presentationPart.SlideMasterParts.SelectMany(mm => mm.SlideLayoutParts).ToList();
+                    if (i > ps.Count) { GrowSlideLayoutParts(i); ps = presentationPart.SlideMasterParts.SelectMany(mm => mm.SlideLayoutParts).ToList(); }
+                    if (i < 1 || i > ps.Count) throw new ArgumentException($"slideLayout index {i} out of range");
+                    epHost = ps[i - 1];
+                }
+                else if (epSldMatch != null && epSldMatch.Success)
+                {
+                    var i = int.Parse(epSldMatch.Groups[1].Value);
+                    var ps = GetSlideParts().ToList();
+                    if (i < 1 || i > ps.Count) throw new ArgumentException($"slide index {i} out of range");
+                    epHost = ps[i - 1];
+                }
+                else
+                    throw new ArgumentException(
+                        "add-part extpart: parent must be /presentation, /slide[N], /slideLayout[N], or /slideMaster[N]");
+
+                // External/hyperlink-rel collision: keep the idempotent skip (can't
+                // re-home a non-part relationship). Part collision (scaffold layout
+                // rel occupying rId3..rId5 on the master): re-home it so the pinned
+                // id is free — otherwise the extpart silently skips and the hdphoto
+                // r:embed dangles. Mirrors the add-part image collision path.
+                if (epHost.ExternalRelationships.Any(r => r.Id == epRid)
+                    || epHost.HyperlinkRelationships.Any(r => r.Id == epRid))
+                    return (epRid, parentPartPath);
+                ReHomeCollidingRel(epHost, epRid);
+                var epPart = epHost.AddExtendedPart(epRelType, epContentType, epExt, epRid);
+                using (var epStream = new MemoryStream(epBytes))
+                    epPart.FeedData(epStream);
+                return (epRid, parentPartPath);
+            }
+
+            case "extrel":
+            {
+                // Re-create an EXTERNAL relationship (TargetMode=External) with a
+                // pinned id and a specified relationship type — used to carry a
+                // master/layout picture's external image link (<a:blip r:link>),
+                // which the embedded-ImagePart carrier doesn't cover. Props:
+                // rid, rel-type, target (the external URI).
+                if (properties == null
+                    || !properties.TryGetValue("rid", out var erRid) || string.IsNullOrEmpty(erRid))
+                    throw new ArgumentException("add-part extrel requires property 'rid'");
+                if (!properties.TryGetValue("rel-type", out var erType) || string.IsNullOrEmpty(erType))
+                    throw new ArgumentException("add-part extrel requires property 'rel-type'");
+                if (!properties.TryGetValue("target", out var erTarget) || string.IsNullOrEmpty(erTarget))
+                    throw new ArgumentException("add-part extrel requires property 'target'");
+                OpenXmlPartContainer erHost;
+                var erSm = Regex.Match(parentPartPath, @"^/slideMaster\[(\d+)\]$");
+                var erSl = erSm.Success ? null : Regex.Match(parentPartPath, @"^/slideLayout\[(\d+)\]$");
+                if (erSm.Success)
+                {
+                    var i = int.Parse(erSm.Groups[1].Value);
+                    var ps = presentationPart.SlideMasterParts.ToList();
+                    if (i > ps.Count) { GrowSlideMasterParts(i); ps = presentationPart.SlideMasterParts.ToList(); }
+                    if (i < 1 || i > ps.Count) throw new ArgumentException($"slideMaster index {i} out of range");
+                    erHost = ps[i - 1];
+                }
+                else if (erSl != null && erSl.Success)
+                {
+                    var i = int.Parse(erSl.Groups[1].Value);
+                    var ps = presentationPart.SlideMasterParts.SelectMany(mm => mm.SlideLayoutParts).ToList();
+                    if (i > ps.Count) { GrowSlideLayoutParts(i); ps = presentationPart.SlideMasterParts.SelectMany(mm => mm.SlideLayoutParts).ToList(); }
+                    if (i < 1 || i > ps.Count) throw new ArgumentException($"slideLayout index {i} out of range");
+                    erHost = ps[i - 1];
+                }
+                else
+                    throw new ArgumentException("add-part extrel: parent must be /slideMaster[N] or /slideLayout[N]");
+                // Idempotent.
+                if (erHost.ExternalRelationships.Any(r => r.Id == erRid)
+                    || erHost.Parts.Any(p => p.RelationshipId == erRid))
+                    return (erRid, parentPartPath);
+                erHost.AddExternalRelationship(erType, new Uri(erTarget, UriKind.RelativeOrAbsolute), erRid);
+                return (erRid, parentPartPath);
+            }
+
+            case "theme":
+            {
+                // Attach a DISTINCT theme part to a slideMaster / notesMaster with
+                // a pinned relationship id and the source theme XML. Multi-master
+                // decks give each master its own theme; the blank scaffold +
+                // GrowSlideMasterParts share the presentation's primary theme,
+                // which loses theme2/theme3 content and (worse) makes masters
+                // reference the wrong / a shared theme — PowerPoint refuses such a
+                // deck. This re-creates each master's own theme so the package
+                // matches the source's 1:1 master:theme topology.
+                if (properties == null
+                    || !properties.TryGetValue("data", out var themeXml) || string.IsNullOrEmpty(themeXml))
+                    throw new ArgumentException("add-part theme requires property 'data' (the theme XML)");
+                // The theme is a part relationship of the master, NOT referenced
+                // by r:id anywhere in the master XML body, so the relationship id
+                // need not be pinned — and pinning it risks colliding with the
+                // master's other relationships (images/layouts). Let the SDK
+                // assign a fresh id; only honour an explicit rid when it's free.
+                string? themeRid = properties.TryGetValue("rid", out var trid) && !string.IsNullOrEmpty(trid) ? trid : null;
+
+                OpenXmlPartContainer themeHost;
+                var tmMatch = Regex.Match(parentPartPath, @"^/slideMaster\[(\d+)\]$");
+                if (tmMatch.Success)
+                {
+                    var i = int.Parse(tmMatch.Groups[1].Value);
+                    var parts = presentationPart.SlideMasterParts.ToList();
+                    if (i > parts.Count) { GrowSlideMasterParts(i); parts = presentationPart.SlideMasterParts.ToList(); }
+                    if (i < 1 || i > parts.Count) throw new ArgumentException($"slideMaster index {i} out of range");
+                    themeHost = parts[i - 1];
+                }
+                else if (parentPartPath == "/notesMaster")
+                {
+                    themeHost = presentationPart.NotesMasterPart
+                        ?? throw new ArgumentException("add-part theme: notesMaster part does not exist yet");
+                }
+                else
+                    throw new ArgumentException(
+                        "add-part theme: parent must be /slideMaster[N] or /notesMaster");
+
+                // Remove any existing (shared/placeholder) theme part on this host
+                // so it gets its OWN distinct part rather than pointing at the
+                // primary theme. Then add a fresh ThemePart with the pinned rId.
+                var existingTheme = themeHost switch
+                {
+                    SlideMasterPart smp => (ThemePart?)smp.ThemePart,
+                    NotesMasterPart nmp => nmp.ThemePart,
+                    _ => null,
+                };
+                if (existingTheme != null)
+                    themeHost.DeletePart(existingTheme);
+
+                // Only pin the rId if it's not already taken by another rel on the
+                // host (after deleting the old theme). Otherwise auto-assign.
+                bool ridFree = !string.IsNullOrEmpty(themeRid)
+                    && !themeHost.Parts.Any(p => p.RelationshipId == themeRid)
+                    && !themeHost.ExternalRelationships.Any(r => r.Id == themeRid)
+                    && !themeHost.HyperlinkRelationships.Any(r => r.Id == themeRid);
+                ThemePart newTheme = themeHost switch
+                {
+                    SlideMasterPart smp => ridFree ? smp.AddNewPart<ThemePart>(themeRid!) : smp.AddNewPart<ThemePart>(),
+                    NotesMasterPart nmp => ridFree ? nmp.AddNewPart<ThemePart>(themeRid!) : nmp.AddNewPart<ThemePart>(),
+                    _ => throw new ArgumentException($"add-part theme: unsupported host {themeHost.GetType().Name}"),
+                };
+                using (var ts = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(themeXml)))
+                    newTheme.FeedData(ts);
+                // Re-attach texture images the theme's fmtScheme references via
+                // <a:blipFill r:embed="rIdN">; without them the verbatim theme XML
+                // dangles. Pinned rIds match the fed theme XML. (Same carrier as
+                // diagram/picture images — flat numbered themeImage{k} props.)
+                AttachDiagramImages(newTheme, properties, "themeImage");
+                var themeActualRid = themeHost.GetIdOfPart(newTheme);
+                return (themeActualRid, parentPartPath);
+            }
+
             default:
                 throw new ArgumentException(
-                    $"Unknown part type: {partType}. Supported: chart, smartart, video, audio, model3d, ole, image");
+                    $"Unknown part type: {partType}. Supported: chart, smartart, video, audio, model3d, ole, image, hyperlink, theme");
+        }
+    }
+
+    // Write verbatim XML into a freshly-created SmartArt diagram sub-part, or
+    // seed a minimal typed root when no content was supplied. Writing the raw
+    // bytes directly (not via the typed root) preserves the source's exact
+    // namespace declarations / extension prefixes that the dump emitter
+    // canonicalised, and — crucially — lands the content regardless of the
+    // SDK's part-naming base (the parts land under /ppt/graphics/, not the
+    // source's /ppt/diagrams/, so a URI-targeted raw-set could not reach them).
+    // Free a pinned relationship id on a host by re-homing whatever part
+    // currently occupies it onto a fresh id. The blank scaffold ships a master
+    // with rId1..rId5 = slideLayouts, so pinning a source image / extended-part
+    // rId that lands in that range collides; without re-homing, an add-part that
+    // idempotent-skips on collision silently fails to create the part and its
+    // r:embed dangles. For a scaffold SlideLayoutPart occupant we also repoint
+    // the master's sldLayoutIdLst entry so the re-homed layout stays declared.
+    // Mirrors the inline re-home in the add-part image case.
+    private static void ReHomeCollidingRel(OpenXmlPartContainer host, string pinnedRid)
+    {
+        if (string.IsNullOrEmpty(pinnedRid)) return;
+        var occupant = host.Parts.FirstOrDefault(p => p.RelationshipId == pinnedRid);
+        if (occupant.OpenXmlPart == null) return;
+        var newRid = "Rreh" + Guid.NewGuid().ToString("N").Substring(0, 12);
+        host.ChangeIdOfPart(occupant.OpenXmlPart, newRid);
+        if (host is SlideMasterPart smHost && smHost.SlideMaster?.SlideLayoutIdList != null)
+        {
+            foreach (var lid in smHost.SlideMaster.SlideLayoutIdList.Elements<SlideLayoutId>())
+            {
+                if (lid.RelationshipId?.Value == pinnedRid)
+                {
+                    lid.RelationshipId = newRid;
+                    smHost.SlideMaster.Save();
+                    break;
+                }
+            }
+        }
+    }
+
+    private static void WriteDiagramPartXml(
+        OpenXmlPart part, string? xml, Func<OpenXmlElement> seedFactory)
+    {
+        if (!string.IsNullOrEmpty(xml))
+        {
+            const string prolog = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\r\n";
+            using var stream = part.GetStream(FileMode.Create, FileAccess.Write);
+            using var writer = new StreamWriter(stream, new System.Text.UTF8Encoding(false));
+            writer.Write(prolog);
+            writer.Write(xml);
+            return;
+        }
+        // Fallback: minimal typed root so direct CLI add-part stays usable.
+        var seed = seedFactory();
+        using var seedStream = part.GetStream(FileMode.Create, FileAccess.Write);
+        using var xw = System.Xml.XmlWriter.Create(seedStream,
+            new System.Xml.XmlWriterSettings { OmitXmlDeclaration = false, Encoding = new System.Text.UTF8Encoding(false) });
+        seed.WriteTo(xw);
+    }
+
+    // Re-attach the pictures a diagram data / drawing part references via its own
+    // .rels. The emitter flattens GetSmartArtsOnSlide's DataImages/DrawingImages
+    // into numbered props ({prefix}{k}.rid/.ct/.data); replay recreates each
+    // ImagePart on the host with the SOURCE rId pinned, so the part XML's
+    // <a:blip r:embed="rIdN"> resolves instead of dangling (which otherwise makes
+    // PowerPoint refuse the deck). No-op when no props with the prefix are present.
+    private static void AttachDiagramImages(OpenXmlPart host, Dictionary<string, string>? properties, string prefix)
+    {
+        if (properties == null) return;
+        for (int k = 0; ; k++)
+        {
+            if (!properties.TryGetValue($"{prefix}{k}.rid", out var rid) || string.IsNullOrEmpty(rid))
+                break;
+            properties.TryGetValue($"{prefix}{k}.ct", out var ct);
+            properties.TryGetValue($"{prefix}{k}.data", out var b64);
+            if (string.IsNullOrEmpty(b64)) continue;
+            if (host.Parts.Any(p => p.RelationshipId == rid)) continue; // idempotent
+            byte[] bytes;
+            try { bytes = Convert.FromBase64String(b64); }
+            catch { continue; }
+            var imgPart = host.AddNewPart<ImagePart>(
+                string.IsNullOrEmpty(ct) ? "image/png" : ct, rid);
+            using var ms = new MemoryStream(bytes);
+            imgPart.FeedData(ms);
+        }
+    }
+
+    // Re-add external hyperlink relationships on a diagram data / drawing part
+    // with pinned rIds, so a diagram node's <a:hlinkClick r:id> resolves on
+    // replay instead of dangling. Numbered keys {prefix}{k}.rid / .target.
+    private static void AttachDiagramHyperlinks(OpenXmlPart host, Dictionary<string, string>? properties, string prefix)
+    {
+        if (properties == null) return;
+        for (int k = 0; ; k++)
+        {
+            if (!properties.TryGetValue($"{prefix}{k}.rid", out var rid) || string.IsNullOrEmpty(rid))
+                break;
+            if (!properties.TryGetValue($"{prefix}{k}.target", out var target) || string.IsNullOrEmpty(target))
+                continue;
+            if (host.HyperlinkRelationships.Any(r => r.Id == rid)) continue; // idempotent
+            try { host.AddHyperlinkRelationship(new Uri(target, UriKind.RelativeOrAbsolute), true, rid); }
+            catch { /* malformed URI — skip rather than abort the whole add */ }
         }
     }
 
@@ -1233,6 +1897,8 @@ public partial class PowerPointHandler : IDocumentHandler
         // out to disk so external readers see the latest bytes immediately.
         if (Modified)
         {
+            try { ReconcileSlideMasterIds(); }
+            catch { /* best-effort id reconcile */ }
             try { OfficeCli.Core.OfficeCliMetadata.StampOnSave(_doc); }
             catch { /* best-effort audit trail */ }
         }
@@ -1249,6 +1915,8 @@ public partial class PowerPointHandler : IDocumentHandler
         // truncate to zero bytes and look like a corrupted zip on reopen.
         if (Modified)
         {
+            try { ReconcileSlideMasterIds(); }
+            catch { /* best-effort id reconcile */ }
             try { OfficeCli.Core.OfficeCliMetadata.StampOnSave(_doc); }
             catch { /* best-effort audit trail */ }
         }
@@ -1295,6 +1963,129 @@ public partial class PowerPointHandler : IDocumentHandler
         return result;
     }
 
+    /// <summary>
+    /// A slide master's own ThemePart: its relationship id (as the master XML's
+    /// package wires it) and the theme XML. Multi-master decks attach a DISTINCT
+    /// theme to each master; the rebuild must re-create each one rather than
+    /// sharing the presentation's primary theme (PowerPoint refuses a deck whose
+    /// masters share or mis-reference themes). Returns null when the master has no
+    /// theme part.
+    /// </summary>
+    internal (string RelId, string ThemeXml)? GetMasterTheme(int masterIdx)
+    {
+        var pp = _doc.PresentationPart;
+        if (pp == null) return null;
+        var masters = pp.SlideMasterParts.ToList();
+        if (masterIdx < 1 || masterIdx > masters.Count) return null;
+        var master = masters[masterIdx - 1];
+        var themePart = master.ThemePart;
+        if (themePart?.Theme == null) return null;
+        return (master.GetIdOfPart(themePart), themePart.Theme.OuterXml);
+    }
+
+    /// <summary>The notes master's own ThemePart (rel id + XML), or null.</summary>
+    internal (string RelId, string ThemeXml)? GetNotesMasterTheme()
+    {
+        var pp = _doc.PresentationPart;
+        var nmp = pp?.NotesMasterPart;
+        var themePart = nmp?.ThemePart;
+        if (nmp == null || themePart?.Theme == null) return null;
+        return (nmp.GetIdOfPart(themePart), themePart.Theme.OuterXml);
+    }
+
+    /// <summary>
+    /// Images attached to a slideMaster's own ThemePart — referenced by an
+    /// <c>&lt;a:fmtScheme&gt;&lt;a:fillStyleLst&gt;&lt;a:blipFill&gt;</c> texture
+    /// fill via r:embed. The theme XML is re-fed verbatim by the add-part theme
+    /// carrier, but its ImageParts live in the theme's own .rels and were never
+    /// re-emitted — the rebuilt theme kept a dangling r:embed. Same shape as
+    /// <see cref="GetThemeImageParts"/> (which covers the presentation's primary
+    /// theme); this covers each master's distinct theme. Empty when none.
+    /// </summary>
+    internal IReadOnlyList<MasterImageInfo> GetMasterThemeImages(int masterIdx)
+    {
+        var pp = _doc.PresentationPart;
+        if (pp == null) return Array.Empty<MasterImageInfo>();
+        var masters = pp.SlideMasterParts.ToList();
+        if (masterIdx < 1 || masterIdx > masters.Count) return Array.Empty<MasterImageInfo>();
+        var themePart = masters[masterIdx - 1].ThemePart;
+        return themePart == null ? Array.Empty<MasterImageInfo>() : ReadImagePartInfos(themePart);
+    }
+
+    /// <summary>Same as <see cref="GetMasterThemeImages"/> for the notes master's theme.</summary>
+    internal IReadOnlyList<MasterImageInfo> GetNotesMasterThemeImages()
+    {
+        var themePart = _doc.PresentationPart?.NotesMasterPart?.ThemePart;
+        return themePart == null ? Array.Empty<MasterImageInfo>() : ReadImagePartInfos(themePart);
+    }
+
+    // Shared: enumerate a part's child ImageParts as (rId, content-type, base64).
+    private static IReadOnlyList<MasterImageInfo> ReadImagePartInfos(OpenXmlPart host)
+    {
+        var result = new List<MasterImageInfo>();
+        foreach (var idp in host.Parts)
+        {
+            if (idp.OpenXmlPart is not ImagePart img) continue;
+            using var s = img.GetStream(FileMode.Open, FileAccess.Read);
+            using var ms = new MemoryStream();
+            s.CopyTo(ms);
+            result.Add(new MasterImageInfo(idp.RelationshipId, img.ContentType, Convert.ToBase64String(ms.ToArray())));
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// 1-based ordinal of a slide's layout within the same
+    /// SlideMasterParts→SlideLayoutParts enumeration that
+    /// <see cref="ResolveSlideLayout"/> indexes (its numeric-index match path)
+    /// and that the raw-set <c>/slideLayout[N]</c> emission walks. Returns null
+    /// when the slide or its layout can't be resolved.
+    ///
+    /// The batch dump emits this as the slide's `layout=` so replay re-binds to
+    /// the EXACT source layout. Emitting the layout NAME is ambiguous: decks
+    /// routinely carry several layouts sharing a name (e.g. two "标题幻灯片"
+    /// under different masters), and ResolveSlideLayout's name match returns the
+    /// first — which can chain the slide to the wrong master and silently drop a
+    /// master-level background. The ordinal is unambiguous and stable because
+    /// replay reconstructs masters/layouts in this same enumeration order.
+    /// </summary>
+    internal int? GetSlideLayoutOrdinal(int slideNum)
+    {
+        var pp = _doc.PresentationPart;
+        if (pp == null) return null;
+        var slideParts = GetSlideParts().ToList();
+        if (slideNum < 1 || slideNum > slideParts.Count) return null;
+        var layoutPart = slideParts[slideNum - 1].SlideLayoutPart;
+        if (layoutPart == null) return null;
+        var allLayouts = pp.SlideMasterParts.SelectMany(m => m.SlideLayoutParts).ToList();
+        var idx = allLayouts.IndexOf(layoutPart);
+        return idx >= 0 ? idx + 1 : null;
+    }
+
+    /// <summary>
+    /// Images attached to the presentation's main ThemePart — referenced by an
+    /// <c>&lt;a:fmtScheme&gt;&lt;a:fillStyleLst&gt;&lt;a:blipFill&gt;</c> texture
+    /// fill via r:embed. The theme XML is raw-set verbatim but its ImageParts are
+    /// enumerated separately; without re-emitting them the embed rId dangles and
+    /// PowerPoint refuses to open the deck. Same shape as
+    /// <see cref="GetMasterImageParts"/>.
+    /// </summary>
+    internal IReadOnlyList<MasterImageInfo> GetThemeImageParts()
+    {
+        var result = new List<MasterImageInfo>();
+        var theme = _doc.PresentationPart?.ThemePart;
+        if (theme == null) return result;
+        foreach (var img in theme.ImageParts)
+        {
+            var rid = theme.GetIdOfPart(img);
+            using var s = img.GetStream();
+            using var ms = new MemoryStream();
+            s.CopyTo(ms);
+            result.Add(new MasterImageInfo(rid, img.ContentType, Convert.ToBase64String(ms.ToArray())));
+        }
+        return result;
+    }
+
     /// <summary>Same as <see cref="GetMasterImageParts"/> for slideLayouts.</summary>
     internal IReadOnlyList<MasterImageInfo> GetLayoutImageParts(int layoutIdx)
     {
@@ -1311,6 +2102,182 @@ public partial class PowerPointHandler : IDocumentHandler
             using var ms = new MemoryStream();
             s.CopyTo(ms);
             result.Add(new MasterImageInfo(rid, img.ContentType, Convert.ToBase64String(ms.ToArray())));
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Non-image binary parts (ExtendedParts) directly attached to a slideMaster
+    /// — chiefly the HD Photo (.wdp) backup layer a master-level decorative
+    /// picture references via <c>&lt;a14:imgLayer r:embed&gt;</c>. The master XML
+    /// is raw-set verbatim (keeping the source rId), and GetMasterImageParts only
+    /// re-creates typed ImageParts, so an hdphoto ExtendedPart was dropped and its
+    /// r:embed dangled. Surfaced as companion infos (rId + rel-type + content-type
+    /// + ext + bytes) so the emitter pins each via add-part extpart, preserving
+    /// the original relationship type. Empty when the master has no such parts.
+    /// </summary>
+    internal IReadOnlyList<BlipCompanionInfo> GetMasterExtendedParts(int masterIdx)
+    {
+        var pp = _doc.PresentationPart;
+        if (pp == null) return Array.Empty<BlipCompanionInfo>();
+        var masters = pp.SlideMasterParts.ToList();
+        if (masterIdx < 1 || masterIdx > masters.Count) return Array.Empty<BlipCompanionInfo>();
+        return ReadExtendedPartInfos(masters[masterIdx - 1]);
+    }
+
+    /// <summary>
+    /// Custom binary ExtendedParts attached directly to the presentation part —
+    /// e.g. Google Slides' ppt/metadata (rel type
+    /// http://customschemas.google.com/relationships/presentationmetadata),
+    /// referenced by <c>&lt;go:slidesCustomData r:id="rIdN"&gt;</c> inside the
+    /// presentation extLst. EmitPresentationExtras replays the extLst verbatim
+    /// via raw-set, so without re-pinning the part the r:id dangled and
+    /// PowerPoint refused the deck. Surfaced as (rId, relType, contentType, ext,
+    /// base64) so the emitter pins each via <c>add-part extpart</c> on
+    /// <c>/presentation</c>. Same shape as <see cref="GetMasterExtendedParts"/>.
+    /// </summary>
+    internal IReadOnlyList<BlipCompanionInfo> GetPresentationExtendedParts()
+    {
+        var pp = _doc.PresentationPart;
+        if (pp == null) return Array.Empty<BlipCompanionInfo>();
+        return ReadExtendedPartInfos(pp);
+    }
+
+    /// <summary>Same as <see cref="GetMasterExtendedParts"/> for slideLayouts.</summary>
+    internal IReadOnlyList<BlipCompanionInfo> GetLayoutExtendedParts(int layoutIdx)
+    {
+        var pp = _doc.PresentationPart;
+        if (pp == null) return Array.Empty<BlipCompanionInfo>();
+        var layouts = pp.SlideMasterParts.SelectMany(m => m.SlideLayoutParts).ToList();
+        if (layoutIdx < 1 || layoutIdx > layouts.Count) return Array.Empty<BlipCompanionInfo>();
+        return ReadExtendedPartInfos(layouts[layoutIdx - 1]);
+    }
+
+    /// <summary>
+    /// External (TargetMode="External") IMAGE relationships on a slideMaster —
+    /// a master picture can LINK to an external image (<a:blip r:link="rIdN">,
+    /// TargetMode=External) rather than embed it. The master XML is raw-set
+    /// verbatim (keeping r:link="rIdN"), but GetMasterImageParts only re-creates
+    /// embedded ImageParts, so the external relationship was dropped and the
+    /// rebuilt master's r:link dangled. Surfaced as (rId, relationship-type, uri)
+    /// so the emitter pins each via add-part extrel. (The hyperlink carrier
+    /// already covers .../hyperlink external rels; this covers the .../image
+    /// external links.) Empty when the master links no external images.
+    /// </summary>
+    internal IReadOnlyList<(string RelId, string RelType, string Uri)> GetMasterExternalImageLinks(int masterIdx)
+    {
+        var pp = _doc.PresentationPart;
+        if (pp == null) return Array.Empty<(string, string, string)>();
+        var masters = pp.SlideMasterParts.ToList();
+        if (masterIdx < 1 || masterIdx > masters.Count) return Array.Empty<(string, string, string)>();
+        return ReadExternalImageLinks(masters[masterIdx - 1]);
+    }
+
+    /// <summary>Same as <see cref="GetMasterExternalImageLinks"/> for slideLayouts.</summary>
+    internal IReadOnlyList<(string RelId, string RelType, string Uri)> GetLayoutExternalImageLinks(int layoutIdx)
+    {
+        var pp = _doc.PresentationPart;
+        if (pp == null) return Array.Empty<(string, string, string)>();
+        var layouts = pp.SlideMasterParts.SelectMany(m => m.SlideLayoutParts).ToList();
+        if (layoutIdx < 1 || layoutIdx > layouts.Count) return Array.Empty<(string, string, string)>();
+        return ReadExternalImageLinks(layouts[layoutIdx - 1]);
+    }
+
+    private static IReadOnlyList<(string RelId, string RelType, string Uri)> ReadExternalImageLinks(OpenXmlPart host)
+    {
+        var result = new List<(string, string, string)>();
+        foreach (var rel in host.ExternalRelationships)
+        {
+            // Image external links (r:link). Skip hyperlinks (carried separately).
+            if (rel.RelationshipType.EndsWith("/image", StringComparison.Ordinal))
+                result.Add((rel.Id, rel.RelationshipType, rel.Uri.OriginalString));
+        }
+        return result;
+    }
+
+    private static IReadOnlyList<BlipCompanionInfo> ReadExtendedPartInfos(OpenXmlPart host)
+    {
+        var result = new List<BlipCompanionInfo>();
+        foreach (var idp in host.Parts)
+        {
+            if (idp.OpenXmlPart is not ExtendedPart ep) continue;
+            using var s = ep.GetStream(FileMode.Open, FileAccess.Read);
+            using var ms = new MemoryStream();
+            s.CopyTo(ms);
+            var ext = System.IO.Path.GetExtension(ep.Uri.OriginalString);
+            if (string.IsNullOrEmpty(ext)) ext = ".bin";
+            result.Add(new BlipCompanionInfo(
+                idp.RelationshipId, ep.RelationshipType, ep.ContentType, ext,
+                Convert.ToBase64String(ms.ToArray())));
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// External (TargetMode="External") hyperlink relationships on a slideLayout.
+    /// The layout XML is replayed via raw-set carrying <c>&lt;a:hlinkClick r:id="rIdN"/&gt;</c>,
+    /// but the referenced relationship is external (a URL, not an embedded part),
+    /// so the ImagePart carrier never re-creates it — the renumbered rebuilt
+    /// layout's .rels lost rIdN and PowerPoint refused the file. Surfaced as
+    /// (rId, target) pairs so PptxBatchEmitter can emit an `add-part hyperlink`
+    /// row that pins each id before the layout raw-set replace.
+    /// </summary>
+    internal IReadOnlyList<(string RelId, string Target)> GetLayoutExternalHyperlinks(int layoutIdx)
+    {
+        var result = new List<(string, string)>();
+        var pp = _doc.PresentationPart;
+        if (pp == null) return result;
+        var layouts = pp.SlideMasterParts.SelectMany(m => m.SlideLayoutParts).ToList();
+        if (layoutIdx < 1 || layoutIdx > layouts.Count) return result;
+        var layout = layouts[layoutIdx - 1];
+        foreach (var rel in layout.HyperlinkRelationships)
+        {
+            if (rel.IsExternal)
+                result.Add((rel.Id, rel.Uri.OriginalString));
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// UserDefinedTags parts (programmability metadata, <c>&lt;p:tagLst&gt;</c>)
+    /// attached to a slideLayout, surfaced as (rId, verbatim tag XML) pairs.
+    /// The layout XML is replayed via raw-set carrying
+    /// <c>&lt;p:custDataLst&gt;&lt;p:tags r:id="rIdN"/&gt;</c>, but the tags part
+    /// lives in the layout's own .rels (enumerated separately) and was never
+    /// re-emitted — the rebuilt layout's <c>r:id="rIdN"</c> then dangled and
+    /// PowerPoint refused the whole deck (0x80070570 OPC corrupt). Emitting an
+    /// <c>add-part tags</c> row that pins each source rId before the layout
+    /// raw-set replace makes the reference resolve. Same shape as
+    /// <see cref="GetLayoutImageParts"/>.
+    /// </summary>
+    internal IReadOnlyList<(string RelId, string TagXml)> GetLayoutTagParts(int layoutIdx)
+    {
+        var pp = _doc.PresentationPart;
+        if (pp == null) return Array.Empty<(string, string)>();
+        var layouts = pp.SlideMasterParts.SelectMany(m => m.SlideLayoutParts).ToList();
+        if (layoutIdx < 1 || layoutIdx > layouts.Count) return Array.Empty<(string, string)>();
+        return ReadTagParts(layouts[layoutIdx - 1]);
+    }
+
+    /// <summary>Same as <see cref="GetLayoutTagParts"/> for a slideMaster.</summary>
+    internal IReadOnlyList<(string RelId, string TagXml)> GetMasterTagParts(int masterIdx)
+    {
+        var pp = _doc.PresentationPart;
+        if (pp == null) return Array.Empty<(string, string)>();
+        var masters = pp.SlideMasterParts.ToList();
+        if (masterIdx < 1 || masterIdx > masters.Count) return Array.Empty<(string, string)>();
+        return ReadTagParts(masters[masterIdx - 1]);
+    }
+
+    private static IReadOnlyList<(string RelId, string TagXml)> ReadTagParts(OpenXmlPartContainer host)
+    {
+        var result = new List<(string, string)>();
+        foreach (var idp in host.Parts)
+        {
+            if (idp.OpenXmlPart is not UserDefinedTagsPart tagPart) continue;
+            using var s = tagPart.GetStream(FileMode.Open, FileAccess.Read);
+            using var sr = new StreamReader(s);
+            result.Add((idp.RelationshipId, sr.ReadToEnd()));
         }
         return result;
     }
@@ -1343,6 +2310,174 @@ public partial class PowerPointHandler : IDocumentHandler
             result.Add(new MasterImageInfo(rid, img.ContentType, Convert.ToBase64String(ms.ToArray())));
         }
         return result;
+    }
+
+    /// <summary>
+    /// External (TargetMode="External") hyperlink relationships on a slide's
+    /// NotesSlidePart — same shape as <see cref="GetLayoutExternalHyperlinks"/>.
+    /// The notesSlide XML is replayed via raw-set carrying
+    /// <c>&lt;a:hlinkClick r:id="rIdN"/&gt;</c> (a URL in the speaker notes), but
+    /// the external relationship is not an embedded part, so the ImagePart carrier
+    /// never re-creates it — the rebuilt notesSlide's <c>r:id="rIdN"</c> dangled
+    /// and PowerPoint refused the whole deck (OPC corrupt). Surfaced as
+    /// (rId, target) pairs so EmitNotes can pin each id via an
+    /// <c>add-part hyperlink</c> row before the notes raw-set replace.
+    /// </summary>
+    internal IReadOnlyList<(string RelId, string Target)> GetNoteSlideExternalHyperlinks(int slideIdx)
+    {
+        var result = new List<(string, string)>();
+        var pp = _doc.PresentationPart;
+        if (pp == null) return result;
+        var slideParts = GetSlideParts().ToList();
+        if (slideIdx < 1 || slideIdx > slideParts.Count) return result;
+        var notesPart = slideParts[slideIdx - 1].NotesSlidePart;
+        if (notesPart == null) return result;
+        foreach (var rel in notesPart.HyperlinkRelationships)
+        {
+            if (rel.IsExternal)
+                result.Add((rel.Id, rel.Uri.OriginalString));
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// External (TargetMode="External") hyperlink relationships on a slide whose
+    /// relationship id is one of <paramref name="relIds"/>. A table cell (and
+    /// other raw-passthrough content) is replayed via verbatim txBodyRaw that
+    /// keeps <c>&lt;a:hlinkClick r:id="rIdN"&gt;</c> pointing at a URL; the typed
+    /// emit never re-creates that external relationship, so the rebuilt slide
+    /// kept a dangling rId. Surfaced as (rId, target) so the emitter pins each
+    /// via add-part hyperlink. Scoped to the requested rIds (the ones the raw
+    /// body actually references) to avoid re-creating links the typed `link=`
+    /// path already rebuilt. Mirrors <see cref="GetNoteSlideExternalHyperlinks"/>.
+    /// </summary>
+    internal IReadOnlyList<(string RelId, string Target)> GetSlideExternalHyperlinksByRelId(
+        int slideIdx, IReadOnlyCollection<string> relIds)
+    {
+        var result = new List<(string, string)>();
+        if (relIds.Count == 0) return result;
+        var slideParts = GetSlideParts().ToList();
+        if (slideIdx < 1 || slideIdx > slideParts.Count) return result;
+        var slide = slideParts[slideIdx - 1];
+        var wanted = new HashSet<string>(relIds, StringComparer.Ordinal);
+        foreach (var rel in slide.HyperlinkRelationships)
+        {
+            if (rel.IsExternal && wanted.Contains(rel.Id))
+                result.Add((rel.Id, rel.Uri.OriginalString));
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Internal slide-jump relationships on a slide whose id is one of
+    /// <paramref name="relIds"/>: a run's <c>&lt;a:hlinkClick r:id="rIdN"
+    /// action="ppaction://hlinksldjump"&gt;</c> targets ANOTHER slide via a
+    /// relationship of type .../slide. When such a link lives in a table cell's
+    /// verbatim txBodyRaw, the typed slide-jump path (DeferSlideJumpLink →
+    /// link=slide[N]) never fires, so the relationship is not re-created and the
+    /// rebuilt slide's r:id="rIdN" dangles — PowerPoint then refuses the deck
+    /// (0x80070570). Surfaced as (rId, targetSlideOrdinal) — the 1-based ordinal
+    /// of the target slide within <see cref="GetSlideParts"/> — so the emitter can
+    /// pin the rId to the rebuilt target slide AFTER every slide exists.
+    /// </summary>
+    internal IReadOnlyList<(string RelId, int TargetOrdinal)> GetSlideInternalSlideJumpRels(
+        int slideIdx, IReadOnlyCollection<string> relIds)
+    {
+        var result = new List<(string, int)>();
+        if (relIds.Count == 0) return result;
+        var slideParts = GetSlideParts().ToList();
+        if (slideIdx < 1 || slideIdx > slideParts.Count) return result;
+        var slide = slideParts[slideIdx - 1];
+        var wanted = new HashSet<string>(relIds, StringComparer.Ordinal);
+        foreach (var idp in slide.Parts)
+        {
+            if (!wanted.Contains(idp.RelationshipId)) continue;
+            if (idp.OpenXmlPart is SlidePart tgt)
+            {
+                var ord = slideParts.IndexOf(tgt);
+                if (ord >= 0) result.Add((idp.RelationshipId, ord + 1));
+            }
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// ImageParts on a slide whose relationship id is one of <paramref name="relIds"/>.
+    /// Used by PptxBatchEmitter.EmitRawSlideBgSlice so a slide-level
+    /// <c>&lt;p:bg&gt;&lt;p:bgPr&gt;&lt;a:blipFill&gt;&lt;a:blip r:embed="rIdN"&gt;</c>
+    /// (background image) raw-set replays against an ImagePart carrying the
+    /// SAME source rId. The bg slice is emitted verbatim via raw-set, so its
+    /// <c>r:embed="rIdN"</c> only resolves if a matching ImagePart with that
+    /// pinned rId exists on the rebuilt slide. We scope to the bg-referenced
+    /// rIds only — slide pictures already round-trip through the typed
+    /// <c>add picture</c> (fresh rId) path, so re-creating every ImagePart
+    /// here would double-create them. Returns an empty list when the slide
+    /// is out of range or carries none of the requested rIds.
+    /// </summary>
+    internal IReadOnlyList<MasterImageInfo> GetSlideImagePartsByRelId(
+        int slideIdx, IReadOnlyCollection<string> relIds)
+    {
+        var result = new List<MasterImageInfo>();
+        if (relIds.Count == 0) return result;
+        var slideParts = GetSlideParts().ToList();
+        if (slideIdx < 1 || slideIdx > slideParts.Count) return result;
+        var slide = slideParts[slideIdx - 1];
+        var wanted = new HashSet<string>(relIds, StringComparer.Ordinal);
+        foreach (var img in slide.ImageParts)
+        {
+            var rid = slide.GetIdOfPart(img);
+            if (!wanted.Contains(rid)) continue;
+            using var s = img.GetStream();
+            using var ms = new MemoryStream();
+            s.CopyTo(ms);
+            result.Add(new MasterImageInfo(rid, img.ContentType, Convert.ToBase64String(ms.ToArray())));
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Images a slide references from RAW-passthrough text/bullet contexts that
+    /// the typed emit never re-creates: picture-bullet glyphs
+    /// (<c>&lt;a:buBlip&gt;&lt;a:blip&gt;</c>) and image text-fills
+    /// (<c>&lt;a:defRPr&gt;/&lt;a:rPr&gt;/&lt;a:lvlNpPr&gt;…&lt;a:blipFill&gt;&lt;a:blip&gt;</c>,
+    /// where the glyph outlines are filled with an image). Both round-trip
+    /// verbatim via bulletRaw / lstStyleRaw / defRPrRaw keeping <c>r:embed="rIdN"</c>,
+    /// but the slide ImagePart was never re-emitted (the typed `add picture` path
+    /// only covers <p:pic>, and a shape's own <p:spPr> blipFill is handled by the
+    /// image=true carrier), so the rebuilt slide dangled. Surfaced as
+    /// (rId, content-type, base64) with the SOURCE rId pinned so the emitter
+    /// re-creates each via an add-part image row BEFORE shapes are added
+    /// (claiming the source rId before AddPicture auto-assigns around it).
+    /// Excludes <p:pic> main blips and shape <p:spPr> fills — those round-trip
+    /// elsewhere — so it never double-creates a typed-emitted image.
+    /// </summary>
+    internal IReadOnlyList<MasterImageInfo> GetSlideBulletImageParts(int slideIdx)
+    {
+        var slideParts = GetSlideParts().ToList();
+        if (slideIdx < 1 || slideIdx > slideParts.Count) return Array.Empty<MasterImageInfo>();
+        var spTree = GetSlide(slideParts[slideIdx - 1]).CommonSlideData?.ShapeTree;
+        if (spTree == null) return Array.Empty<MasterImageInfo>();
+        var rids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var blip in spTree.Descendants<DocumentFormat.OpenXml.Drawing.Blip>())
+        {
+            var embed = blip.Embed?.Value;
+            if (string.IsNullOrEmpty(embed)) continue;
+            var parent = blip.Parent;
+            if (parent == null) continue;
+            if (parent.LocalName == "buBlip")
+            {
+                rids.Add(embed); // picture-bullet glyph
+            }
+            else if (parent.LocalName == "blipFill")
+            {
+                var gp = parent.Parent?.LocalName;
+                // spPr → shape image-fill (image=true carrier handles it);
+                // pic → typed picture (add picture handles it). Anything else
+                // (defRPr / rPr / lvlNpPr / lstStyle text-fill) is raw-only.
+                if (gp != "spPr" && gp != "pic") rids.Add(embed);
+            }
+        }
+        return rids.Count == 0 ? Array.Empty<MasterImageInfo>() : GetSlideImagePartsByRelId(slideIdx, rids);
     }
 
     /// <summary>
@@ -1409,7 +2544,52 @@ public partial class PowerPointHandler : IDocumentHandler
         string DataXml,
         string LayoutXml,
         string ColorsXml,
-        string QuickStyleXml);
+        string QuickStyleXml,
+        string? DrawingXml,
+        string? DrawingRelId,
+        // Images referenced by the data part and the DSP drawing part via their
+        // OWN .rels (picture-in-diagram blipFills). Both parts are recreated
+        // empty by add-part smartart, so without re-attaching these ImageParts
+        // with pinned rIds their r:embed references dangle and PowerPoint refuses
+        // the deck (0x80070570). Empty when the SmartArt carries no pictures.
+        IReadOnlyList<MasterImageInfo> DataImages,
+        IReadOnlyList<MasterImageInfo> DrawingImages,
+        // External hyperlink relationships on the data part and the DSP drawing
+        // part's OWN .rels — a diagram node can carry an <a:hlinkClick r:id> to
+        // an external URL. add-part smartart recreates both parts empty, so
+        // without re-adding these external relationships with pinned rIds their
+        // r:id dangles and PowerPoint refuses the deck (0x80070570). Empty when
+        // the SmartArt carries no hyperlinks.
+        IReadOnlyList<(string RelId, string Target)> DataHyperlinks,
+        IReadOnlyList<(string RelId, string Target)> DrawingHyperlinks);
+
+    // External (TargetMode="External") hyperlink relationships on a part's own
+    // .rels, surfaced as (rId, target-uri). Mirrors GetLayoutExternalHyperlinks
+    // for any OpenXmlPartContainer host (diagram data / drawing parts).
+    private static IReadOnlyList<(string RelId, string Target)> ReadExternalHyperlinksOf(OpenXmlPart host)
+    {
+        var result = new List<(string, string)>();
+        foreach (var rel in host.HyperlinkRelationships)
+            if (rel.IsExternal) result.Add((rel.Id, rel.Uri.OriginalString));
+        return result;
+    }
+
+    // Enumerate the ImageParts directly attached to a part (its own .rels),
+    // surfaced as (rId, content-type, base64). Mirrors GetMasterImageParts but
+    // for any OpenXmlPartContainer host (diagram data / drawing parts).
+    private static IReadOnlyList<MasterImageInfo> ReadImagePartsOf(OpenXmlPart host)
+    {
+        var result = new List<MasterImageInfo>();
+        foreach (var idp in host.Parts)
+        {
+            if (idp.OpenXmlPart is not ImagePart img) continue;
+            using var s = img.GetStream(FileMode.Open, FileAccess.Read);
+            using var ms = new MemoryStream();
+            s.CopyTo(ms);
+            result.Add(new MasterImageInfo(idp.RelationshipId, img.ContentType, Convert.ToBase64String(ms.ToArray())));
+        }
+        return result;
+    }
 
     internal IReadOnlyList<SmartArtInfo> GetSmartArtsOnSlide(int slideIdx)
     {
@@ -1460,10 +2640,76 @@ public partial class PowerPointHandler : IDocumentHandler
             var qXml = xmlFor(qRid);
             if (dXml == null || lXml == null || cXml == null || qXml == null) continue;
 
+            // The data part references a 5th part — the DSP cached-drawing
+            // part — via <dsp:dataModelExt relId="..."> in the data XML. That
+            // relId resolves against the SLIDE part's relationships (the
+            // drawing part is a slide-level part of type
+            // .../2007/relationships/diagramDrawing, sibling to the
+            // data/layout/colors/qs rels — NOT a child of the data part).
+            // PowerPoint refuses the file if that relId dangles, so carry the
+            // drawing XML + the relId. Leave both null when absent (older /
+            // simpler SmartArt without a cached drawing) → keep behavior.
+            string? drawingXml = null, drawingRelId = null;
+            IReadOnlyList<MasterImageInfo> dataImages = Array.Empty<MasterImageInfo>();
+            IReadOnlyList<MasterImageInfo> drawingImages = Array.Empty<MasterImageInfo>();
+            IReadOnlyList<(string, string)> dataHlinks = Array.Empty<(string, string)>();
+            IReadOnlyList<(string, string)> drawingHlinks = Array.Empty<(string, string)>();
+            try
+            {
+                if (slidePart.GetPartById(dRid) is DiagramDataPart ddp)
+                {
+                    // Pictures embedded in the diagram (point-level blipFills)
+                    // live as ImageParts on the data part's own .rels.
+                    try { dataImages = ReadImagePartsOf(ddp); } catch { }
+                    // External hyperlinks on diagram nodes live as hyperlink rels.
+                    try { dataHlinks = ReadExternalHyperlinksOf(ddp); } catch { }
+                    const string dspNs = "http://schemas.microsoft.com/office/drawing/2008/diagram";
+                    var ext = ddp.DataModelRoot?.Descendants().FirstOrDefault(e =>
+                        e.LocalName == "dataModelExt" && e.NamespaceUri == dspNs);
+                    if (ext != null)
+                    {
+                        foreach (var a in ext.GetAttributes())
+                            if (a.LocalName == "relId") { drawingRelId = a.Value; break; }
+                    }
+                    if (!string.IsNullOrEmpty(drawingRelId))
+                    {
+                        try
+                        {
+                            if (slidePart.GetPartById(drawingRelId) is DiagramPersistLayoutPart drawingPart)
+                            {
+                                // The DSP cached drawing re-references the same
+                                // pictures for rendering via its own .rels.
+                                try { drawingImages = ReadImagePartsOf(drawingPart); } catch { }
+                                try { drawingHlinks = ReadExternalHyperlinksOf(drawingPart); } catch { }
+                                using var s = drawingPart.GetStream(FileMode.Open, FileAccess.Read);
+                                using var r = new StreamReader(s);
+                                drawingXml = r.ReadToEnd();
+                                // Strip XML prolog so emit/replay re-adds it
+                                // uniformly (WriteDiagramPartXml re-prepends).
+                                int lt = drawingXml.IndexOf('<', StringComparison.Ordinal);
+                                int decl = drawingXml.IndexOf("<?xml", StringComparison.Ordinal);
+                                if (decl == 0)
+                                {
+                                    int end = drawingXml.IndexOf("?>", StringComparison.Ordinal);
+                                    if (end >= 0) drawingXml = drawingXml.Substring(end + 2).TrimStart();
+                                }
+                                else if (lt > 0) drawingXml = drawingXml.Substring(lt);
+                            }
+                        }
+                        catch { drawingXml = null; }
+                    }
+                }
+            }
+            catch { drawingXml = null; drawingRelId = null; }
+            if (drawingXml == null || drawingRelId == null) { drawingXml = null; drawingRelId = null; }
+
             result.Add(new SmartArtInfo(
                 GraphicFrameXml: gf.OuterXml,
                 DataRelId: dRid, LayoutRelId: lRid, ColorsRelId: cRid, QuickStyleRelId: qRid,
-                DataXml: dXml, LayoutXml: lXml, ColorsXml: cXml, QuickStyleXml: qXml));
+                DataXml: dXml, LayoutXml: lXml, ColorsXml: cXml, QuickStyleXml: qXml,
+                DrawingXml: drawingXml, DrawingRelId: drawingRelId,
+                DataImages: dataImages, DrawingImages: drawingImages,
+                DataHyperlinks: dataHlinks, DrawingHyperlinks: drawingHlinks));
         }
         return result;
     }
@@ -2032,6 +3278,84 @@ public partial class PowerPointHandler : IDocumentHandler
                 && kid.NamespaceUri == "http://schemas.openxmlformats.org/drawingml/2006/main")
                 continue;
             result.Add(kid.OuterXml);
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Companion binary parts a picture's <a:blip> references from inside its
+    /// <a:extLst> — beyond the main <c>r:embed</c>. The common cases:
+    /// <list type="bullet">
+    /// <item>HD Photo backup layer (<c>&lt;a14:imgProps&gt;&lt;a14:imgLayer r:embed&gt;</c>
+    /// → a <c>.wdp</c> part, relationship type <c>.../2007/relationships/hdphoto</c>)
+    /// carrying advanced image effects.</item>
+    /// <item>SVG companion (<c>&lt;asvg:svgBlip r:embed&gt;</c> → the vector
+    /// original behind a raster fallback).</item>
+    /// </list>
+    /// The main image round-trips via <c>add picture</c> and the blip's extLst is
+    /// re-appended verbatim by <see cref="GetPictureBlipPassthroughChildrenXml"/>,
+    /// so the companion <c>r:embed="rIdN"</c> survives — but the part it points at
+    /// was never re-emitted, leaving a dangling relationship (lost image-effects
+    /// layer; stricter consumers reject the package). Surfaced as
+    /// (rId, relationship-type, content-type, target-ext, base64) so EmitPicture
+    /// can pin each via an <c>add-part extpart</c> row. Mirrors the master/layout
+    /// image carrier. Returns empty when the blip carries no companion references.
+    /// </summary>
+    public readonly record struct BlipCompanionInfo(
+        string RelId, string RelType, string ContentType, string TargetExt, string Base64Data);
+
+    public IReadOnlyList<BlipCompanionInfo> GetPictureBlipCompanionParts(string picturePath)
+    {
+        var empty = (IReadOnlyList<BlipCompanionInfo>)Array.Empty<BlipCompanionInfo>();
+        var m = Regex.Match(picturePath,
+            @"^/slide\[(\d+)\]/(?:.+/)?picture\[(?:@id=)?(\d+)\]$");
+        if (!m.Success) return empty;
+        var slideIdx = int.Parse(m.Groups[1].Value);
+        var idOrIdx = int.Parse(m.Groups[2].Value);
+        var byId = picturePath.Contains("@id=", StringComparison.Ordinal);
+        var parts = GetSlideParts().ToList();
+        if (slideIdx < 1 || slideIdx > parts.Count) return empty;
+        var slidePart = parts[slideIdx - 1];
+        var shapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree;
+        if (shapeTree == null) return empty;
+        var pictures = shapeTree.Descendants<Picture>().ToList();
+        Picture? pic = byId
+            ? pictures.FirstOrDefault(p =>
+                p.NonVisualPictureProperties?.NonVisualDrawingProperties?.Id?.Value
+                    == (uint)idOrIdx)
+            : (idOrIdx >= 1 && idOrIdx <= pictures.Count ? pictures[idOrIdx - 1] : null);
+        if (pic == null) return empty;
+        var blip = pic.BlipFill?.GetFirstChild<DocumentFormat.OpenXml.Drawing.Blip>();
+        if (blip == null) return empty;
+        var mainEmbed = blip.Embed?.Value;
+
+        const string relNs = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+        var result = new List<BlipCompanionInfo>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        // Walk every descendant of the blip (the extLst lives there) and collect
+        // r:embed / r:link / r:id references other than the main image.
+        foreach (var el in blip.Descendants())
+        {
+            foreach (var attr in el.GetAttributes())
+            {
+                if (attr.NamespaceUri != relNs) continue;
+                if (attr.LocalName is not ("embed" or "link" or "id")) continue;
+                var rid = attr.Value;
+                if (string.IsNullOrEmpty(rid) || rid == mainEmbed || !seen.Add(rid)) continue;
+                try
+                {
+                    var part = slidePart.GetPartById(rid);
+                    using var s = part.GetStream(FileMode.Open, FileAccess.Read);
+                    using var ms = new MemoryStream();
+                    s.CopyTo(ms);
+                    var ext = System.IO.Path.GetExtension(part.Uri.OriginalString);
+                    if (string.IsNullOrEmpty(ext)) ext = ".bin";
+                    result.Add(new BlipCompanionInfo(
+                        rid, part.RelationshipType, part.ContentType, ext,
+                        Convert.ToBase64String(ms.ToArray())));
+                }
+                catch { /* external / unresolvable — skip (dangling already) */ }
+            }
         }
         return result;
     }

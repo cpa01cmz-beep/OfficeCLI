@@ -131,6 +131,13 @@ public static partial class PptxBatchEmitter
 
         if (seriesParts.Count > 0)
             props["data"] = string.Join(";", seriesParts);
+        else
+            // A genuinely dataless chart (0 series — e.g. an unpopulated
+            // template doughnut). AddChart requires data for interactive use;
+            // signal that this empty chart is an intentional round-trip so it
+            // builds an empty chart frame instead of aborting. Consumed by
+            // AddChart, never written to the chart XML.
+            props["allowEmpty"] = "true";
 
         // Per-series style round-trip: NodeBuilder emits color/lineWidth/
         // lineDash/marker/smooth on each series child Format, but the chart-

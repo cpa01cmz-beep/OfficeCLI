@@ -46,6 +46,34 @@ public partial class PowerPointHandler
     private const string ParagraphPropsHint =
         "valid paragraph props: align, indent, level, marginLeft, marginRight, lineSpacing, spaceBefore, spaceAfter, tabs, link, tooltip — plus any run prop (applied to all runs in the paragraph)";
 
+    // Run-level (character) property keys that, set on a RUNLESS paragraph, must
+    // seed an empty run to land on (see SetParagraphOnShape). Paragraph-level
+    // keys (align/indent/lineSpacing/spaceBefore/…) write to pPr and need no run.
+    private static readonly HashSet<string> RunStyleParagraphKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "size", "font.size", "fontsize", "sz",
+        "color", "fill",
+        "font", "font.latin", "font.ea", "font.eastasia", "font.eastasian",
+        "font.cs", "font.complexscript", "font.complex",
+        "bold", "b", "italic", "i", "underline", "u", "strike",
+        "spacing", "charspacing", "letterspacing", "spc",
+        "baseline", "cap", "allcaps", "smallcaps", "kern",
+    };
+
+    // Copy every attribute and child (deep clone) from one
+    // CT_TextCharacterProperties element (a:rPr / a:endParaRPr / a:defRPr) to
+    // another. Used to round-trip run-style props through a scratch a:rPr when
+    // the only sink is an empty paragraph's a:endParaRPr. Clones nodes rather
+    // than round-tripping OuterXml so inherited xmlns prefixes stay resolvable.
+    private static void CopyCharacterProps(OpenXmlElement source, OpenXmlElement target)
+    {
+        target.RemoveAllChildren();
+        foreach (var attr in source.GetAttributes())
+            target.SetAttribute(attr);
+        foreach (var child in source.Elements())
+            target.AppendChild(child.CloneNode(true));
+    }
+
     private List<string> SetParagraphRunByPath(Match paraRunMatch, Dictionary<string, string> properties)
     {
         var slideIdx = int.Parse(paraRunMatch.Groups[1].Value);
@@ -137,6 +165,45 @@ public partial class PowerPointHandler
         var paraRuns = para.Elements<Drawing.Run>().ToList();
         var unsupported = new List<string>();
 
+        // Empty (runless) paragraph carrying run-style props: route size / color
+        // / font.* / bold / ... onto the paragraph's endParaRPr. Without a run the
+        // default branch below calls SetRunOrShapeProperties with an empty run
+        // list and silently drops them — only `cap` had an endParaRPr fallback.
+        // Designers use a runless paragraph with a small endParaRPr font size as
+        // a vertical spacer; PowerPoint sizes the empty line from the endParaRPr,
+        // not from a seeded empty run. The dump configures the shape's
+        // auto-seeded first paragraph via Set (not Add), so `set paragraph[1]
+        // size=1pt` left the spacer's endParaRPr at the inherited body size
+        // (16pt+), inflating its height and pushing all following body text down
+        // on every text slide. Apply the props to a detached run (reusing the
+        // full run-property logic), then transfer its rPr children onto the
+        // endParaRPr. Skip when `text` is present (it builds its own runs).
+        if (paraRuns.Count == 0 && !properties.ContainsKey("text")
+            && properties.Keys.Any(k => RunStyleParagraphKeys.Contains(k)))
+        {
+            var endRPr = para.GetFirstChild<Drawing.EndParagraphRunProperties>();
+            // rPr and endParaRPr share the CT_TextCharacterProperties content
+            // model. Seed a scratch run's rPr from the existing endParaRPr (clone
+            // attributes + children — not OuterXml, whose xmlns prefixes wouldn't
+            // re-parse), mutate it through the full run-property path, then mirror
+            // the result back onto the endParaRPr.
+            var scratchRPr = new Drawing.RunProperties();
+            if (endRPr != null) CopyCharacterProps(endRPr, scratchRPr);
+            var scratchRun = new Drawing.Run { RunProperties = scratchRPr };
+            var runStyleProps = properties.Where(kv => RunStyleParagraphKeys.Contains(kv.Key))
+                .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
+            unsupported.AddRange(SetRunOrShapeProperties(runStyleProps, new List<Drawing.Run> { scratchRun },
+                shape, slidePart, runContext: true, unsupportedContextHint: ParagraphPropsHint));
+            var newEnd = new Drawing.EndParagraphRunProperties();
+            CopyCharacterProps(scratchRun.RunProperties ?? scratchRPr, newEnd);
+            if (endRPr != null) para.ReplaceChild(newEnd, endRPr);
+            else para.AppendChild(newEnd);
+            // Drop consumed keys so the default branch below doesn't re-process
+            // them against the (still empty) run list.
+            properties = properties.Where(kv => !RunStyleParagraphKeys.Contains(kv.Key))
+                .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
+        }
+
         // Order keys so `text` is processed BEFORE run-style props (size /
         // color / font.* / bold / italic / ...). The text branch in
         // SetRunOrShapeProperties rebuilds the shape's paragraphs from
@@ -181,6 +248,23 @@ public partial class PowerPointHandler
                     if (!int.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var lvl) || lvl < 0 || lvl > 8)
                         throw new ArgumentException($"Invalid 'level' value: '{value}'. Expected an integer between 0 and 8 (OOXML a:pPr/@lvl).");
                     pProps.Level = lvl;
+                    break;
+                }
+                case "bulletraw" or "bulletRaw":
+                {
+                    // Full bullet group (buClr/buFont/buSzPct/buChar/…) verbatim —
+                    // round-trips colored/sized/Wingdings bullets the `list`
+                    // keyword cannot represent.
+                    var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
+                    ApplyBulletRaw(pProps, value);
+                    break;
+                }
+                case "defrprraw" or "defRPrRaw":
+                {
+                    // Paragraph-level <a:defRPr> verbatim — bare runs inherit
+                    // size/bold/font/color from it; see ApplyDefRPrRaw.
+                    var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
+                    ApplyDefRPrRaw(pProps, value);
                     break;
                 }
                 case "marginleft" or "marl":
@@ -278,6 +362,16 @@ public partial class PowerPointHandler
                         ? IsTruthy(value)
                         : ParsePptDirectionRtl(value);
                     pProps.RightToLeft = rtl;
+                    break;
+                }
+                case "ealnbrk" or "ealinebreak"
+                  or "latinlnbrk" or "latinlinebreak"
+                  or "fontalgn" or "fontalignment"
+                  or "deftabsz" or "defaulttabsize":
+                {
+                    // CJK / line-break pPr attributes — mirror AddParagraph + readback.
+                    var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
+                    ApplyParagraphBreakProp(pProps, key, value);
                     break;
                 }
                 default:
@@ -557,6 +651,16 @@ public partial class PowerPointHandler
             throw new ArgumentException($"Connector {cxnIdx} not found (total: {connectors.Count})");
 
         var cxn = connectors[cxnIdx - 1];
+        return ApplyConnectorProps(slidePart, cxn, properties);
+    }
+
+    /// <summary>
+    /// Apply connector property mutations to an already-resolved ConnectionShape.
+    /// Shared by SetConnectorByPath (slide-level) and the group-inner connector
+    /// Set route so a connector nested in a group gets the same property surface.
+    /// </summary>
+    private List<string> ApplyConnectorProps(SlidePart slidePart, ConnectionShape cxn, Dictionary<string, string> properties)
+    {
         var unsupported = new List<string>();
         foreach (var (key, value) in properties)
         {
@@ -912,7 +1016,9 @@ public partial class PowerPointHandler
                     // rejected as unsupported_property. Replace any existing
                     // StartConnection/EndConnection rather than append (XML
                     // schema allows only one of each on a connector).
-                    var endpointId = ResolveShapeId(value, shapeTree);
+                    var endpointShapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree
+                        ?? throw new ArgumentException("Slide has no shape tree");
+                    var endpointId = ResolveShapeId(value, endpointShapeTree);
                     var cxnDrawProps = cxn.NonVisualConnectionShapeProperties
                         ?.GetFirstChild<NonVisualConnectorShapeDrawingProperties>();
                     if (cxnDrawProps == null) { unsupported.Add(key); break; }
@@ -1028,6 +1134,131 @@ public partial class PowerPointHandler
     /// SetParagraphOnShape / SetParagraphRunOnShape helpers without
     /// duplicating navigation logic.
     /// </summary>
+    /// <summary>
+    /// Resolve a Shape inside a (possibly nested) group from the raw
+    /// "/group[K]/group[L]…" segment string and a final shape index. Walks each
+    /// group segment in order, then picks shape[shapeIdx] inside the deepest
+    /// group. Shared by AddParagraph's grouped-shape parent route.
+    /// </summary>
+    /// <summary>
+    /// Resolve a ConnectionShape inside a (possibly nested) group. Each group
+    /// segment and the final connector segment accept either a positional index
+    /// ([N]) or an @id selector ([@id=K]) — dump addresses grouped connectors by
+    /// @id. Walks every group segment, then locates the connector in the deepest
+    /// group.
+    /// </summary>
+    private (SlidePart slidePart, ConnectionShape cxn) ResolveGroupInnerConnector(
+        int slideIdx, string groupSegs, string connectorToken)
+    {
+        var slideParts = GetSlideParts().ToList();
+        if (slideIdx < 1 || slideIdx > slideParts.Count)
+            throw new ArgumentException($"Slide {slideIdx} not found (total: {slideParts.Count})");
+        var slidePart = slideParts[slideIdx - 1];
+        var shapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree
+            ?? throw new ArgumentException("Slide has no shape tree");
+
+        OpenXmlCompositeElement current = shapeTree;
+        int depth = 0;
+        foreach (Match seg in Regex.Matches(groupSegs, @"/group\[([^\]]+)\]"))
+        {
+            depth++;
+            var groups = current.Elements<GroupShape>().ToList();
+            var token = seg.Groups[1].Value;
+            int grpIdx = ResolveContainerChildIndex(token, groups.Count,
+                i => groups[i].NonVisualGroupShapeProperties?.NonVisualDrawingProperties);
+            current = groups[grpIdx - 1];
+        }
+        var connectors = current.Elements<ConnectionShape>().ToList();
+        int cxnIdx = ResolveContainerChildIndex(connectorToken, connectors.Count,
+            i => connectors[i].NonVisualConnectionShapeProperties?.NonVisualDrawingProperties);
+        return (slidePart, connectors[cxnIdx - 1]);
+    }
+
+    /// <summary>
+    /// Resolve a child selector token — "N" (1-based positional) or "@id=K" — to
+    /// a 1-based index within a container's typed child list. nvAt returns the
+    /// NonVisualDrawingProperties for the i-th (0-based) child so @id matching can
+    /// read the cNvPr id.
+    /// </summary>
+    private static int ResolveContainerChildIndex(string token, int count,
+        Func<int, NonVisualDrawingProperties?> nvAt)
+    {
+        var idMatch = Regex.Match(token, @"^@id=(\d+)$");
+        if (idMatch.Success)
+        {
+            var wantId = idMatch.Groups[1].Value;
+            for (int i = 0; i < count; i++)
+                if (nvAt(i)?.Id?.Value.ToString() == wantId)
+                    return i + 1;
+            throw new ArgumentException($"No child found with @id={wantId} (total: {count})");
+        }
+        if (int.TryParse(token, out var pos))
+        {
+            if (pos < 1 || pos > count)
+                throw new ArgumentException($"Index {pos} out of range (total: {count})");
+            return pos;
+        }
+        throw new ArgumentException($"Unsupported selector token '{token}': expected an index or @id=K.");
+    }
+
+    private (SlidePart slidePart, Shape shape) ResolveGroupInnerShapeBySegments(int slideIdx, string groupSegs, int shapeIdx)
+    {
+        var slideParts = GetSlideParts().ToList();
+        if (slideIdx < 1 || slideIdx > slideParts.Count)
+            throw new ArgumentException($"Slide {slideIdx} not found (total: {slideParts.Count})");
+        var slidePart = slideParts[slideIdx - 1];
+        var shapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree
+            ?? throw new ArgumentException("Slide has no shape tree");
+        OpenXmlCompositeElement current = shapeTree;
+        int depth = 0;
+        foreach (Match seg in Regex.Matches(groupSegs, @"/group\[(\d+)\]"))
+        {
+            depth++;
+            var grpIdx = int.Parse(seg.Groups[1].Value);
+            var groups = current.Elements<GroupShape>().ToList();
+            if (grpIdx < 1 || grpIdx > groups.Count)
+                throw new ArgumentException($"Group {grpIdx} not found at depth {depth} (total: {groups.Count})");
+            current = groups[grpIdx - 1];
+        }
+        var innerShapes = current.Elements<Shape>().ToList();
+        if (shapeIdx < 1 || shapeIdx > innerShapes.Count)
+            throw new ArgumentException($"Shape {shapeIdx} not found in group (total: {innerShapes.Count})");
+        return (slidePart, innerShapes[shapeIdx - 1]);
+    }
+
+    /// <summary>
+    /// /slide[N]/group[M](/group[L])*/picture[K] — resolve a Picture nested in a
+    /// group at ANY depth and apply picture-set props via the shared core.
+    /// Match group 2 is the full /group[..] chain. Mirrors
+    /// ResolveGroupInnerShapeBySegments but for Picture children.
+    /// </summary>
+    private List<string> SetGroupInnerPictureByPath(Match m, Dictionary<string, string> properties)
+    {
+        var slideIdx = int.Parse(m.Groups[1].Value);
+        var groupSegs = m.Groups[2].Value;
+        var picIdx = int.Parse(m.Groups[3].Value);
+        var slideParts = GetSlideParts().ToList();
+        if (slideIdx < 1 || slideIdx > slideParts.Count)
+            throw new ArgumentException($"Slide {slideIdx} not found (total: {slideParts.Count})");
+        var slidePart = slideParts[slideIdx - 1];
+        OpenXmlCompositeElement current = GetSlide(slidePart).CommonSlideData?.ShapeTree
+            ?? throw new ArgumentException("Slide has no shape tree");
+        int depth = 0;
+        foreach (Match seg in Regex.Matches(groupSegs, @"/group\[(\d+)\]"))
+        {
+            depth++;
+            var gi = int.Parse(seg.Groups[1].Value);
+            var groups = current.Elements<GroupShape>().ToList();
+            if (gi < 1 || gi > groups.Count)
+                throw new ArgumentException($"Group {gi} not found at depth {depth} (total: {groups.Count})");
+            current = groups[gi - 1];
+        }
+        var pics = current.Elements<Picture>().ToList();
+        if (picIdx < 1 || picIdx > pics.Count)
+            throw new ArgumentException($"Picture {picIdx} not found in group (total: {pics.Count})");
+        return ApplyPicturePropertiesCore(slidePart, pics[picIdx - 1], properties);
+    }
+
     private (SlidePart slidePart, Shape shape) ResolveGroupInnerShape(int slideIdx, int grpIdx, int shapeIdx)
     {
         var slideParts = GetSlideParts().ToList();

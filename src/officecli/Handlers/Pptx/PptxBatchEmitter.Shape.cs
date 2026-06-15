@@ -319,6 +319,14 @@ public static partial class PptxBatchEmitter
         // <p:timing> tree (round-tripped via raw-set passthrough) pointing
         // at the right shape.
 
+        // Faithful round-trip: a source slide may carry two title/ctrTitle
+        // placeholders (PowerPoint keeps them; it only de-dups via the UI). The
+        // interactive uniqueness guard in AddPlaceholder would abort the second
+        // one — and cascade the slide's later shapes via the broken shape count.
+        // Signal the replay to allow it. Consumed by AddPlaceholder, not written
+        // to XML.
+        props["allowDuplicate"] = "true";
+
         items.Add(new BatchItem
         {
             Command = "add",
@@ -336,7 +344,7 @@ public static partial class PptxBatchEmitter
     }
 
     private static void EmitConnector(PowerPointHandler ppt, DocumentNode cxnNode, string parentSlidePath,
-                                      List<BatchItem> items, SlideEmitContext ctx)
+                                      List<BatchItem> items, SlideEmitContext ctx, int connectorOrdinal)
     {
         // R57 bt-4: depth=3 mirrors EmitShape — surface paragraph→run→inline
         // runs so the connector-label single-run-collapse heuristic below can
@@ -424,12 +432,18 @@ public static partial class PptxBatchEmitter
         if (deferredArrows.Count > 0)
         {
             // Connector's replay path: parentSlidePath + /connector[K] where
-            // K is the source connector's positional index within
-            // shapeTree.Elements<ConnectionShape>(). Reuse the source path's
-            // tail segment — it already encodes that positional index in
-            // BuildElementPathSegment-emitted form (`connector[K]` or
-            // `connector[@id=N]`). Both forms route through SetConnector.
-            var replayPath = ReplayPathForCxn(cxnNode.Path ?? "", parentSlidePath);
+            // K is the connectorOrdinal the caller assigned when walking the
+            // parent's children in document order — the SAME ordinal the
+            // `add connector` above lands at. Build it positionally rather
+            // than reusing cxnNode.Path: NodeBuilder emits the source path in
+            // @id= form (`/slide[N]/group[@id=10]/connector[@id=532]`), and
+            // group descendants have their cNvPr id reassigned on replay (see
+            // CONSISTENCY(group-id-autoassign)), so an @id= selector for a
+            // group-nested connector resolves to nothing — the deferred
+            // arrowhead `set` then fails with "No connector found with @id=N".
+            // The positional form survives because AddConnector lands the
+            // connector at exactly connectorOrdinal under parentSlidePath.
+            var replayPath = $"{parentSlidePath}/connector[{connectorOrdinal}]";
             ctx.DeferredLinks.Add(new BatchItem
             {
                 Command = "set",
@@ -443,28 +457,13 @@ public static partial class PptxBatchEmitter
         // path resolves through AddParagraph / AddRun's connector branches.
         if ((full.Children?.Count ?? 0) > 0)
         {
-            var cxnReplayPath = ReplayPathForCxn(cxnNode.Path ?? "", parentSlidePath);
+            // Same positional rationale as the deferred-arrow path above:
+            // group-nested connectors carry an @id= source path whose id is
+            // reassigned on replay, so label paragraph/run ops must target the
+            // connector by its document-order ordinal under parentSlidePath.
+            var cxnReplayPath = $"{parentSlidePath}/connector[{connectorOrdinal}]";
             EmitTextBody(ppt, full, cxnReplayPath, items, seededFirstParaHasRun: seededFirstParaHasRun, ctx: ctx);
         }
-    }
-
-    // Translate a NodeBuilder-emitted cxnNode.Path (which may use the
-    // @id= form via BuildElementPathSegment) into a positional replay
-    // path under <paramref name="parentSlidePath"/>. The source's cNvPr id
-    // is preserved through AcquireShapeId's high-range floor, so the
-    // @id= form still resolves at replay; falling back to a positional
-    // form keeps parity with TranslateConnectorEndpoint.
-    private static string ReplayPathForCxn(string sourcePath, string parentSlidePath)
-    {
-        // Strip the source's /slide[N] prefix, replace with the replay's
-        // parentSlidePath. Group-nested cxn paths (containing /group[K]/)
-        // are passed through verbatim — TranslateConnectorEndpoint's
-        // CONSISTENCY(group-id-autoassign) note explains that group
-        // children resolve positionally on Set.
-        var m = System.Text.RegularExpressions.Regex.Match(sourcePath,
-            @"^/slide\[\d+\](?<tail>(?:/group\[\d+\])*/connector\[[^\]]+\])$");
-        if (!m.Success) return sourcePath;
-        return parentSlidePath + m.Groups["tail"].Value;
     }
 
     private static void TranslateConnectorEndpoint(PowerPointHandler ppt,
@@ -530,6 +529,20 @@ public static partial class PptxBatchEmitter
             var s = grpZ.ToString();
             if (!string.IsNullOrEmpty(s)) props["zorder"] = s!;
         }
+        // Preserve the group's OWN cNvPr id. Unlike the group's children (whose
+        // ids are stripped below to dodge sibling-id collisions and are only ever
+        // resolved positionally), the group's id IS externally referenced — slide
+        // animation timing targets the group via <p:spTgt spid="N">. Dropping it
+        // (auto-assign on replay) left the raw-set timing block pointing at a
+        // non-existent shape id, and PowerPoint refused the whole file. The
+        // group-as-slide-child node (grpNode) carries the id in its Format; the
+        // direct Get used for `props` above does not, so pull it from grpNode.
+        if (!props.ContainsKey("id")
+            && grpNode.Format.TryGetValue("id", out var grpIdObj) && grpIdObj != null)
+        {
+            var s = grpIdObj.ToString();
+            if (!string.IsNullOrEmpty(s)) props["id"] = s!;
+        }
         DeferSlideJumpLink(props, replayPath, ctx);
 
         items.Add(new BatchItem
@@ -573,7 +586,7 @@ public static partial class PptxBatchEmitter
                     break;
                 case "connector":
                     ord["connector"] = ord.GetValueOrDefault("connector", 0) + 1;
-                    EmitConnector(ppt, child, replayPath, items, ctx);
+                    EmitConnector(ppt, child, replayPath, items, ctx, ord["connector"]);
                     break;
                 case "group":
                     ord["group"] = ord.GetValueOrDefault("group", 0) + 1;
@@ -615,15 +628,28 @@ public static partial class PptxBatchEmitter
             }
         }
 
-        // Strip `id` from every `add` BatchItem emitted between the boundary
+        // Reassign `id` on every `add` BatchItem emitted between the boundary
         // and now — these are the group's descendants. Set ops within the
-        // group reference shapes positionally; they don't carry `id` to
-        // begin with, so the filter is naturally a no-op for them.
+        // group reference shapes positionally and carry no `id`, so they're
+        // untouched. Previously the id was STRIPPED (→ replay auto-assign), but
+        // auto-assign (base 100000) collides on decks with authored top-level
+        // ids above that base: a stripped child auto-assigns max+1 = a sibling's
+        // preserved source id, throwing "id already in use" and cascading the
+        // rest of the group. Assign an explicit high-range id instead — group
+        // descendants are resolved positionally, so the value is never
+        // externally referenced. Skip items already in the high range (a nested
+        // group's recursive pass reassigned them first).
         for (int gi = groupChildItemsStart; gi < items.Count; gi++)
         {
             var bi = items[gi];
             if (bi.Command == "add" && bi.Props != null && bi.Props.ContainsKey("id"))
-                bi.Props.Remove("id");
+            {
+                if (bi.Props.TryGetValue("id", out var idv)
+                    && uint.TryParse(idv, out var idn)
+                    && idn >= SlideEmitContext.GroupChildIdBase)
+                    continue; // already reassigned by a nested EmitGroup
+                bi.Props["id"] = ctx.NextGroupChildId().ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
         }
     }
 
