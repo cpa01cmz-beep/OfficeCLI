@@ -994,6 +994,17 @@ public partial class WordHandler
             => hostPart.AddNewPart<DiagramPersistLayoutPart>(ct, null),
         _ when ct.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
             => hostPart.AddNewPart<ImagePart>(ct, null),
+        // BUG-DUMP-R55-VMLCHART: a VML shape / AlternateContent drawing embeds a
+        // DrawingML chart (chart+xml, referenced by r:id). Without this the
+        // inlined-parts materializer aborted the whole `add vmlshape` step and
+        // dropped the chart. Its colour-style / style / embedded-package
+        // children (when present) ride part{N}.child{M} via CreateInlinedChildPart.
+        "application/vnd.openxmlformats-officedocument.drawingml.chart+xml"
+            => hostPart.AddNewPart<ChartPart>(ct, null),
+        "application/vnd.ms-office.chartcolorstyle+xml"
+            => hostPart.AddNewPart<ChartColorStylePart>(ct, null),
+        "application/vnd.ms-office.chartstyle+xml"
+            => hostPart.AddNewPart<ChartStylePart>(ct, null),
         // BUG-DUMP-R40-VMLOLE: a VML shape / <o:OLEObject> embeds an OLE object
         // (legacy .xls/.doc/.ppt → application/vnd.ms-* via an `oleObject`
         // relationship) or a modern OOXML package (.xlsx/.docx/.pptx via a
@@ -1036,6 +1047,12 @@ public partial class WordHandler
         // actually rasterizes for modern SmartArt.
         "application/vnd.ms-office.drawingml.diagramDrawing+xml"
             => parent.AddNewPart<DiagramPersistLayoutPart>(ct, relId),
+        // BUG-DUMP-R55-VMLCHART: a chart part's own children (colour-style /
+        // style / its embedded data package) keep their source rel id.
+        "application/vnd.ms-office.chartcolorstyle+xml"
+            => parent.AddNewPart<ChartColorStylePart>(ct, relId),
+        "application/vnd.ms-office.chartstyle+xml"
+            => parent.AddNewPart<ChartStylePart>(ct, relId),
         _ when ct.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
             => parent.AddNewPart<ImagePart>(ct, relId),
         _ => null,
