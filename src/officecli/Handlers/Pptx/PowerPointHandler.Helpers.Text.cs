@@ -57,8 +57,13 @@ public partial class PowerPointHandler
             return xml;
         // Match an <a:t ...>content</a:t> element (any attribute prefix; the
         // package writer never realiases the `a` prefix on drawingml runs).
+        // The (?<!/) before the closing '>' excludes a self-closing empty run
+        // <a:t/> / <a:t />: without it, attrs greedily captures the " /" and the
+        // '/>' close is misread as an open tag, so .*? swallows the following
+        // siblings up to the next </a:t> and xml:space is injected mid-tag,
+        // corrupting the body (e.g. "<a:t / xml:space=\"preserve\">…").
         return Regex.Replace(xml,
-            @"<a:t(?<attrs>(?:\s[^>]*?)?)>(?<content>.*?)</a:t>",
+            @"<a:t(?<attrs>(?:\s[^>]*?)?)(?<!/)>(?<content>.*?)</a:t>",
             m =>
             {
                 var attrs = m.Groups["attrs"].Value;
