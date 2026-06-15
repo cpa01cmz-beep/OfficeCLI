@@ -530,15 +530,26 @@ public partial class PowerPointHandler
     /// </summary>
     private static void ApplyTextMargin(Drawing.BodyProperties bodyPr, string value)
     {
-        // Maximum reasonable inset: ~142cm (max slide dimension in OOXML = 51206400 EMU)
+        // Maximum reasonable inset magnitude: ~142cm (max slide dimension in
+        // OOXML = 51206400 EMU). Insets are ST_Coordinate32 (xsd:int) and MAY be
+        // negative — PowerPoint uses a small negative lIns/tIns/rIns/bIns to let
+        // text bleed slightly past the shape box (seen in the wild as lIns="-1").
+        // The prior ParseEmuAsInt rejected any negative inset, which aborted the
+        // whole `add shape` op on round-trip (and, for a grouped shape, threw off
+        // the group's child count → a cascade of "Shape N not found in group").
         const int MaxInsetEmu = 51206400;
+        static int ParseInset(string raw)
+        {
+            var v = Core.EmuConverter.ParseEmu(raw); // long; allows negative
+            if (Math.Abs(v) > MaxInsetEmu)
+                throw new ArgumentException($"Inset value {v} EMU exceeds maximum allowed magnitude ({MaxInsetEmu} EMU / ~142cm).");
+            return (int)v;
+        }
 
         var parts = value.Split(',');
         if (parts.Length == 1)
         {
-            var emu = Core.EmuConverter.ParseEmuAsInt(parts[0]);
-            if (emu > MaxInsetEmu)
-                throw new ArgumentException($"Inset value {emu} EMU exceeds maximum allowed ({MaxInsetEmu} EMU / ~142cm).");
+            var emu = ParseInset(parts[0]);
             bodyPr.LeftInset = emu;
             bodyPr.TopInset = emu;
             bodyPr.RightInset = emu;
@@ -556,9 +567,7 @@ public partial class PowerPointHandler
             {
                 var raw = parts[i].Trim();
                 if (raw == "-" || raw.Length == 0) continue;
-                var v = Core.EmuConverter.ParseEmuAsInt(raw);
-                if (v > MaxInsetEmu)
-                    throw new ArgumentException($"Inset value {v} EMU exceeds maximum allowed ({MaxInsetEmu} EMU / ~142cm).");
+                var v = ParseInset(raw);
                 switch (i)
                 {
                     case 0: bodyPr.LeftInset = v; break;
