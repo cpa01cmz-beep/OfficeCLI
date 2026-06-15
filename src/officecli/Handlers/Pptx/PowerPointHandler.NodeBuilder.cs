@@ -1123,9 +1123,13 @@ public partial class PowerPointHandler
             var fgEl = patternFill.GetFirstChild<Drawing.ForegroundColor>();
             var bgEl = patternFill.GetFirstChild<Drawing.BackgroundColor>();
             var fgHex = fgEl?.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
-            var fgScheme = fgEl?.GetFirstChild<Drawing.SchemeColor>()?.Val?.Value.ToString();
+            // Use the EnumValue's InnerText (the OOXML token, e.g. "tx1"); the
+            // newer SDK backs SchemeColorValues with a struct whose Value.ToString()
+            // is "SchemeColorValues { }", which is not a parseable color. Mirrors
+            // the scheme-color readback in PowerPointHandler.Fill.cs.
+            var fgScheme = fgEl?.GetFirstChild<Drawing.SchemeColor>()?.Val?.InnerText;
             var bgHex = bgEl?.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
-            var bgScheme = bgEl?.GetFirstChild<Drawing.SchemeColor>()?.Val?.Value.ToString();
+            var bgScheme = bgEl?.GetFirstChild<Drawing.SchemeColor>()?.Val?.InnerText;
             var fg = fgHex != null ? ParseHelpers.FormatHexColor(fgHex) : (fgScheme ?? "");
             var bg = bgHex != null ? ParseHelpers.FormatHexColor(bgHex) : (bgScheme ?? "");
             node.Format["pattern"] = string.IsNullOrEmpty(bg) ? $"{preset}:{fg}" : $"{preset}:{fg}:{bg}";
