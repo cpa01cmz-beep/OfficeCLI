@@ -1843,7 +1843,16 @@ public partial class WordHandler
             newNum.AppendChild(lvlOverride);
         }
 
-        numbering.AppendChild(newNum);
+        // CT_Numbering order: abstractNum*, num*, numIdMacAtCleanup? — a new
+        // <w:num> must precede a trailing <w:numIdMacAtCleanup> (appending after
+        // it is schema-invalid "unexpected w:num child"). Insert before it when
+        // present; else append. CONSISTENCY(numbering-num-before-maccleanup):
+        // mirrors WordHandler.StyleList.cs.
+        var newNumMacCleanup = numbering.GetFirstChild<NumberingIdMacAtCleanup>();
+        if (newNumMacCleanup != null)
+            numbering.InsertBefore(newNum, newNumMacCleanup);
+        else
+            numbering.AppendChild(newNum);
         numbering.Save();
         return $"/numbering/num[@id={numId}]";
     }

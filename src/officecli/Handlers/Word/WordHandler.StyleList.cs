@@ -1158,10 +1158,20 @@ public partial class WordHandler
         else
             numbering.AppendChild(abstractNum);
 
-        // Create numbering instance
+        // Create numbering instance. CT_Numbering schema order is
+        // numPicBullet*, abstractNum*, num*, numIdMacAtCleanup? — so <w:num>
+        // must sit AFTER every abstractNum/num but BEFORE a trailing
+        // <w:numIdMacAtCleanup>. Appending unconditionally placed the new num
+        // after numIdMacAtCleanup when the source carried one, producing a
+        // schema-invalid "unexpected w:num child" on validate/open. Insert
+        // before numIdMacAtCleanup when present; else append.
         var numInstance = new NumberingInstance { NumberID = maxNumId };
         numInstance.AppendChild(new AbstractNumId { Val = maxAbstractId });
-        numbering.AppendChild(numInstance);
+        var macCleanup = numbering.GetFirstChild<NumberingIdMacAtCleanup>();
+        if (macCleanup != null)
+            numbering.InsertBefore(numInstance, macCleanup);
+        else
+            numbering.AppendChild(numInstance);
 
         numbering.Save();
 
