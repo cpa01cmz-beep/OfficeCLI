@@ -1268,9 +1268,14 @@ public partial class WordHandler
         // EMU → points (914400 EMU/inch, 72 points/inch).
         double cxPt = cxEmu / EmuConverter.EmuPerPointF;
         double cyPt = cyEmu / EmuConverter.EmuPerPointF;
-        // Twips for w:dxaOrig/w:dyaOrig (20 twips/point).
-        long cxTwips = (long)(cxPt * 20);
-        long cyTwips = (long)(cyPt * 20);
+        // Twips for w:dxaOrig/w:dyaOrig (20 twips/point). A round-tripped OLE
+        // carries the source's native object box verbatim (dxaOrig/dyaOrig props)
+        // so a floating OLE keeps Word's original size instead of being rescaled
+        // from the display frame.
+        string cxTwips = properties.TryGetValue("dxaOrig", out var dxaO) && !string.IsNullOrEmpty(dxaO)
+            ? dxaO : ((long)(cxPt * 20)).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        string cyTwips = properties.TryGetValue("dyaOrig", out var dyaO) && !string.IsNullOrEmpty(dyaO)
+            ? dyaO : ((long)(cyPt * 20)).ToString(System.Globalization.CultureInfo.InvariantCulture);
 
         // 5. DrawAspect: "Icon" (default) or "Content" (live preview).
         // Strict validation: unknown values throw rather than silently
@@ -1345,9 +1350,21 @@ public partial class WordHandler
 </v:shapetype>
 """;
 
+        // A round-tripped FLOATING OLE carries its source v:shape style verbatim
+        // (position:absolute + margin + z-index + wrap), keeping the object out of
+        // the text flow. An inline OLE (no shapeStyle) rebuilds the bare
+        // width/height frame and marks itself o:ole="" — the floating shape omits
+        // o:ole="" to match what Word writes for an absolutely-positioned OLE.
+        var hasFloatStyle = properties.TryGetValue("shapeStyle", out var floatStyle)
+            && !string.IsNullOrEmpty(floatStyle);
+        var shapeStyleAttr = hasFloatStyle
+            ? System.Security.SecurityElement.Escape(floatStyle)
+            : $"width:{cxPt.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)}pt;height:{cyPt.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)}pt";
+        var oleAttr = hasFloatStyle ? "" : " o:ole=\"\"";
+
         var oleXml = $"""
 <w:object xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" w:dxaOrig="{cxTwips}" w:dyaOrig="{cyTwips}">
-{shapetypeXml}<v:shape id="{shapeId}" type="#_x0000_t75" style="width:{cxPt.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)}pt;height:{cyPt.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)}pt" o:ole=""{shapeAltAttr}>
+{shapetypeXml}<v:shape id="{shapeId}" type="#_x0000_t75" style="{shapeStyleAttr}"{oleAttr}{shapeAltAttr}>
 <v:imagedata r:id="{iconRelId}" o:title=""/>
 </v:shape>
 <o:OLEObject Type="Embed" ProgID="{System.Security.SecurityElement.Escape(progId)}" ShapeID="{shapeId}" DrawAspect="{drawAspect}" ObjectID="{objectId}" r:id="{embedRelId}"/>

@@ -401,7 +401,12 @@ public partial class WordHandler : IDocumentHandler
     internal sealed record OleEmitData(
         byte[] EmbeddedBytes, string OleKind, string EmbeddedContentType, string EmbeddedExt,
         byte[]? IconBytes, string? IconContentType,
-        string? ProgId, string? Display, string? Width, string? Height, string? Name);
+        string? ProgId, string? Display, string? Width, string? Height, string? Name,
+        // The verbatim VML v:shape style (only when it floats — carries
+        // position:absolute / margin-left / margin-top / z-index / wrap hints)
+        // plus the w:object native size, so a floating OLE round-trips out of the
+        // text flow instead of collapsing to inline (which pushes content down).
+        string? ShapeStyle, string? DxaOrig, string? DyaOrig);
 
     private const string RelNs = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
@@ -475,7 +480,7 @@ public partial class WordHandler : IDocumentHandler
             ? null
             : (drawAspect.Equals("Content", StringComparison.OrdinalIgnoreCase) ? "content" : "icon");
 
-        string? width = null, height = null, name = null;
+        string? width = null, height = null, name = null, shapeStyle = null;
         var shape = oleObj.Descendants().FirstOrDefault(e => e.LocalName == "shape");
         if (shape != null)
         {
@@ -484,6 +489,7 @@ public partial class WordHandler : IDocumentHandler
             var style = shape.GetAttributes().FirstOrDefault(a => a.LocalName == "style").Value;
             if (!string.IsNullOrEmpty(style))
             {
+                bool isFloating = false;
                 foreach (var seg in style.Split(';', StringSplitOptions.RemoveEmptyEntries))
                 {
                     var kv = seg.Split(':', 2);
@@ -493,12 +499,29 @@ public partial class WordHandler : IDocumentHandler
                     // accepts pt/cm/in, so the frame dimensions round-trip exactly.
                     if (k == "width") width = kv[1].Trim();
                     else if (k == "height") height = kv[1].Trim();
+                    else if (k == "position" && kv[1].Trim().Equals("absolute", StringComparison.OrdinalIgnoreCase))
+                        isFloating = true;
                 }
+                // Carry the verbatim style only when the OLE floats — an inline
+                // shape's style is just width/height, which AddOle rebuilds anyway,
+                // and forcing a verbatim inline style would defeat the width/height
+                // props. A floating shape's style holds the absolute position +
+                // z-index + wrap hints that keep it out of the text flow.
+                if (isFloating) shapeStyle = style;
             }
         }
 
+        // w:object native size (w:dxaOrig/w:dyaOrig) — preserve it verbatim so a
+        // floating OLE keeps Word's original object box; otherwise AddOle derives
+        // it from the display size, which can rescale the rendered object.
+        string? dxaOrig = oleObj.GetAttributes()
+            .FirstOrDefault(a => a.LocalName == "dxaOrig").Value;
+        string? dyaOrig = oleObj.GetAttributes()
+            .FirstOrDefault(a => a.LocalName == "dyaOrig").Value;
+
         return new OleEmitData(embeddedBytes, oleKind, embedPart.ContentType, embedExt,
-            iconBytes, iconCt, progId, display, width, height, name);
+            iconBytes, iconCt, progId, display, width, height, name,
+            shapeStyle, dxaOrig, dyaOrig);
     }
 
     // dump→batch round-trip carrier for an ActiveX form-control run — a

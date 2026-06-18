@@ -3557,6 +3557,12 @@ public static partial class WordBatchEmitter
             if (!string.IsNullOrEmpty(data.Width)) props["width"] = data.Width!;
             if (!string.IsNullOrEmpty(data.Height)) props["height"] = data.Height!;
             if (!string.IsNullOrEmpty(data.Name)) props["name"] = data.Name!;
+            // Floating-OLE positioning: the verbatim v:shape style (position:
+            // absolute + margin + z-index + wrap) keeps the object out of the text
+            // flow on replay, plus the original native object box.
+            if (!string.IsNullOrEmpty(data.ShapeStyle)) props["shapeStyle"] = data.ShapeStyle!;
+            if (!string.IsNullOrEmpty(data.DxaOrig)) props["dxaOrig"] = data.DxaOrig!;
+            if (!string.IsNullOrEmpty(data.DyaOrig)) props["dyaOrig"] = data.DyaOrig!;
             if (data.IconBytes is { Length: > 0 })
                 props["icon"] = $"data:{data.IconContentType ?? "image/png"};base64,{Convert.ToBase64String(data.IconBytes)}";
             items.Add(new BatchItem
