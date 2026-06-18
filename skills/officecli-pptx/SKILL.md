@@ -60,11 +60,13 @@ Rule of thumb: **min shape height ≈ font_pt × 0.05cm**. An 18pt sublabel in a
 
 Title must be **≥ 2× body size** (36pt over 20pt works; 28pt over 20pt looks timid). Four legit exceptions to body ≥ 18pt: chart axis labels, legends, footer / page number, and ≤ 5-word KPI sublabels (e.g. "Active users"). Descriptive sentences must be ≥ 18pt. Left-align body; center only titles and hero numbers. If "the cards won't fit", drop cards instead of shrinking font.
 
-**Two fonts max, one palette.** One heading font + one body font (e.g. Georgia + Calibri). One dominant brand color (60–70% weight) + one supporting + one accent. Never mix 4+ colors in body content.
+**Two fonts max, one palette.** One heading font + one body font (e.g. Georgia + Calibri) — a third *display* face is fine only for big numerals or the cover title, as long as that heading+body pair stays intact. One dominant brand color (60–70% weight) + one supporting + one accent. Never mix 4+ colors in body content. **The palettes and font pairings in Design Principles are a floor, not a menu:** if the user gave brand colors/fonts or an existing template, match those first; otherwise the named sets are calibrated seeds — blend or diverge freely, as long as the result isn't *worse* than them and still clears the contrast floor.
 
 **Every slide carries a non-text visual.** Shape, chart, icon, gradient band. A bullet-only deck is interchangeable with a Word doc. Exceptions: literal quote slides, code blocks, a single summary-table slide.
 
 **Speaker notes on every content slide.** `--type notes --prop text="..."`. The speaker needs a script; the audience shouldn't read the slide verbatim.
+
+**Copy reads human, not AI.** Titles orient on content, not punchline. No "It's not X. It's Y.", no manufactured tension, no faux-insight ("The magic moment"), no one-word drama ("Momentum."). Cut hype adjectives (seamless, robust, game-changing) — let the number carry it.
 
 **Preserve existing templates.** When a file already has a theme and masters, match them. Existing conventions override these guidelines.
 
@@ -73,22 +75,12 @@ Title must be **≥ 2× body size** (36pt over 20pt works; 28pt over 20pt looks 
 Before declaring done, the per-slide render (see QA) MUST satisfy:
 
 - **No placeholder tokens rendered as content.** `{{name}}`, `$fy$24`, `<TODO>`, `lorem`, `xxxx`, empty `()`/`[]` in chart titles never appear.
-- **No overflow past slide edges.** For 16:9 (33.87 × 19.05cm), every shape satisfies `x + width ≤ 33.87cm` AND `y + height ≤ 19.05cm`. `get` and check — don't eyeball.
-- **No text overflow inside shapes.** A 72pt KPI in a 4cm-tall box clips. Shrink the number, enlarge the box, or shorten the text — never trim content to fit.
+- **No overflow off-edge, no clipped text in shapes.** `view issues` flags both (`shape_off_slide` + a text-fit hint). To fix a clip: grow the box or shorten the value — never trim content to fit.
 - **Cover slide is content-rich.** Title + subtitle + presenter/client block + date + a brand band or key-takeaway strap. A cover with 80% whitespace reads as a stub.
-- **Contrast.** On fills with brightness < 30% (`1E2761`, `36454F`, `000000`, deep forest / berry / cherry), every run of body text, card body, chart series fill, and icon color must be `FFFFFF` or brightness > 80%. Mid-gray (`6B7B8D` ≈ 44%) reads fine on a laptop and vanishes on projection. Verify via `view html` after the dark-fill pass.
-- **No `\$` literals in slide text.** If `view text` shows a literal `\$`, the shell didn't unescape it (the CLI does NOT interpret `\$`). Single-quote the value: `--prop text='$15M'`. Note: `\n` and `\t` ARE interpreted as a real paragraph break / tab; seeing those as literals means the value was double-escaped (`\\n`).
+- **Contrast.** `view issues` auto-flags the common case — opaque dark text on a shape's own dark fill (`low_contrast`). It can't see the rest: icon / chart-series fills, scheme/inherited colors, or text over a *separate* background shape. So on any fill with brightness < 30% (`1E2761`, `36454F`, deep forest / berry / cherry), still confirm every body run, card body, chart series, and icon is `FFFFFF` or brightness > 80% — mid-gray (`6B7B8D` ≈ 44%) reads on a laptop and vanishes on projection. Spot-check via `view html` after the dark-fill pass.
+- **No `\$` literals in slide text.** A literal `\$` in `view text` means the value wasn't single-quoted — fix per Shell discipline above. (`\n` / `\t` ARE real breaks; literal `\\n` means double-escaping.)
 
 If any fails, STOP and fix before declaring done.
-
-### KPI fit math
-
-**KPI text must fit the card — pre-compute, don't eyeball.** In a 7cm-wide card at 60pt Georgia bold, values with `$` and `.` (wide glyphs) wrap at 4 characters. `$9.4M` breaks the card; use `$9M` + "USD millions" sublabel, or move to the 3-card 9.78cm layout. Upper bound: `max_size_pt ≈ card_width_cm × denom`, where denom = 10 for 1–2 chars, 7 for 3–4 chars, 5 for 5+ chars.
-
-### `layout=blank` and alt text
-
-- **`layout=blank` is the default for custom designs.** Titles become plain `shape` elements, not placeholders. `view outline` / `view issues` reporting `(untitled)` / `Slide has no title` is **expected**, not a defect. Use `layout=title` + `placeholder[title]` only when screen-reader outline compatibility matters.
-- **Alt text verification.** `view stats "Pictures without alt text: 0"` is a false-positive zero (alt auto-fills to filename) — verify via `view annotated`.
 
 ## Design Principles
 
@@ -99,13 +91,14 @@ A deck is not a document. The audience has 3 seconds to get each slide. Before a
 Standard widescreen is **33.87 × 19.05cm**. Treat it as a 12-column grid internally:
 
 - **Edge margin ≥ 1.27cm** (0.5") on all sides.
-- **Inter-block gap ≥ 0.76cm** (0.3") between cards / columns / rows.
+- **Inter-block gap ≥ 0.76cm** (0.3") between cards / columns / rows — pick one value (0.76 or 1.27cm) and use it everywhere; mixed gaps look unfinished.
 - **≥ 20% negative space per slide.** Filling every pixel reads as amateur.
+- **Compose, don't web-center.** Whitespace is structural: a slide top-weighted with open space in the lower third is correct composition, not an empty defect. Intentional asymmetry (content left, breathing room right) reads more designed than centering everything — don't fill a gap just because it's there.
 - For card grids: `usable = 33.87 − 2·margin − (N−1)·gap`, then `col_width = usable / N`. Don't hand-pick x coordinates.
 
 ### Font pairings
 
-Two fonts max — one for headings, one for body. Pair by document register, not by novelty. "Best For" is a prompt, not a decree; if the topic matches a row, use it as the default and move on.
+Pair by document register, not by novelty. "Best For" is a prompt, not a decree; a pairing outside this table is fine if it fits — these 8 are seeds, not the set.
 
 | Header | Body | Best For |
 |---|---|---|
@@ -118,11 +111,11 @@ Two fonts max — one for headings, one for body. Pair by document register, not
 | Palatino | Garamond | Elegant editorial, luxury, nonprofit |
 | Consolas | Calibri | Developer tools, technical / engineering |
 
-Set both fonts explicitly on every shape (`--prop font=Georgia` on title shapes, `--prop font=Calibri` on body shapes) — theme-default inheritance drifts between masters.
+Set both fonts explicitly on every shape (`--prop font=Georgia` on titles, `--prop font=Calibri` on body), not via theme inheritance.
 
 ### Color and contrast
 
-One dominant color does 60–70% of visual weight, two supporting tones, one accent used sparingly. Never use 4+ colors in body content. Columns are: **Primary** (dominant — the one color you see first), **Secondary** (the supporting tone), **Accent** (sparing, one-hit emphasis), **Text** (body on light fills), **Muted** (captions / axis labels / footer).
+The columns: **Primary** (dominant — 60–70% of weight, the color you see first), **Secondary** (supporting tone), **Accent** (sparing, one-hit emphasis), **Text** (body on light fills), **Muted** (captions / axis labels / footer).
 
 | Theme | Primary | Secondary | Accent | Text | Muted |
 |---|---|---|---|---|---|
@@ -156,17 +149,19 @@ Wrong chart type kills the 3-second test:
 
 Rule of thumb: if > 3 series and > 8 categories, split into two charts or switch to a table.
 
-### Animation restraint
+### Animation
 
-Each animation is a cognitive interrupt. Limits:
-- **≤ 1 animation per slide**, duration **≤ 600ms**.
-- Use only `fade`, `appear`, or a single `zoom-entrance` on a hero slide.
-- Never: `bounce`, `swivel`, `fly-from-edge`, `spin`, multi-object choreography.
-- Animation is runtime-only — verify in a live presentation viewer.
+Use as much or as little as the brand and content call for — a formal finance deck trends to near-zero, a product launch can be more expressive. Animation is a tool, not décor. Three floors keep it from hurting the deck (none caps how much you use):
+
+- **Purposeful** — each one reveals or emphasizes (progressive bullet reveal, a build-up chart), never decorates. If it doesn't aid comprehension, cut it.
+- **Degrades gracefully** — pptx animation renders inconsistently across viewers (Keynote / Slides / web / mobile) and may not play at all, so every slide must read correctly as a *static* frame. Never hide essential content behind a reveal.
+- **Verify live** — animation is runtime-only; `view html` and screenshots can't see it, so confirm in a real presentation viewer before shipping.
+
+Taste steer (not a ban): `fade` / `appear` / a single `zoom-entrance` with snappy durations (~hundreds of ms) fit most decks; `bounce` / `swivel` / `spin` / `fly-from-edge` / dense multi-object choreography usually read amateur — reach for them only when the brand is deliberately playful.
 
 ### Layout patterns & data display
 
-Vary layout across slides — repeating the same pattern makes every slide feel identical. Pick one per slide from these building blocks:
+Vary layout across slides — repeating the same pattern makes every slide feel identical. These are common building blocks, not the full set — pick one per slide, or build a layout outside the table when the content calls for it:
 
 | Pattern | When to use | Key measurement |
 |---|---|---|
@@ -177,35 +172,39 @@ Vary layout across slides — repeating the same pattern makes every slide feel 
 | **Large stat callout** (60-72pt number + ≤5-word sublabel below) | Single KPI, milestone, market size | Use shape, NOT a chart; sublabel 14-16pt muted |
 
 **Data display quick rules:**
-- One big number reads faster than a chart — use a `shape` with 60-72pt bold for a single KPI.
 - Comparison columns (before/after, A vs B) beat a table for 2-3 options.
 - Timelines and process flows: numbered step shapes + connectors, not a bullet list.
 
+### Image treatment (only when a slide uses a photo / screenshot / logo)
+
+**Read the image first** (open the file) and choose treatment from what you see — don't place blind from a filename.
+
+- **Full-bleed photo** → size to COVER the region (crop edges), no border.
+- **Screenshot / diagram / logo** → size to FIT (never crop content). A transparent or fit image sits on a contrasting fill — drop a colored rectangle behind it, don't let it float on white.
+- **Text over a photo** → never raw on the image. Put it on a card, or lay a protection scrim between image and text (a dark rectangle at ~50–60% opacity, or a gradient fading from the text edge).
+- Never stretch (distort the aspect ratio); don't overlay text on a busy screenshot.
+- Prefer user-provided images / brand assets; no emoji or self-drawn art unless asked.
+
 ### Visual motif commitment
 
-Pick ONE distinctive element (rounded image frames, section numbers in filled circles, single-side border band, diagonal accent strips) and carry it to every slide. Declare it in your build plan first: `## Motif: numbered circles in brand color`.
+Pick ONE distinctive element (rounded image frames, section numbers in filled circles, single-side border band, diagonal accent strips) and carry it to every slide — commit across the whole deck; styling one slide and leaving the rest plain reads as abandoned. A secondary motif is fine only if it doesn't compete with the primary. Declare it in your build plan first: `## Motif: numbered circles in brand color`.
 
-### What to avoid (common design mistakes)
+### The one visual AI-tell with no positive home
 
-These are the patterns that make a deck look AI-generated or amateur:
+(Other "don'ts" — vary layout, left-align body, pick palette by topic, every slide a visual, commit the motif deck-wide — are already stated as positive rules above.)
 
-- **NEVER place a decorative line under slide titles.** Underline stripes below headings are the single most common AI-slide tell. Use whitespace or background color change instead.
-- **Don't repeat the same layout across consecutive slides.** Alternate between two-column, callout, grid, and half-bleed patterns. Same layout = same visual rhythm = audience tunes out.
-- **Don't center body text.** Left-align all paragraphs, lists, card descriptions. Center only slide titles and hero numbers.
-- **Don't default to blue** because it feels "professional." Pick the palette that fits the topic — finance reads navy, sustainability reads forest, energy reads coral.
-- **Don't use inconsistent spacing.** Choose either 0.76cm or 1.27cm as your inter-block gap and use it everywhere. Mixed gaps look unfinished.
-- **Don't create text-only slides.** If a slide has only a title and bullets, add a supporting shape, chart, icon, or image. A purely textual slide is a Word paragraph.
-- **Don't style one slide and leave the rest plain.** Commit fully or keep it simple throughout — partial styling reads as abandoned.
+- **No decorative underline under slide titles.** A stripe / rule below a heading is the single most common AI-slide tell — use whitespace or a background-color change instead. (Copy-level tells: see "Copy reads human".)
 
 ## Common Workflow
 
 1. **Open/close mode.** Always `officecli open <file>` at start + `officecli close <file>` at end. Resident is the default, not an optimization. Use `batch` for repetitive shape grids.
 2. **Orient.** New deck: `officecli create "$FILE"`. Existing: `officecli view "$FILE" outline` first. Never edit blind.
-3. **Build in display order.** Add slides in audience-view order: cover → agenda → section-1 divider → section-1 content → section-2 divider → … → closing. `--index` on slide add works, but linear append keeps the build script readable and avoids index-arithmetic bugs. **Before final delivery, confirm slide count + narrative arc match your build plan.** Gate 3's order-sanity check catches cases where the cover ends up as slide 11 of 14 instead of slide 1.
-4. **Incremental per slide.** Create slide + background, then title, then supporting shapes / charts / connectors. Always `layout=blank` for custom designs. After each structural op, `get /slide[N] --depth 1` to confirm shape IDs.
-5. **Format to spec.** Per the Requirements table; formatting is deliverable, not polish.
-6. **Close + verify.** `officecli close` writes the ZIP. Always open in the target presentation viewer before shipping — chart colors, animations, fonts, and zoom are runtime features `view html` can't render. Full verification in QA below.
-7. **QA — assume there are problems.** Fix-and-verify until a cycle finds zero new issues.
+3. **Title sequence first (plan, don't build yet).** Before creating any slide or shape, write out the full ordered list of slide titles. If someone reading ONLY the titles can't follow the argument, fix the arc now — cheaper in a list than after 14 slides. Pick ONE title grammar — all topic noun-phrases or all action statements, never a mix — and hold it throughout (see "Copy reads human").
+4. **Build in display order.** Add slides in audience-view order: cover → agenda → section-1 divider → section-1 content → section-2 divider → … → closing. `--index` on slide add works, but linear append keeps the build script readable and avoids index-arithmetic bugs. **Before final delivery, confirm slide count + narrative arc match your build plan.** Gate 3's order-sanity check catches cases where the cover ends up as slide 11 of 14 instead of slide 1.
+5. **Incremental per slide.** Create slide + background, then title, then supporting shapes / charts / connectors. Always `layout=blank` for custom designs. After each structural op, `get /slide[N] --depth 1` to confirm shape IDs.
+6. **Format to spec.** Per the Requirements table; formatting is deliverable, not polish.
+7. **Close + verify.** `officecli close` writes the ZIP. Always open in the target presentation viewer before shipping — chart colors, animations, fonts, and zoom are runtime features `view html` can't render. Full verification in QA below.
+8. **QA — assume there are problems.** Fix-and-verify until a cycle finds zero new issues.
 
 ## Quick Start
 
@@ -247,7 +246,7 @@ officecli view "$FILE" outline          # slide count + titles
 officecli view "$FILE" annotated        # complete per-slide breakdown with fonts, sizes, tables, charts
 officecli view "$FILE" text --start 1 --end 5   # text dump (does NOT extract table cells — use get)
 officecli view "$FILE" issues           # empty slides, overflow hints
-officecli view "$FILE" stats            # counts + missing alt (false-positive zero — verify via view annotated)
+officecli view "$FILE" stats            # counts + totals (alt count unreliable — see Alt text verification)
 ```
 
 **Inspect one element.** XPath-style paths, 1-based. ALWAYS quote. Prefer `@name=` / `@id=` selectors over positional `[N]` (stable across reorderings). `[last()]` works. Add `--json` for machine output.
@@ -276,6 +275,10 @@ officecli view "$FILE" html                # prints an HTML preview path; Read i
 officecli view "$FILE" svg --start 3 --end 3   # single slide SVG (charts + gradients do NOT render in SVG)
 ```
 
+**Reading the output — two expected non-defects:**
+- **`layout=blank` has no title placeholder.** Titles are plain `shape` elements, so `view outline` / `view issues` reporting `(untitled)` / `Slide has no title` is **expected**, not a defect. Use `layout=title` + `placeholder[title]` only when screen-reader outline compatibility matters.
+- **Alt text verification.** `view stats "Pictures without alt text: 0"` is a false-positive zero (alt auto-fills to filename) — verify via `view annotated`.
+
 ## Creating & Editing
 
 Verbs: `add` / `set` / `remove` / `move` / `swap` / `batch` / `raw-set`. Ninety percent of a deck is slides, shapes, text, a few charts, pictures, connectors.
@@ -300,9 +303,7 @@ officecli add "$FILE" /slide[2] --type shape --prop name=Title --prop text="Key 
   --prop font=Georgia --prop size=36 --prop bold=true --prop color=1E2761 --prop fill=none
 ```
 
-Positioning is explicit — no layout engine, you own the grid math. `--prop preset=` picks geometry (`rect`, `roundRect`, `ellipse`, `triangle`, `arrow`, `star5`, ...); custom `M...Z` paths are not supported — pick a preset. **Name shapes at creation** (`--prop name=HeroTitle`) and address later with `"/slide[N]/shape[@name=HeroTitle]"` — positional `/shape[3]` breaks after any z-order / remove.
-
-> **Prefer `@name=` over `@id=`.** Names you set yourself survive remove-then-add and z-order ops cleanly. After any structural change, re-`get --depth 1` before referencing positional indexes.
+Positioning is explicit — no layout engine, you own the grid math. `--prop preset=` picks geometry (`rect`, `roundRect`, `ellipse`, `triangle`, `arrow`, `star5`, ...); custom `M...Z` paths are not supported — pick a preset. **Name shapes at creation** (`--prop name=HeroTitle`) and address later with `"/slide[N]/shape[@name=HeroTitle]"` — names survive z-order / remove-then-add, whereas positional `/shape[3]` (and even `@id=`) shift. Re-`get --depth 1` after any structural change before using positional indexes.
 
 ### Text inside shapes (paragraphs, runs, styling)
 
@@ -342,7 +343,7 @@ officecli add "$FILE" /slide[4] --type picture --prop src=hero.jpg \
   --prop alt="Product hero, gradient lit from right"
 ```
 
-Confirm with `officecli query "$FILE" 'picture:no-alt'` — must be empty before delivery (but remember `view stats` is a false-positive zero because alt auto-fills to filename).
+Confirm with `officecli query "$FILE" 'picture:no-alt'` — must be empty before delivery.
 
 ### Connectors (LEAD — flowcharts / decision trees first-class)
 
@@ -358,7 +359,7 @@ officecli add "$FILE" /slide[5] --type connector \
 
 ### Animations (LEAD)
 
-One preset per slide, ≤ 600ms. Preset names + duration syntax: `help pptx animation`.
+Use per the Animation floors above (purposeful, degrades gracefully, verify live). Preset names + duration syntax: `help pptx animation`.
 
 ```bash
 officecli set "$FILE" "/slide[2]/shape[@name=HeroCard]" --prop animation=fade-entrance-400
@@ -384,7 +385,7 @@ officecli set "$FILE" "/slide[2]/shape[@name=HeroCard]" --prop animation=none   
 
 ### Deck-level recipes
 
-Patterns not obvious from the primitives. Each gives the **visual outcome** first, then a runnable block. `$FILE` = your filename. Use `/slide[last()]` to address the slide you just added.
+Patterns not obvious from the primitives. Each gives the **visual outcome** first, then a runnable block. `$FILE` = your filename. Use `/slide[last()]` to address the slide you just added. The recipes demonstrate **structure and coordinate math** — swap in the palette / fonts you chose for this topic; the navy `1E2761` + Georgia is just the example's theme, not a house style to copy verbatim.
 
 **Z-order.** Later-added shapes are on top. Add background decoration FIRST, titles LAST. To fix after the fact: `--prop zorder=back/front` (renumbers siblings — re-`get --depth 1` before stacking more).
 
@@ -463,7 +464,7 @@ done
 
 #### (d) Multi-slide deck skeletons
 
-No code block — it's a rhythm. **Alternate dark divider slides with white content slides** using the recipes above:
+No code block — it's a rhythm. The sequences below are **illustrations of one working cadence (alternating dark dividers with white content), not required running orders** — derive your actual arc from the content first (see "Title sequence first"), then borrow whatever divider/content rhythm fits:
 
 - **10-slide review:** Cover · Agenda · 3 KPI · Div01 · Chart · Chart · Div02 · Flow · Timeline · Close
 - **20-slide pitch:** same rhythm × 2, sectioned Problem · Solution · Market · Product · Traction · Model · Team · Financials · Ask
@@ -548,7 +549,7 @@ done
 [ $n -eq 1 ] && { echo "no headless backend — using fallback"; SCREENSHOT_FAILED=1; }
 ```
 
-Read each PNG against the checklist; delegate to a subagent when the harness has one.
+**Judge every PNG against the checklist, adversarially** — "assume problems exist; finding none means you didn't look hard enough." Report one `slide N: <issue>` line per problem, or `PASS`. This step is required however you run it. **If** your harness can spawn a subagent, delegate the judging to a *fresh, independent* one — the agent that built the deck is biased toward "looks fine", a separate pair of eyes is more critical — handing it the screenshots + this checklist and the same adversarial framing. No subagent? Do exactly the same yourself.
 
 **Fallback — HTML-text** (no image-Read or no browser): read `view "$FILE" html` as text. DOM cannot prove **dark-on-dark / fine overlap / arrowheads / gap-margin metrics / column alignment** — flag these as "not visually verified" rather than PASS.
 
@@ -560,6 +561,7 @@ Read each PNG against the checklist; delegate to a subagent when the harness has
 - **text overflow** — clipped at slide or shape boundary (KPI cards, narrow boxes)
 - **narrow text box** — content fits technically but wraps to many short lines (1–2 words each); long sublabel in a 3cm KPI card, body line in a too-tight column
 - **dark-on-dark** — fill brightness < 30% with text/icon brightness < 80% (incl. dark icons on dark without a contrasting circle)
+- **image treatment** — photo stretched/distorted, text raw on a busy image (no card/scrim), screenshot or logo cropped, transparent image floating on white
 - **missing arrowheads** — flowchart connectors as plain lines
 - **decorative-line / title mismatch** — accent bar sized for one-line title but title wrapped to two (or vice versa)
 - **footer / citation collision** — source line, page number, or footnote touching content above
