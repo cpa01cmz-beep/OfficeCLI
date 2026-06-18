@@ -132,9 +132,22 @@
       "readback": "string",
       "enforcement": "report"
     },
+    "opacity": {
+      "type": "number",
+      "description": "picture opacity. Input as a decimal 0.0-1.0 or a percent 2-100. Stored on the blip as a:alphaModFix @amt (value * 100000); readback emits the decimal 0.0-1.0 form.",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop opacity=0.5",
+        "--prop opacity=80"
+      ],
+      "readback": "decimal in [0.0, 1.0]",
+      "enforcement": "report"
+    },
     "brightness": {
       "type": "number",
-      "description": "luminance offset in [-100, 100]. Stored on the blip as a:lumOff (value * 1000). Combine with `contrast` to mirror PowerPoint's Picture Format → Corrections.",
+      "description": "luminance brightness in [-100, 100]. Stored on the blip as a:lum @bright (value * 1000). Combine with `contrast` to mirror PowerPoint's Picture Format → Corrections.",
       "add": false,
       "set": true,
       "get": true,
@@ -147,7 +160,7 @@
     },
     "contrast": {
       "type": "number",
-      "description": "luminance modulation in [-100, 100]. Stored on the blip as a:lumMod (100000 + value * 1000). Combine with `brightness`.",
+      "description": "luminance contrast in [-100, 100]. Stored on the blip as a:lum @contrast (value * 1000). Combine with `brightness`.",
       "add": false,
       "set": true,
       "get": true,

@@ -347,6 +347,7 @@
       "type": "enum",
       "values": [
         "normal",
+        "shrink",
         "shape",
         "none"
       ],
@@ -356,13 +357,50 @@
       "add": true,
       "set": true,
       "get": true,
-      "description": "text body auto-fit mode. 'normal' shrinks text to fit; 'shape' resizes the shape to fit text; 'none' overflows. Aliases on Set: true/shrink → normal, resize → shape, false → none.",
+      "description": "text body auto-fit mode. 'normal'/'shrink' shrinks text to fit (normAutofit); 'shape' resizes the shape to fit text; 'none' overflows. Aliases (Add+Set): true/shrink → normal, resize → shape, false → none.",
       "examples": [
         "--prop autoFit=normal",
+        "--prop autoFit=shrink",
         "--prop autoFit=shape",
         "--prop autoFit=none"
       ],
       "readback": "normal | shape | none",
+      "enforcement": "report"
+    },
+    "fontScale": {
+      "type": "string",
+      "aliases": [
+        "fontscale"
+      ],
+      "add": true,
+      "set": true,
+      "get": true,
+      "description": "normAutofit font-scale (shrink-to-fit text ratio). Input as a percent: bare integer 0-100 (75 → 75%) or N% form ('75%'). Stored as OOXML thousandths-of-percent (75000); readback emits the raw OOXML integer.",
+      "examples": [
+        "--prop fontScale=75",
+        "--prop fontScale=75%"
+      ],
+      "readback": "OOXML thousandths-of-percent (e.g. 75000)",
+      "enforcement": "report"
+    },
+    "lnSpcReduction": {
+      "type": "string",
+      "aliases": [
+        "lnspcreduction",
+        "lineSpaceReduction",
+        "linespacereduction",
+        "lineSpacingReduction",
+        "linespacingreduction"
+      ],
+      "add": true,
+      "set": true,
+      "get": true,
+      "description": "normAutofit line-space reduction (shrink-to-fit spacing ratio). Input as a percent: bare integer 0-100 (20 → 20%) or N% form ('20%'). Stored as OOXML thousandths-of-percent (20000); readback emits the raw OOXML integer.",
+      "examples": [
+        "--prop lnSpcReduction=20",
+        "--prop lineSpaceReduction=20%"
+      ],
+      "readback": "OOXML thousandths-of-percent (e.g. 20000)",
       "enforcement": "report"
     },
     "lineSpacing": {
