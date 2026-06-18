@@ -382,6 +382,16 @@ public partial class PowerPointHandler
                         slide2.Show = null;
                     break;
                 }
+                case "showmastershapes":
+                {
+                    // <p:sld showMasterSp="0"> — suppress master-level
+                    // decoration shapes. Default (null) means show. false→"0".
+                    if (IsTruthy(value))
+                        slide2.ShowMasterShapes = null;
+                    else
+                        slide2.ShowMasterShapes = false;
+                    break;
+                }
                 case "showfooter":
                 case "showslidenumber":
                 case "showdate":
@@ -476,7 +486,7 @@ public partial class PowerPointHandler
                     if (!GenericXmlQuery.SetGenericAttribute(slide2, key, value))
                     {
                         if (unsupported.Count == 0)
-                            unsupported.Add($"{key} (valid slide props: background, background.mode, background.alpha, background.scale, layout, transition, name, align, distribute, targets, showFooter, showSlideNumber, showDate, showHeader)");
+                            unsupported.Add($"{key} (valid slide props: background, background.mode, background.alpha, background.scale, layout, transition, name, align, distribute, targets, showFooter, showSlideNumber, showDate, showHeader, showMasterShapes)");
                         else
                             unsupported.Add(key);
                     }
