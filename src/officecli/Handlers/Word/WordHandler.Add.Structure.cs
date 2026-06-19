@@ -1623,6 +1623,23 @@ public partial class WordHandler
                 pPrShd.Shading = ParseShadingValue(value);
                 continue;
             }
+            // CONSISTENCY(style-snaptogrid-pPr): <w:snapToGrid> is dual-valid —
+            // legal in BOTH CT_PPr and CT_RPr. On a docGrid document a paragraph
+            // style's pPr-level <w:snapToGrid w:val="0"/> turns OFF grid-snapping
+            // for the whole paragraph (lines keep their natural height); the dump
+            // reader flattens that to the bare `snapToGrid` key. ApplyRunFormatting
+            // (step 1) handles snapToGrid as an rPr toggle, so without this branch
+            // the property round-tripped into rPr (character-level) and the
+            // paragraph re-snapped to the grid — taller lines, cumulative drift
+            // (BUG-DUMP-STYLE-SNAPGRID). Route it to pPr for paragraph/table
+            // styles; character styles fall through to the rPr path below.
+            if (string.Equals(key, "snapToGrid", StringComparison.OrdinalIgnoreCase)
+                && (styleType == StyleValues.Paragraph || styleType == StyleValues.Table))
+            {
+                var pPrSnap = newStyle.StyleParagraphProperties ?? EnsureStyleParagraphProperties(newStyle);
+                pPrSnap.SnapToGrid = new SnapToGrid { Val = OnOffValue.FromBoolean(IsTruthy(value)) };
+                continue;
+            }
             // 1) Run-formatting helper (covers underline/strike/highlight/caps/
             //    smallCaps/dstrike/vanish/shadow/emboss/imprint/noProof/rtl/
             //    superscript/subscript/charSpacing/shading/...).

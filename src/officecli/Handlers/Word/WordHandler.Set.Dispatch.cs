@@ -1697,6 +1697,19 @@ public partial class WordHandler
                 continue;
             }
 
+            // CONSISTENCY(style-snaptogrid-pPr): see AddStyle (BUG-DUMP-STYLE-SNAPGRID).
+            // snapToGrid is dual-valid (CT_PPr + CT_RPr); for a paragraph/table
+            // style it disables grid-snapping for the whole paragraph and must
+            // land in pPr. ApplyRunFormatting below would mis-route it to rPr, so
+            // intercept it here first. Character styles fall through to rPr.
+            if (string.Equals(key, "snapToGrid", StringComparison.OrdinalIgnoreCase)
+                && (style.Type?.Value == StyleValues.Paragraph || style.Type?.Value == StyleValues.Table))
+            {
+                var pPrSnap = style.StyleParagraphProperties ?? EnsureStyleParagraphProperties(style);
+                pPrSnap.SnapToGrid = new SnapToGrid { Val = OnOffValue.FromBoolean(IsTruthy(value)) };
+                continue;
+            }
+
             var rPrProbeFmt = new StyleRunProperties();
             if (ApplyRunFormatting(rPrProbeFmt, key, value))
             {
