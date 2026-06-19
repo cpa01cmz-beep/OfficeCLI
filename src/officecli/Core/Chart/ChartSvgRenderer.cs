@@ -851,6 +851,12 @@ internal partial class ChartSvgRenderer
         // cumulative sum of itself and all series below it. Percent normalizes
         // each category's stack to 100. Transform the series up-front so axis
         // scaling, markers, and labels all reflect the stacked geometry.
+        // R44: preserve the pre-stack series so data-label TEXT shows the
+        // original per-series value, while geometry/markers/axis use the
+        // stacked (cumulative) values. Mirrors the bar path's `rawVal` split:
+        // the bar renderer labels the original value (or percentage when
+        // showPercent), never the cumulative stack height.
+        var originalSeries = series;
         if (stacked || percent)
             series = StackSeries(series, percent);
 
@@ -1040,7 +1046,14 @@ internal partial class ChartSvgRenderer
                 sb.AppendLine($"        {RenderMarkerSvg(shape, pts[p].x, pts[p].y, mSize, lineColor)}");
                 if (showDataLabels)
                 {
-                    var val = pts[p].val;
+                    // R44: label TEXT uses the original (pre-stack) per-series
+                    // value; the label POSITION stays at the stacked vertex
+                    // (pts[p]). For non-stacked charts originalSeries == series,
+                    // so pts[p].val and the original value are identical.
+                    var val = (stacked || percent) && s < originalSeries.Count
+                              && p < originalSeries[s].values.Length
+                        ? originalSeries[s].values[p]
+                        : pts[p].val;
                     // BUG5(R25): honor <c:dLbls><c:numFmt> on the data labels
                     // (e.g. "$#,##0"); fall back to the value-axis numFmt (mirrors
                     // the bar LabelText path) then the bare-integer shortcut.
