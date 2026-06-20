@@ -895,12 +895,16 @@ public partial class PowerPointHandler
 
             // Superscript/subscript. OOXML baseline is a raw integer where
             // 1000 == 1% (so super preset 30000 == 30%, sub preset -25000 == -25%).
-            // Map proportionally to CSS vertical-align:<percent>% — positive raises,
-            // negative lowers — instead of a binary super/sub keyword so distinct
-            // baselines render at distinct heights (matches real PowerPoint).
+            // Real PowerPoint shifts the glyph by baseline% × the ORIGINAL (pre-shrink)
+            // font size as an ABSOLUTE distance — positive raises, negative lowers.
+            // CSS vertical-align:<percent>% is a percentage of line-height (not
+            // font-size) and the span's size is already reduced to 65% below, so a
+            // percentage value renders ~1.7× too small. Emit an absolute pt offset
+            // computed against effFontPt instead (vertical-align in pt is independent
+            // of the span's own font-size) so distinct baselines render at the same
+            // distinct heights real PowerPoint uses.
             if (rp.Baseline?.HasValue == true && rp.Baseline.Value != 0)
             {
-                double percent = rp.Baseline.Value / 1000.0;
                 // PowerPoint auto-scales any baseline-shifted run to ~65% of its
                 // computed size (Office super/subscript convention), regardless of
                 // whether sz= was explicit. Replace the full-size font-size emitted
@@ -909,7 +913,8 @@ public partial class PowerPointHandler
                 string reducedFontSize = $"font-size:{effFontPt * 0.65:0.##}pt";
                 if (fsIdx >= 0) styles[fsIdx] = reducedFontSize;
                 else styles.Add(reducedFontSize);
-                styles.Add($"vertical-align:{percent:0.##}%");
+                double shiftPt = (rp.Baseline.Value / 100000.0) * effFontPt;  // baseline% × original font size
+                styles.Add($"vertical-align:{shiftPt:0.##}pt");
             }
         }
         // R7-2: run with no <a:rPr> at all — still inherit the cascade default color.
