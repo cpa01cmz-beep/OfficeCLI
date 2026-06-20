@@ -56,8 +56,12 @@ public partial class PowerPointHandler
         var lnRed = naf?.LineSpaceReduction?.Value;
         double lnSpcFactor = (lnRed.HasValue && lnRed.Value > 0) ? (1 - lnRed.Value / 100000.0) : 1.0;
         bool isFirstPara = true;
+        // PowerPoint ignores spaceAfter on the LAST paragraph of a text body (the
+        // gap would fall outside the body and has no effect on layout/centering).
+        var lastParaRef = textBody.Elements<Drawing.Paragraph>().LastOrDefault();
         foreach (var para in textBody.Elements<Drawing.Paragraph>())
         {
+            bool isLastPara = ReferenceEquals(para, lastParaRef);
             // Resolve per-paragraph font size based on paragraph level
             int? defaultFontSizeHundredths = null;
             // R7-2: inherited default run color from the placeholder/master cascade.
@@ -141,8 +145,8 @@ public partial class PowerPointHandler
             var saElem = pProps?.GetFirstChild<Drawing.SpaceAfter>()
                 ?? inheritedLvlPpr?.GetFirstChild<Drawing.SpaceAfter>();
             var saPts = saElem?.GetFirstChild<Drawing.SpacingPoints>()?.Val?.Value;
-            if (saPts.HasValue) paraStyles.Add($"margin-bottom:{saPts.Value / 100.0:0.##}pt");
-            else
+            if (saPts.HasValue && !isLastPara) paraStyles.Add($"margin-bottom:{saPts.Value / 100.0:0.##}pt");
+            else if (!isLastPara)
             {
                 var saPct = saElem?.GetFirstChild<Drawing.SpacingPercent>()?.Val?.Value;
                 if (saPct.HasValue)
