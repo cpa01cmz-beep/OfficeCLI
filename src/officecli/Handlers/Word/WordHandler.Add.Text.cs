@@ -1571,9 +1571,14 @@ public partial class WordHandler
             // leads). Mirrors the paraMarkDel block below.
             var pMarkRPr3 = pProps.ParagraphMarkRunProperties
                           ?? pProps.AppendChild(new ParagraphMarkRunProperties());
+            // BUG-DUMP-R71-PARAMARK-INSDEL-ORDER: seat via schema-order helper,
+            // not PrependChild. A paragraph mark CAN carry both ins and del
+            // (inserted by one reviewer, later deleted by another); two blind
+            // prepends order them by execution (del first), but CT_ParaRPr
+            // requires ins before del. The helper places each correctly.
             if (pMarkRPr3.GetFirstChild<Inserted>() == null)
             {
-                pMarkRPr3.PrependChild(new Inserted
+                InsertRunPropInSchemaOrder(pMarkRPr3, new Inserted
                 {
                     Author = author,
                     Date = date,
@@ -1622,16 +1627,17 @@ public partial class WordHandler
             var pMarkRPr2 = pProps.ParagraphMarkRunProperties
                           ?? pProps.AppendChild(new ParagraphMarkRunProperties());
             // Don't double-emit if a Deleted element already lives here.
-            // Prepend (not append) the <w:del> within the rPr: in CT_ParaRPr the
-            // ins/del/move group leads the sequence, so when markRPr.* props
-            // (rFonts / sz / …) were already added to this rPr the del must
-            // precede them or Word rejects it as an unexpected child. A
-            // paragraph mark is never both inserted and deleted, so prepending
-            // del cannot mis-order it relative to an ins. Mirrors the paragraph-
-            // mark ins handling above.
+            // BUG-DUMP-R71-PARAMARK-INSDEL-ORDER: seat the <w:del> via the
+            // schema-order helper. CT_ParaRPr leads with the ins/del/move group,
+            // so del must precede any markRPr.* props (rFonts/sz/…) already in
+            // the rPr. The earlier assumption that a paragraph mark is "never
+            // both inserted and deleted" is false — real review chains delete a
+            // previously-inserted mark, leaving both ins (id A) and del (id B);
+            // blind prepend then puts del before ins, which CT_ParaRPr rejects.
+            // The helper orders ins-then-del regardless of application order.
             if (pMarkRPr2.GetFirstChild<Deleted>() == null)
             {
-                pMarkRPr2.PrependChild(new Deleted
+                InsertRunPropInSchemaOrder(pMarkRPr2, new Deleted
                 {
                     Author = author,
                     Date = date,
