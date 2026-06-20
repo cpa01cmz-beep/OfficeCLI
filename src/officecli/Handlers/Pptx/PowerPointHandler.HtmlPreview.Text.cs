@@ -461,6 +461,10 @@ public partial class PowerPointHandler
                 // defRPr, applied as a fallback when the run sets neither.
                 bool? inhBold = inheritedDefRp?.Bold?.HasValue == true ? inheritedDefRp.Bold.Value : null;
                 bool? inhItalic = inheritedDefRp?.Italic?.HasValue == true ? inheritedDefRp.Italic.Value : null;
+                // Inherited caps (e.g. layout/master title defRPr cap="all"): applied
+                // as a fallback when the run sets no cap of its own, so all-caps title
+                // styles render uppercase (matching PowerPoint).
+                Drawing.TextCapsValues? inhCap = inheritedDefRp?.Capital?.HasValue == true ? inheritedDefRp.Capital.Value : null;
                 // R63: walk the paragraph's children IN DOCUMENT ORDER so that a
                 // soft line break (<a:br>, Drawing.Break) interleaved between runs
                 // emits its <br> at the right position. Previously runs were all
@@ -472,7 +476,7 @@ public partial class PowerPointHandler
                 {
                     if (child is Drawing.Run run)
                     {
-                        RenderRun(sb, run, themeColors, defaultFontSizeHundredths, placeholderPart, themeFontFallback, fontScale, defaultRunColor, inhBold, inhItalic, tabCtx);
+                        RenderRun(sb, run, themeColors, defaultFontSizeHundredths, placeholderPart, themeFontFallback, fontScale, defaultRunColor, inhBold, inhItalic, tabCtx, inhCap);
                     }
                     else if (child is Drawing.Break)
                     {
@@ -496,7 +500,7 @@ public partial class PowerPointHandler
                         if (fldRpr != null)
                             fldRun.RunProperties = (Drawing.RunProperties)fldRpr.CloneNode(true);
                         fldRun.Text = new Drawing.Text(fldText);
-                        RenderRun(sb, fldRun, themeColors, defaultFontSizeHundredths, placeholderPart, themeFontFallback, fontScale, defaultRunColor, inhBold, inhItalic, tabCtx);
+                        RenderRun(sb, fldRun, themeColors, defaultFontSizeHundredths, placeholderPart, themeFontFallback, fontScale, defaultRunColor, inhBold, inhItalic, tabCtx, inhCap);
                     }
                 }
             }
@@ -625,7 +629,7 @@ public partial class PowerPointHandler
     private static void RenderRun(StringBuilder sb, Drawing.Run run, Dictionary<string, string> themeColors,
         int? defaultFontSizeHundredths = null, OpenXmlPart? part = null, string? themeFontFallback = null,
         double fontScale = 1.0, string? defaultRunColor = null,
-        bool? inheritedBold = null, bool? inheritedItalic = null, TabContext? tabCtx = null)
+        bool? inheritedBold = null, bool? inheritedItalic = null, TabContext? tabCtx = null, Drawing.TextCapsValues? inheritedCap = null)
     {
         var text = run.Text?.Text ?? "";
         if (string.IsNullOrEmpty(text)) return;
@@ -848,11 +852,15 @@ public partial class PowerPointHandler
 
             // Caps (rPr/@cap). all → text-transform:uppercase; small → font-variant-caps:small-caps
             // (browsers fall back to synthetic small-caps when the font lacks the SC variant).
-            if (rp.Capital?.HasValue == true && rp.Capital.Value != Drawing.TextCapsValues.None)
+            // Effective cap: the run's own cap wins; otherwise inherit from the
+            // layout/master defRPr (e.g. an all-caps title style) so the text
+            // renders uppercase like PowerPoint.
+            var effCap = rp.Capital?.HasValue == true ? rp.Capital.Value : inheritedCap;
+            if (effCap.HasValue && effCap.Value != Drawing.TextCapsValues.None)
             {
-                if (rp.Capital.Value == Drawing.TextCapsValues.All)
+                if (effCap.Value == Drawing.TextCapsValues.All)
                     styles.Add("text-transform:uppercase");
-                else if (rp.Capital.Value == Drawing.TextCapsValues.Small)
+                else if (effCap.Value == Drawing.TextCapsValues.Small)
                     styles.Add("font-variant-caps:all-small-caps");
             }
 
