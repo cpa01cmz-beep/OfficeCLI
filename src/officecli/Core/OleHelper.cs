@@ -528,6 +528,15 @@ internal static class OleHelper
         // contentType + embedExt let AddOle rebuild the exact part class /
         // content type / target extension without classifying by file ext.
         "oleKind", "olekind", "contentType", "contenttype", "embedExt", "embedext",
+        // Frame/preview carrier keys: the verbatim floating v:shape style, the
+        // w:object native box (dxaOrig/dyaOrig), and the VML <v:imagedata> crop
+        // rectangle. All are written by the OLE dump and consumed by AddOle so a
+        // floating, cropped object round-trips at its original size.
+        "shapeStyle", "shapestyle", "dxaOrig", "dxaorig", "dyaOrig", "dyaorig", "crop",
+        // Tracked-change attribution: a deleted/inserted/moved OLE object carries
+        // its revision wrapper through dump→batch so AddOle re-wraps the run in
+        // <w:del>/<w:ins>/move (else a deleted figure resurrects as live content).
+        "revision.type", "revision.author", "revision.date", "revision.id",
     };
 
     /// <summary>

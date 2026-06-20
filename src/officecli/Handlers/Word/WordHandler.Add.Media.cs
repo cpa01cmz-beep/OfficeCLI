@@ -1384,10 +1384,30 @@ public partial class WordHandler
             : $"width:{cxPt.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)}pt;height:{cyPt.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)}pt";
         var oleAttr = hasFloatStyle ? "" : " o:ole=\"\"";
 
+        // BUG-DUMP-OLECROP: re-apply the VML <v:imagedata> crop rectangle captured
+        // by the dump ("cropleft:Nf;cropright:Nf;…"), splicing each present side
+        // back as a verbatim VML attribute so the preview round-trips cropped (an
+        // uncropped EMF preview renders larger and pushes later pages down).
+        var imageCropAttrs = "";
+        if (properties.TryGetValue("crop", out var oleCrop) && !string.IsNullOrEmpty(oleCrop))
+        {
+            var cropSb = new System.Text.StringBuilder();
+            foreach (var seg in oleCrop.Split(';', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var kv = seg.Split(':', 2);
+                if (kv.Length != 2) continue;
+                var ck = kv[0].Trim().ToLowerInvariant();
+                if (ck is not ("cropleft" or "croptop" or "cropright" or "cropbottom")) continue;
+                cropSb.Append(' ').Append(ck).Append("=\"")
+                      .Append(System.Security.SecurityElement.Escape(kv[1].Trim())).Append('"');
+            }
+            imageCropAttrs = cropSb.ToString();
+        }
+
         var oleXml = $"""
 <w:object xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" w:dxaOrig="{cxTwips}" w:dyaOrig="{cyTwips}">
 {shapetypeXml}<v:shape id="{shapeId}" type="#_x0000_t75" style="{shapeStyleAttr}"{oleAttr}{shapeAltAttr}>
-<v:imagedata r:id="{iconRelId}" o:title=""/>
+<v:imagedata r:id="{iconRelId}" o:title=""{imageCropAttrs}/>
 </v:shape>
 <o:OLEObject Type="Embed" ProgID="{System.Security.SecurityElement.Escape(progId)}" ShapeID="{shapeId}" DrawAspect="{drawAspect}" ObjectID="{objectId}" r:id="{embedRelId}"/>
 </w:object>
@@ -1512,6 +1532,12 @@ public partial class WordHandler
             // for OLE, the only interesting target is the run itself.
             resultPath = $"{parentPath}/{BuildParaPathSegment(olePara, olePIdx)}/r[1]";
         }
+        // BUG-DUMP-DELOLE: preserve a tracked-change wrapper on the rebuilt OLE run
+        // (revision.type=del/ins/moveFrom/moveTo). Mirrors AddBreak — wrap after the
+        // result path is computed; no-op when no revision.type is present. A deleted
+        // figure that loses its <w:del> resurrects as a live full-size object and
+        // pushes the following content onto new pages.
+        WrapRunsInRevision(new List<Run> { oleRun }, properties);
         return resultPath;
     }
 }

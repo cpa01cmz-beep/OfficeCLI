@@ -406,7 +406,13 @@ public partial class WordHandler : IDocumentHandler
         // position:absolute / margin-left / margin-top / z-index / wrap hints)
         // plus the w:object native size, so a floating OLE round-trips out of the
         // text flow instead of collapsing to inline (which pushes content down).
-        string? ShapeStyle, string? DxaOrig, string? DyaOrig);
+        string? ShapeStyle, string? DxaOrig, string? DyaOrig,
+        // The VML <v:imagedata> crop rectangle (cropleft/croptop/cropright/
+        // cropbottom, each a VML "Nf" 1/65536 fraction), serialized as a
+        // semicolon-joined "name:value" list. Dropped on round-trip → Word
+        // renders the full uncropped EMF preview, inflating the object and
+        // pushing every later page down. Captured verbatim for AddOle to splice back.
+        string? Crop);
 
     private const string RelNs = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
@@ -476,6 +482,21 @@ public partial class WordHandler : IDocumentHandler
             }
         }
 
+        // BUG-DUMP-OLECROP: capture the VML <v:imagedata> crop attributes verbatim
+        // (cropleft/croptop/cropright/cropbottom). Same imageData element as the
+        // icon lookup above. Without these AddOle rebuilds an uncropped imagedata.
+        string? crop = null;
+        if (imageData != null)
+        {
+            var cropParts = new List<string>();
+            foreach (var cropAttr in new[] { "cropleft", "croptop", "cropright", "cropbottom" })
+            {
+                var cv = imageData.GetAttributes().FirstOrDefault(a => a.LocalName == cropAttr).Value;
+                if (!string.IsNullOrEmpty(cv)) cropParts.Add($"{cropAttr}:{cv}");
+            }
+            if (cropParts.Count > 0) crop = string.Join(";", cropParts);
+        }
+
         string? display = string.IsNullOrEmpty(drawAspect)
             ? null
             : (drawAspect.Equals("Content", StringComparison.OrdinalIgnoreCase) ? "content" : "icon");
@@ -521,7 +542,7 @@ public partial class WordHandler : IDocumentHandler
 
         return new OleEmitData(embeddedBytes, oleKind, embedPart.ContentType, embedExt,
             iconBytes, iconCt, progId, display, width, height, name,
-            shapeStyle, dxaOrig, dyaOrig);
+            shapeStyle, dxaOrig, dyaOrig, crop);
     }
 
     // dump→batch round-trip carrier for an ActiveX form-control run — a

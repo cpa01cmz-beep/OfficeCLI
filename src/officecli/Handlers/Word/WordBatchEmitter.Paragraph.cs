@@ -3670,6 +3670,20 @@ public static partial class WordBatchEmitter
             if (!string.IsNullOrEmpty(data.ShapeStyle)) props["shapeStyle"] = data.ShapeStyle!;
             if (!string.IsNullOrEmpty(data.DxaOrig)) props["dxaOrig"] = data.DxaOrig!;
             if (!string.IsNullOrEmpty(data.DyaOrig)) props["dyaOrig"] = data.DyaOrig!;
+            // BUG-DUMP-OLECROP: forward the VML imagedata crop so AddOle re-applies
+            // it — an uncropped preview renders larger and pushes later pages down.
+            if (!string.IsNullOrEmpty(data.Crop)) props["crop"] = data.Crop!;
+            // BUG-DUMP-DELOLE: forward tracked-change attribution so AddOle re-wraps
+            // the rebuilt OLE run in <w:del>/<w:ins>/move. A tracked-DELETED figure
+            // (invisible in Word's final view) otherwise resurrects as a LIVE
+            // full-size object, inflating the page count and cascading a render
+            // drift. Mirrors the deleted-break (TryEmitBreakRun) / deleted-field
+            // forwarding. revision.* live on the run node (set by the Get-side
+            // DeletedRun/InsertedRun ancestor walk), not on GetOleEmitData.
+            foreach (var rk in new[] { "revision.type", "revision.author", "revision.date", "revision.id" })
+                if (run.Format.TryGetValue(rk, out var rv)
+                    && rv?.ToString() is { Length: > 0 } rvs)
+                    props[rk] = rvs;
             if (data.IconBytes is { Length: > 0 })
                 props["icon"] = $"data:{data.IconContentType ?? "image/png"};base64,{Convert.ToBase64String(data.IconBytes)}";
             items.Add(new BatchItem
