@@ -346,14 +346,32 @@ public partial class WordHandler
         if (!fmt.Equals("bullet", StringComparison.OrdinalIgnoreCase)) return null;
         var text = GetLevelText(numId, ilvl);
         if (string.IsNullOrEmpty(text)) return null;
-        // Already covered by the existing disc/circle/square switch in the
+        // Already covered by the standard disc/circle/square switch in the
         // main render path — don't override those.
-        if (text == "•" || text == "o" || text == "▪"
-            || text == "◦" /* ◦ */ || text == "▪" /* ▪ */
-            || text == "" /* Wingdings square */)
-            return null;
+        if (BulletGlyphToCssKeyword(text!) != null) return null;
         // Escape ' and \ for CSS string literal.
         var escaped = text!.Replace("\\", "\\\\").Replace("'", "\\'");
         return $"'{escaped} '";
     }
+
+    // CONSISTENCY(bullet-glyph-map): single source of truth mapping a Word
+    // bullet lvlText glyph to a CSS list-style-type keyword. Called from all
+    // three ul render paths so they never diverge:
+    //   - GetCustomListStyleString (above): non-null => glyph is "standard",
+    //     so skip the custom 'X ' list-style-type string override.
+    //   - WordHandler.HtmlPreview.cs (body ul switch)
+    //   - WordHandler.HtmlPreview.Tables.cs (table-cell ul switch)
+    // Returns null when the glyph is not a recognized standard bullet; the
+    // body/table callers then default to "disc". Covers Word's default
+    // Wingdings round bullet U+F0B7 (the most common default) -> disc.
+    private static string? BulletGlyphToCssKeyword(string lvlText) => lvlText switch
+    {
+        "•" => "disc",        // • BULLET
+        "" => "disc",        // Wingdings round bullet (Word default)
+        "o" => "circle",
+        "◦" => "circle",      // ◦ WHITE BULLET (Word outline level 1)
+        "" => "square",      // Wingdings square
+        "▪" => "square",      // ▪ BLACK SMALL SQUARE
+        _ => null
+    };
 }

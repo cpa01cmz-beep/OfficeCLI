@@ -697,13 +697,9 @@ public partial class WordHandler
         else if (tag == "ul")
         {
             listStyleParts += ";list-style-image:none";
-            var bulletType = lvlText switch
-            {
-                "o" => "circle",
-                "◦" => "circle",
-                "" or "▪" => "square",
-                _ => "disc"
-            };
+            // CONSISTENCY(bullet-glyph-map): shared with body path and
+            // GetCustomListStyleString; null => disc.
+            var bulletType = BulletGlyphToCssKeyword(lvlText ?? "") ?? "disc";
             listStyleParts += $";list-style-type:{bulletType}";
         }
 

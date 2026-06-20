@@ -2130,14 +2130,10 @@ public partial class WordHandler
                     else if (tag == "ul")
                     {
                         listStyleParts += ";list-style-image:none"; // reset inherited picture bullet
-                        // Map Word bullet character to CSS list-style-type
-                        var bulletType = lvlText switch
-                        {
-                            "o" => "circle",
-                            "\u25E6" => "circle", // U+25E6 WHITE BULLET (Word outline level 1)
-                            "\uf0a7" or "▪" or "\u25AA" => "square",
-                            _ => "disc"
-                        };
+                        // Map Word bullet character to CSS list-style-type.
+                        // CONSISTENCY(bullet-glyph-map): shared with table-cell
+                        // path and GetCustomListStyleString; null => disc.
+                        var bulletType = BulletGlyphToCssKeyword(lvlText ?? "") ?? "disc";
                         listStyleParts += $";list-style-type:{bulletType}";
                     }
                     var indentStyle = $" style=\"{listStyleParts}\"";
