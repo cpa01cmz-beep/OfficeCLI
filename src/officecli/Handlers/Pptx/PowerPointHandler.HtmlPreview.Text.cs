@@ -947,6 +947,17 @@ public partial class PowerPointHandler
             if (rp.Spacing?.HasValue == true)
                 styles.Add($"letter-spacing:{rp.Spacing.Value / 100.0:0.##}pt");
 
+            // Run-level text shadow (<a:rPr><a:effectLst><a:outerShdw>). The same
+            // helper the shape renderer uses produces filter:drop-shadow(...), which
+            // on a <span> renders as a per-glyph shadow — matching PowerPoint's
+            // shadowed text. Absent effectLst => no shadow (unchanged).
+            var runEffects = rp.GetFirstChild<Drawing.EffectList>();
+            if (runEffects != null)
+            {
+                var runShadowCss = EffectListToShadowCss(runEffects, themeColors);
+                if (!string.IsNullOrEmpty(runShadowCss)) styles.Add(runShadowCss);
+            }
+
             // Superscript/subscript. OOXML baseline is a raw integer where
             // 1000 == 1% (so super preset 30000 == 30%, sub preset -25000 == -25%).
             // Real PowerPoint shifts the glyph by baseline% × the ORIGINAL (pre-shrink)
