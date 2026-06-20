@@ -1794,6 +1794,29 @@ public partial class WordHandler
             LastAddUnsupportedProps.Add(key);
         }
 
+        // BUG-DUMP-STYLE-RPR-ORDER: the rPr is built in two passes — the explicit
+        // dispatch (rFonts/sz/color via SDK typed setters + ligatures via
+        // InsertRunPropInSchemaOrder) then the per-key sweep (size.cs→szCs,
+        // lang.*→lang, … via TypedAttributeFallback/GenericXmlQuery). The sweep
+        // paths call SchemaOrder.Place directly, which lacks the w14-extension
+        // hoist InsertRunPropInSchemaOrder has: when a <w14:ligatures> already
+        // sits in the rPr, the SDK comparator sorts that unknown element to the
+        // front, so Place strands a later standard child (szCs/lang) AFTER the
+        // w14 block — schema-invalid (CT_RPr requires every standard child to
+        // precede the w14 extension) and cascading into a fully scrambled rPr.
+        // Re-seat every standard (non-w14) child through InsertRunPropInSchemaOrder
+        // once at the end: its Place + w14-hoist converge on the correct CT_RPr
+        // order regardless of the pre-existing (scrambled) sibling order.
+        if (newStyle.StyleRunProperties is { } finalRPr)
+        {
+            foreach (var child in finalRPr.ChildElements
+                         .Where(c => c.NamespaceUri != W14Ns).ToList())
+            {
+                child.Remove();
+                InsertRunPropInSchemaOrder(finalRPr, child);
+            }
+        }
+
         stylesPart.Styles.AppendChild(newStyle);
         stylesPart.Styles.Save();
         InvalidateStyleIndex(); // new StyleId must be visible to FindStyleById
