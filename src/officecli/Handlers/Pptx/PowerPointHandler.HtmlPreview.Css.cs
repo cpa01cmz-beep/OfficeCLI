@@ -1702,7 +1702,7 @@ public partial class PowerPointHandler
             "flowChartPunchedCard" => "clip-path:polygon(15% 0,100% 0,100% 100%,0 100%,0 15%)",
             "flowChartPunchedTape" => "",
             "flowChartOnlineStorage" => "border-radius:50% 0 0 50%",
-            "flowChartOfflineStorage" => "clip-path:polygon(10% 0,90% 0,50% 100%)",
+            "flowChartOfflineStorage" => "clip-path:polygon(0 0,100% 0,50% 100%)",
             "flowChartMagneticDisk" => "border-radius:50%/20%",
             "flowChartConnector" or "flowChartOffpageConnector" => "border-radius:50%",
 
