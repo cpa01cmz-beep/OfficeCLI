@@ -1575,6 +1575,17 @@ public partial class PowerPointHandler
         // collapses the hole to a solid rectangle. The old hardcoded 12%/12% ignored adj.
         if (preset == "frame")
             return FramePolygon(widthEmu, heightEmu, presetGeom);
+        // corner (L-shape): adj1 = bottom (horizontal) arm height %, adj2 = left
+        // (vertical) arm width %; both default 50000. Inner corner at (adj2, 100-adj1).
+        // The old hardcoded 50/50 ignored both, so a thin-armed L looked fat.
+        if (preset == "corner")
+        {
+            var armH = Math.Clamp(ReadAdjValueCss(presetGeom, 0, 50000) / 1000.0, 0, 100);
+            var armW = Math.Clamp(ReadAdjValueCss(presetGeom, 1, 50000) / 1000.0, 0, 100);
+            string P(double d) => d.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+            var innerY = 100 - armH;
+            return $"clip-path:polygon(0 0,{P(armW)}% 0,{P(armW)}% {P(innerY)}%,100% {P(innerY)}%,100% 100%,0 100%)";
+        }
 
         // Calculate roundRect corner radius from avLst or default (16.667% of shorter side)
         if (preset is "roundRect" or "round1Rect" or "round2SameRect" or "round2DiagRect")
@@ -1738,7 +1749,6 @@ public partial class PowerPointHandler
             "donut" => DonutCss(presetGeom),
             "noSmoking" => "border-radius:50%",
             "halfFrame" => "clip-path:polygon(0 0,100% 0,100% 15%,15% 15%,15% 100%,0 100%)",
-            "corner" => "clip-path:polygon(0 0,50% 0,50% 50%,100% 50%,100% 100%,0 100%)",
             // pie/arc/chord/blockArc/snipRoundRect handled above (parametric)
 
             // Ribbons/banners
