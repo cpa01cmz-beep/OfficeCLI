@@ -2154,6 +2154,40 @@ public partial class PowerPointHandler
         return "clip-path:polygon(" + string.Join(",", pts) + ")";
     }
 
+    // swooshArrow: a curved swoosh sweeping up from the bottom-left to an arrowhead near
+    // the top-right. adj1 (default 25000) = arrowhead height, adj2 (default 16667) =
+    // arrowhead inset from the right. Single connected path: 2 quadratic beziers (the
+    // curved body edges) + 4 straight lines (the arrowhead). Was missing (rendered as a
+    // rectangle). Guide chain from the ECMA preset definition; verified against PowerPoint.
+    private static string SwooshArrowPolygon(long widthEmu, long heightEmu, Drawing.PresetGeometry? presetGeom)
+    {
+        double w = widthEmu, h = heightEmu, ss = Math.Min(w, h);
+        var a1 = Math.Clamp(ReadAdjValueCss(presetGeom, 0, 25000), 1, 75000);
+        double maxAdj2 = 70000.0 * w / ss;
+        var a2 = Math.Clamp(ReadAdjValueCss(presetGeom, 1, 16667), 0, maxAdj2);
+        double ad1 = h * a1 / 100000.0, ad2 = ss * a2 / 100000.0, ssd8 = ss / 8.0;
+        double xB = w - ad2, yB = ssd8;
+        double alfa = (Math.PI / 2) / 14.0;
+        double dx0 = ssd8 * Math.Tan(alfa), xC = xB - dx0;
+        double dx1 = ad1 * Math.Tan(alfa), yF = yB + ad1, xF = xB + dx1, xE = xF + dx0, yE = yF + ssd8;
+        double yD = yE / 2 - h / 20.0;
+        double yP1 = h / 3.0, xP1 = w / 6.0;
+        double yP2 = yF + (h / 6.0) / 2.0, xP2 = w / 4.0;
+        var ci = System.Globalization.CultureInfo.InvariantCulture;
+        string X(double v) => (v / w * 100).ToString("0.##", ci);
+        string Y(double v) => (v / h * 100).ToString("0.##", ci);
+        var pts = new System.Collections.Generic.List<string>();
+        void Pt(double x, double y) => pts.Add($"{X(x)}% {Y(y)}%");
+        const int N = 10;
+        void Quad(double px0, double py0, double cx, double cy, double px1, double py1)
+        { for (int i = 1; i <= N; i++) { double tt = (double)i / N, u = 1 - tt; Pt(u * u * px0 + 2 * u * tt * cx + tt * tt * px1, u * u * py0 + 2 * u * tt * cy + tt * tt * py1); } }
+        Pt(0, h);                              // bottom-left start
+        Quad(0, h, xP1, yP1, xB, yB);          // upper body edge -> (xB,yB)
+        Pt(xC, 0); Pt(w, yD); Pt(xE, yE); Pt(xF, yF);   // arrowhead
+        Quad(xF, yF, xP2, yP2, 0, h);          // lower body edge back to start
+        return "clip-path:polygon(" + string.Join(",", pts) + ")";
+    }
+
     private static string PresetGeometryToCss(string preset, long widthEmu, long heightEmu,
         Drawing.PresetGeometry? presetGeom)
     {
@@ -2269,6 +2303,8 @@ public partial class PowerPointHandler
             return PieWedgeCss();
         if (preset == "teardrop" && widthEmu > 0 && heightEmu > 0)
             return TeardropPolygon(widthEmu, heightEmu, presetGeom);
+        if (preset == "swooshArrow" && widthEmu > 0 && heightEmu > 0)
+            return SwooshArrowPolygon(widthEmu, heightEmu, presetGeom);
         // corner (L-shape): adj1 = bottom (horizontal) arm height %, adj2 = left
         // (vertical) arm width %; both default 50000. Inner corner at (adj2, 100-adj1).
         // The old hardcoded 50/50 ignored both, so a thin-armed L looked fat.
