@@ -2588,7 +2588,11 @@ public partial class PowerPointHandler
             "curvedLeftArrow" => "clip-path:polygon(100% 85%,100% 55%,98% 40%,94% 28%,88% 19%,80% 13%,70% 10%,30% 10%,30% 0%,0% 20%,30% 40%,30% 30%,60% 30%,68% 33%,74% 38%,78% 45%,80% 55%,80% 85%)",
             "curvedUpArrow" => "clip-path:polygon(85% 100%,55% 100%,40% 98%,28% 94%,19% 88%,13% 80%,10% 70%,10% 30%,0% 30%,20% 0%,40% 30%,30% 30%,30% 60%,33% 68%,38% 74%,45% 78%,55% 80%,85% 80%)",
             "curvedDownArrow" => "clip-path:polygon(85% 0%,55% 0%,40% 2%,28% 6%,19% 12%,13% 20%,10% 30%,10% 70%,0% 70%,20% 100%,40% 70%,30% 70%,30% 40%,33% 32%,38% 26%,45% 22%,55% 20%,85% 20%)",
-            "circularArrow" => "border-radius:50%",
+            // circular-arrow family: rendered as a circle (border-radius) — a crude but
+            // CONSISTENT approximation. The faithful annular-sector-with-arrowhead geometry
+            // (5 adjusts, 200+ guides) is a deferred focused task; a circle is far closer to
+            // the true silhouette than the bare-rectangle fallback the left variants had.
+            "circularArrow" or "leftCircularArrow" or "leftRightCircularArrow" => "border-radius:50%",
 
             // Math
             "mathPlus" => "clip-path:polygon(33% 0,67% 0,67% 33%,100% 33%,100% 67%,67% 67%,67% 100%,33% 100%,33% 67%,0 67%,0 33%,33% 33%)",
