@@ -970,8 +970,16 @@ public partial class WordHandler
         var ovr = inst?.Elements<LevelOverride>()
             .FirstOrDefault(o => o.LevelIndex?.Value == ilvl);
         if (ovr == null) return null;
-        if (ovr.GetFirstChild<Level>() is Level emb)
-            return emb.StartNumberingValue?.Val?.Value ?? 1;
+        // Only a bare <w:startOverride> forces a RESTART at that value
+        // (ECMA-376 §17.9.7). An embedded <w:lvl> override merely REDEFINES the
+        // level (its format + its own <w:start> for future lvlRestart events);
+        // the counter CONTINUES from the shared abstractNum, it does not restart
+        // (Word: a num sharing abstractNum that ends at 7 then carries an
+        // embedded-lvl override renders the next item as 8 in the new format,
+        // not the override's start). The embedded start is still honored for a
+        // fresh (non-continuation) list via normal start resolution — GetLevel
+        // prefers the override lvl — so it is not lost; it just must not trigger
+        // an override-restart here.
         return ovr.StartOverrideNumberingValue?.Val?.Value;
     }
 
