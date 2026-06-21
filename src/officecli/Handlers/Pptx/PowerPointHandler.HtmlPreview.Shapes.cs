@@ -2014,12 +2014,34 @@ public partial class PowerPointHandler
             // bentConnector2: single 90-degree bend (2 segments, 3 points).
             // bentConnector3 (default): 3 segments with mid bend — (0,0) -> (50,0) -> (50,100) -> (100,100).
             // bentConnector4/5: approximate with 25/75 splits when no adjustments set.
-            string points = preset switch
+            // The elbow position(s) are driven by avLst adjusts (a user dragging the
+            // elbow handle writes <a:gd name="adjN" fmla="val P"/>, P in 1/100000).
+            // Previously the elbows were hardcoded (50% for bentConnector3; 25/50/75 for
+            // 4/5), so any non-default elbow rendered in the wrong place.
+            var ci = System.Globalization.CultureInfo.InvariantCulture;
+            double ConnAdj(string name, double def)
             {
-                "bentConnector2" => "0,0 100,0 100,100",
-                "bentConnector4" or "bentConnector5" => "0,0 25,0 25,50 75,50 75,100 100,100",
-                _ => "0,0 50,0 50,100 100,100", // bentConnector3
-            };
+                var f = prstGeom?.GetFirstChild<Drawing.AdjustValueList>()?.Elements<Drawing.ShapeGuide>()
+                    .FirstOrDefault(g => g.Name?.Value == name)?.Formula?.Value;
+                if (f != null && f.StartsWith("val ", StringComparison.Ordinal)
+                    && double.TryParse(f.AsSpan(4), System.Globalization.NumberStyles.Float, ci, out var v))
+                    return v / 100000.0 * 100.0;
+                return def;
+            }
+            string N(double v) => v.ToString("0.##", ci);
+            string points;
+            if (preset == "bentConnector2")
+                points = "0,0 100,0 100,100";
+            else if (preset is "bentConnector4" or "bentConnector5")
+            {
+                var a1 = ConnAdj("adj1", 25); var a2 = ConnAdj("adj2", 50); var a3 = ConnAdj("adj3", 75);
+                points = $"0,0 {N(a1)},0 {N(a1)},{N(a2)} {N(a3)},{N(a2)} {N(a3)},100 100,100";
+            }
+            else // bentConnector3
+            {
+                var ex = ConnAdj("adj1", 50);
+                points = $"0,0 {N(ex)},0 {N(ex)},100 100,100";
+            }
             // R27: mirror the polyline in the 0..100 viewBox when flipH/flipV is
             // set so a flipped elbow lands on the shape edges (the straight branch
             // already flips via svgX1/Y1/X2/Y2). flipH → x'=100-x, flipV → y'=100-y.
