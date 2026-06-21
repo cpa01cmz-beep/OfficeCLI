@@ -1578,6 +1578,16 @@ public partial class PowerPointHandler
         // corner (L-shape): adj1 = bottom (horizontal) arm height %, adj2 = left
         // (vertical) arm width %; both default 50000. Inner corner at (adj2, 100-adj1).
         // The old hardcoded 50/50 ignored both, so a thin-armed L looked fat.
+        // homePlate (pentagon arrow): adj = point depth as a fraction of width
+        // (default 25000 = 25%). The body occupies (100-adj)%, the triangular point
+        // the rest. The old hardcoded 75%/25% ignored adj.
+        if (preset == "homePlate")
+        {
+            var ptPct = Math.Clamp(ReadAdjValueCss(presetGeom, 0, 25000) / 1000.0, 0, 100);
+            var bodyPct = 100 - ptPct;
+            string P(double d) => d.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+            return $"clip-path:polygon(0 0,{P(bodyPct)}% 0,100% 50%,{P(bodyPct)}% 100%,0 100%)";
+        }
         if (preset == "corner")
         {
             var armH = Math.Clamp(ReadAdjValueCss(presetGeom, 0, 50000) / 1000.0, 0, 100);
@@ -1706,7 +1716,6 @@ public partial class PowerPointHandler
             "notchedRightArrow" => "clip-path:polygon(0 25%,70% 25%,70% 0,100% 50%,70% 100%,70% 75%,0 75%,10% 50%)",
             "bentArrow" => "clip-path:polygon(0 20%,60% 20%,60% 0,100% 35%,60% 70%,60% 50%,20% 50%,20% 100%,0 100%)",
             "chevron" => "clip-path:polygon(0 0,80% 0,100% 50%,80% 100%,0 100%,20% 50%)",
-            "homePlate" => "clip-path:polygon(0 0,75% 0,100% 50%,75% 100%,0 100%)",
             "stripedRightArrow" => "clip-path:polygon(10% 20%,12% 20%,12% 80%,10% 80%,10% 20%,15% 20%,70% 20%,70% 0,100% 50%,70% 100%,70% 80%,15% 80%)",
 
             // Callouts — rectangle/rounded-rect/ellipse body with a wedge tail pointing down-left
