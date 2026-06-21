@@ -1593,6 +1593,28 @@ public partial class PowerPointHandler
              + $"{P(d2)}% 0,100% 50%,{P(d2)}% 100%,{P(d2)}% {P(shaftB)}%,{P(depthX)}% {P(shaftB)}%,{P(depthX)}% 100%)";
     }
 
+    /// <summary>
+    /// halfFrame (top-left L-bracket) clip-path honoring avLst. adj1 = top-arm
+    /// thickness (fraction of HEIGHT, default 33333); adj2 = left-arm thickness
+    /// (fraction of WIDTH). The two open ends are 45° mitered (equal absolute
+    /// offset in EMU), so the miter %s are aspect-adjusted. The old hardcoded
+    /// polygon used 15% square corners (no miters) and ignored adj. Verified
+    /// empirically against real PowerPoint.
+    /// </summary>
+    private static string HalfFramePolygon(long widthEmu, long heightEmu, Drawing.PresetGeometry? presetGeom)
+    {
+        var adj1 = Math.Clamp(ReadAdjValueCss(presetGeom, 0, 33333), 0, 100000);
+        var adj2 = Math.Clamp(ReadAdjValueCss(presetGeom, 1, 33333), 0, 100000);
+        var armTopH = adj1 / 1000.0;                              // % of height
+        var armLeftW = adj2 / 1000.0;                             // % of width
+        var aspect = (double)heightEmu / widthEmu;
+        var miterTopX = Math.Clamp(100 - armTopH * aspect, 0, 100);   // 45° miter (equal EMU offset)
+        var miterBottomY = Math.Clamp(100 - armLeftW / aspect, 0, 100);
+        string P(double d) => d.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+        return $"clip-path:polygon(0 0,100% 0,{P(miterTopX)}% {P(armTopH)}%,{P(armLeftW)}% {P(armTopH)}%,"
+             + $"{P(armLeftW)}% {P(miterBottomY)}%,0 100%)";
+    }
+
     private static string PresetGeometryToCss(string preset, long widthEmu, long heightEmu,
         Drawing.PresetGeometry? presetGeom)
     {
@@ -1650,6 +1672,8 @@ public partial class PowerPointHandler
             return UpDownArrowPolygon(widthEmu, heightEmu, presetGeom);
         if (preset == "leftRightArrow" && widthEmu > 0 && heightEmu > 0)
             return LeftRightArrowPolygon(widthEmu, heightEmu, presetGeom);
+        if (preset == "halfFrame" && widthEmu > 0 && heightEmu > 0)
+            return HalfFramePolygon(widthEmu, heightEmu, presetGeom);
         // corner (L-shape): adj1 = bottom (horizontal) arm height %, adj2 = left
         // (vertical) arm width %; both default 50000. Inner corner at (adj2, 100-adj1).
         // The old hardcoded 50/50 ignored both, so a thin-armed L looked fat.
@@ -1828,7 +1852,6 @@ public partial class PowerPointHandler
             // Misc shapes
             "donut" => DonutCss(presetGeom),
             "noSmoking" => "border-radius:50%",
-            "halfFrame" => "clip-path:polygon(0 0,100% 0,100% 15%,15% 15%,15% 100%,0 100%)",
             // pie/arc/chord/blockArc/snipRoundRect handled above (parametric)
 
             // Ribbons/banners
