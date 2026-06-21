@@ -745,6 +745,28 @@ public partial class PowerPointHandler
         var dashType = "solid";
         if (dash?.Val?.HasValue == true)
             dashType = dash.Val.InnerText ?? "solid";
+        else
+        {
+            // <a:custDash> (mutually exclusive with prstDash): a list of <a:ds d sp/>
+            // stops where d/sp are ST_PositivePercentage (100000 = 100% of line width).
+            // Encode as "custom:<onMult>,<offMult>,..." (multiples of line width) so the
+            // SVG dash overlay can scale them by stroke width like the preset dasharrays.
+            var cust = outline.GetFirstChild<Drawing.CustomDash>();
+            if (cust != null)
+            {
+                var ci = System.Globalization.CultureInfo.InvariantCulture;
+                var segs = new System.Collections.Generic.List<string>();
+                foreach (var ds in cust.Elements<Drawing.DashStop>())
+                {
+                    double d = (ds.DashLength?.Value ?? 0) / 100000.0;
+                    double sp = (ds.SpaceLength?.Value ?? 0) / 100000.0;
+                    if (d <= 0 && sp <= 0) continue;
+                    segs.Add(d.ToString("0.##", ci));
+                    segs.Add(sp.ToString("0.##", ci));
+                }
+                if (segs.Count > 0) dashType = "custom:" + string.Join(",", segs);
+            }
+        }
 
         // Line cap (<a:ln cap="rnd|sq|flat"/>) and compound type
         // (<a:ln cmpd="sng|dbl|thickThin|thinThick|tri"/>).
@@ -937,6 +959,8 @@ public partial class PowerPointHandler
             "dashDot" or "lgDashDot" or "sysDashDot" or "sysDashDotDot" => "dashed",
             _ => "solid"
         };
+        if (dashType.StartsWith("custom:", StringComparison.Ordinal))
+            borderStyle = "dashed";
         // Compound (dbl/thickThin/thinThick/tri) draws multiple parallel lines.
         // CSS `double` renders two parallel lines when the border is wide enough.
         if (cmpd != "sng" && dashType == "solid")
@@ -951,6 +975,16 @@ public partial class PowerPointHandler
     private static string DashTypeToSvgDasharray(string dashType, double strokeWidth)
     {
         var w = strokeWidth;
+        // custom:<onMult>,<offMult>,... — a <a:custDash> pattern in multiples of line width.
+        if (dashType.StartsWith("custom:", StringComparison.Ordinal))
+        {
+            var ci = System.Globalization.CultureInfo.InvariantCulture;
+            var outp = new System.Collections.Generic.List<string>();
+            foreach (var part in dashType.Substring(7).Split(','))
+                if (double.TryParse(part, System.Globalization.NumberStyles.Float, ci, out var m))
+                    outp.Add((m * w).ToString("0.##", ci));
+            return string.Join(" ", outp);
+        }
         return dashType switch
         {
             // Dot is a visible short segment (length = stroke width) with linecap=butt
