@@ -1796,6 +1796,10 @@ internal partial class ChartSvgRenderer
         // Helper: map a data value to a y-coordinate within [oy, oy+ph]
         double DataToY(double v) => oy + ph - (v - niceMin) / axisRange * ph;
         double ZeroY() => DataToY(0.0);
+        // Like DataToY but clamped to the plot rect — for stacked-area polygons whose
+        // baseline (data value 0) can fall below an explicit axisMin (PowerPoint clips
+        // the fill to the axis bottom rather than letting it run off-plot).
+        double ClampY(double v) => Math.Clamp(DataToY(v), oy, oy + ph);
 
         if (ShowValGridlines && ValAxisVisible)
         for (int t = 1; t <= tickCount; t++)
@@ -1831,9 +1835,9 @@ internal partial class ChartSvgRenderer
                 for (int c = 0; c < catCount; c++)
                 {
                     var px = ox + (catCount > 1 ? (double)pw * c / (catCount - 1) : pw / 2.0);
-                    topPoints.Add($"{px:0.#},{oy + ph - (cumulative[s, c] / niceMax) * ph:0.#}");
+                    topPoints.Add($"{px:0.#},{ClampY(cumulative[s, c]):0.#}");
                     var bottomVal = s > 0 ? cumulative[s - 1, c] : 0;
-                    bottomPoints.Add($"{px:0.#},{oy + ph - (bottomVal / niceMax) * ph:0.#}");
+                    bottomPoints.Add($"{px:0.#},{ClampY(bottomVal):0.#}");
                 }
                 bottomPoints.Reverse();
                 sb.AppendLine($"        <polygon points=\"{string.Join(" ", topPoints)} {string.Join(" ", bottomPoints)}\" fill=\"{colors[s % colors.Count]}\" opacity=\"{FillOpacity(s)}\"/>");
