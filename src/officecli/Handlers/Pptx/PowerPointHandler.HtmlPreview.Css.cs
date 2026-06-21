@@ -1182,16 +1182,17 @@ public partial class PowerPointHandler
     // ==================== CSS Helper: Preset Geometry ====================
 
     /// <summary>Plus/cross polygon with arm width proportional to min(w,h).</summary>
-    private static string PlusPolygon(long w, long h)
+    // plus/cross: the single adj is the corner-notch inset as a fraction of each
+    // dimension (ECMA x1=w*adj, y1=h*adj), default 25000 (25%). Arm spans
+    // [inset, 100-inset] on both axes. Small adj => wide arms / tiny notches;
+    // large adj => thin needle-cross. The old code hardcoded 25% (ignored adj).
+    private static string PlusPolygon(Drawing.PresetGeometry? presetGeom)
     {
-        // OOXML default: arm width = 25% of min dimension
-        var minDim = Math.Min(w, h);
-        var armW = minDim * 0.25;
-        var hPct = armW / w * 100; // horizontal arm width as % of width
-        var vPct = armW / h * 100; // vertical arm width as % of height
-        var l = (50 - hPct); var r = (50 + hPct);
-        var t = (50 - vPct); var b = (50 + vPct);
-        return $"clip-path:polygon({l:0.#}% 0,{r:0.#}% 0,{r:0.#}% {t:0.#}%,100% {t:0.#}%,100% {b:0.#}%,{r:0.#}% {b:0.#}%,{r:0.#}% 100%,{l:0.#}% 100%,{l:0.#}% {b:0.#}%,0 {b:0.#}%,0 {t:0.#}%,{l:0.#}% {t:0.#}%)";
+        var adj = Math.Clamp(ReadAdjValueCss(presetGeom, 0, 25000), 0, 50000);
+        var inset = adj / 1000.0;
+        string P(double d) => d.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+        var l = P(inset); var r = P(100 - inset); var t = l; var b = r;
+        return $"clip-path:polygon({l}% 0,{r}% 0,{r}% {t}%,100% {t}%,100% {b}%,{r}% {b}%,{r}% 100%,{l}% 100%,{l}% {b}%,0 {b}%,0 {t}%,{l}% {t}%)";
     }
 
     private static string PresetGeometryToCss(string preset) =>
@@ -1747,8 +1748,7 @@ public partial class PowerPointHandler
             "wedgeEllipseCallout" => "clip-path:polygon(50% 0%,60% 1%,70% 3%,78% 7%,85% 13%,90% 20%,94% 28%,97% 37%,98% 47%,97% 56%,95% 64%,91% 71%,40% 75%,10% 100%,35% 72%,27% 76%,19% 72%,12% 65%,7% 57%,3% 48%,2% 38%,3% 29%,6% 20%,11% 13%,18% 7%,26% 3%,35% 1%,42% 0%)",
 
             // Crosses and plus — arm width scales with aspect ratio
-            "plus" or "cross" when widthEmu > 0 && heightEmu > 0 => PlusPolygon(widthEmu, heightEmu),
-            "plus" or "cross" => "clip-path:polygon(33% 0,67% 0,67% 33%,100% 33%,100% 67%,67% 67%,67% 100%,33% 100%,33% 67%,0 67%,0 33%,33% 33%)",
+            "plus" or "cross" => PlusPolygon(presetGeom),
 
             // Heart (polygon approximation)
             "heart" => "clip-path:polygon(50% 18%, 53% 12%, 57% 6%, 62% 2%, 68% 0%, 75% 0%, 82% 0%, 89% 3%, 94% 8%, 98% 14%, 100% 21%, 100% 28%, 99% 35%, 95% 43%, 90% 51%, 84% 59%, 77% 67%, 69% 75%, 60% 84%, 50% 100%, 40% 84%, 31% 75%, 23% 67%, 16% 59%, 10% 51%, 5% 43%, 1% 35%, 0% 28%, 0% 21%, 2% 14%, 6% 8%, 11% 3%, 18% 0%, 25% 0%, 32% 0%, 38% 2%, 43% 6%, 47% 12%)",
