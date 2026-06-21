@@ -1632,6 +1632,39 @@ public partial class PowerPointHandler
              + $"{P(100 - cx)}% 100%,{P(cx)}% 100%,0 {P(100 - cy)}%,0 {P(cy)}%)";
     }
 
+    // moon: a crescent. adj = the rightward extent of the inner (bite) arc at the
+    // vertical center, as a fraction of width (default 50000 = 50%). Both the outer
+    // (left) boundary and the inner (bite) boundary are half-ellipses of vertical
+    // radius = half the height, sharing the top/bottom tips at (100%,0)/(100%,100%).
+    // The outer arc reaches the left edge (0%) at mid; the inner arc reaches adj% at
+    // mid. The old hardcoded 30-point polygon locked the shape to ~adj=50000 (and
+    // even then put the bite at 42%), so any non-default adj was invisible. Both
+    // arcs verified empirically against real PowerPoint (R167).
+    private static string MoonPolygon(Drawing.PresetGeometry? presetGeom)
+    {
+        var adjPct = Math.Clamp(ReadAdjValueCss(presetGeom, 0, 50000) / 1000.0, 0, 100);
+        var innerRx = 100.0 - adjPct; // inner-arc horizontal radius (bulge left from x=100)
+        var ci = System.Globalization.CultureInfo.InvariantCulture;
+        string Pt(double x, double y) => $"{x.ToString("0.##", ci)}% {y.ToString("0.##", ci)}%";
+        var pts = new System.Collections.Generic.List<string>();
+        const int N = 18;
+        // inner (right/bite) arc: top tip -> bottom tip
+        for (int i = 0; i <= N; i++)
+        {
+            double y = 100.0 * i / N;
+            double k = Math.Sqrt(Math.Max(0, 1 - Math.Pow((y - 50) / 50.0, 2)));
+            pts.Add(Pt(100.0 - innerRx * k, y));
+        }
+        // outer (left) arc: bottom tip -> top tip
+        for (int i = N; i >= 0; i--)
+        {
+            double y = 100.0 * i / N;
+            double k = Math.Sqrt(Math.Max(0, 1 - Math.Pow((y - 50) / 50.0, 2)));
+            pts.Add(Pt(100.0 * (1 - k), y));
+        }
+        return "clip-path:polygon(" + string.Join(",", pts) + ")";
+    }
+
     private static string PresetGeometryToCss(string preset, long widthEmu, long heightEmu,
         Drawing.PresetGeometry? presetGeom)
     {
@@ -1702,6 +1735,8 @@ public partial class PowerPointHandler
             return HalfFramePolygon(widthEmu, heightEmu, presetGeom);
         if (preset == "octagon" && widthEmu > 0 && heightEmu > 0)
             return OctagonPolygon(widthEmu, heightEmu, presetGeom);
+        if (preset == "moon")
+            return MoonPolygon(presetGeom);
         // corner (L-shape): adj1 = bottom (horizontal) arm height %, adj2 = left
         // (vertical) arm width %; both default 50000. Inner corner at (adj2, 100-adj1).
         // The old hardcoded 50/50 ignored both, so a thin-armed L looked fat.
@@ -1863,7 +1898,7 @@ public partial class PowerPointHandler
             "sun" => "clip-path:polygon(50% 0,56% 15%,70% 3%,66% 19%,85% 15%,74% 27%,93% 30%,80% 38%,97% 45%,82% 48%,97% 55%,80% 62%,93% 70%,74% 73%,85% 85%,66% 81%,70% 97%,56% 85%,50% 100%,44% 85%,30% 97%,34% 81%,15% 85%,26% 73%,7% 70%,20% 62%,3% 55%,18% 48%,3% 45%,20% 38%,7% 30%,26% 27%,15% 15%,34% 19%,30% 3%,44% 15%)",
 
             // Moon (crescent) — outer arc minus inner arc
-            "moon" => "clip-path:polygon(75% 0%,65% 5%,56% 12%,49% 21%,44% 31%,42% 42%,42% 50%,42% 58%,44% 69%,49% 79%,56% 88%,65% 95%,75% 100%,63% 100%,50% 98%,38% 93%,27% 86%,18% 77%,10% 66%,5% 54%,2% 42%,2% 30%,5% 18%,10% 9%,18% 3%,27% 0%,38% 0%,50% 0%,63% 0%)",
+            "moon" => MoonPolygon(presetGeom),
 
             // Gear (polygon approximation of 6-tooth gear)
             "gear6" => "clip-path:polygon(50% 0,61% 10%,75% 3%,80% 18%,97% 25%,88% 38%,100% 50%,88% 62%,97% 75%,80% 82%,75% 97%,61% 90%,50% 100%,39% 90%,25% 97%,20% 82%,3% 75%,12% 62%,0 50%,12% 38%,3% 25%,20% 18%,25% 3%,39% 10%)",
