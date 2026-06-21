@@ -1029,11 +1029,13 @@ public partial class PowerPointHandler
 
     /// <summary>
     /// Resolve a shadow's color (rgba) from its srgbClr/schemeClr child, applying
-    /// lumMod/lumOff/tint/shade/alpha transforms (default 50% opacity when no alpha).
+    /// lumMod/lumOff/tint/shade/alpha transforms. When the color carries no
+    /// &lt;a:alpha&gt;, the shadow is fully opaque (OOXML default = 100%), matching
+    /// how PowerPoint renders an alpha-less shadow (solid, not half-transparent).
     /// </summary>
     private static string ResolveShadowColor(OpenXmlCompositeElement shadow, Dictionary<string, string> themeColors)
     {
-        var alpha = shadow.Descendants<Drawing.Alpha>().FirstOrDefault()?.Val?.Value ?? 50000;
+        var alpha = shadow.Descendants<Drawing.Alpha>().FirstOrDefault()?.Val?.Value ?? 100000;
         var opacity = alpha / 100000.0;
         var rgbEl = shadow.GetFirstChild<Drawing.RgbColorModelHex>();
         var rgb = rgbEl?.Val?.Value;

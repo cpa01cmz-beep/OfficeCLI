@@ -1735,7 +1735,8 @@ public partial class PowerPointHandler
         var shadow = effectList.GetFirstChild<Drawing.OuterShadow>();
         if (shadow == null) return null;
 
-        var alpha = shadow.Descendants<Drawing.Alpha>().FirstOrDefault()?.Val?.Value ?? 50000;
+        // Absent <a:alpha> => fully opaque (OOXML default), matching PowerPoint.
+        var alpha = shadow.Descendants<Drawing.Alpha>().FirstOrDefault()?.Val?.Value ?? 100000;
         var opacity = alpha / 100000.0;
 
         var rgb = shadow.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
