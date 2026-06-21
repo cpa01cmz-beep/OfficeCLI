@@ -102,6 +102,18 @@ internal partial class ChartSvgRenderer
     // (1.0 = opaque, matching native). Synced from ChartInfo.SeriesFillOpacities.
     public List<double?> SeriesFillOpacities { get; set; } = [];
 
+    // Per-series invertIfNegative flag (bar/column). True (PowerPoint's
+    // observed default when <c:invertIfNegative> is absent) means negative
+    // bars render hollow: white/plot-background interior with the series
+    // color as a thin outline. Explicit <c:invertIfNegative val="0"/> sets
+    // false → negatives keep the solid series fill. Index = series index;
+    // absent entry defaults to true. Synced from ChartInfo.InvertIfNegative.
+    public List<bool> InvertIfNegative { get; set; } = [];
+
+    // Whether series s inverts negative bars. Absent entry → true (default).
+    private bool SeriesInverts(int s)
+        => s < 0 || s >= InvertIfNegative.Count || InvertIfNegative[s];
+
     // Series fill opacity for index s, falling back to the supplied default
     // when the series declared no explicit <a:alpha>. Default is full opacity
     // (1.0) to match native Office, which renders chart fills opaque unless an
@@ -163,6 +175,23 @@ internal partial class ChartSvgRenderer
             => perPointColors != null && s < perPointColors.Count
                && perPointColors[s].TryGetValue(catIdx, out var pc)
                 ? pc : colors[s % colors.Count];
+
+        // Fill/stroke SVG attributes for a (series, category, value) rect.
+        // PowerPoint's "invert if negative" (the effective default when
+        // <c:invertIfNegative> is absent) renders negative bars hollow: a
+        // white/plot-background interior outlined in the series color. Only
+        // applied to clustered/standard bars (not stacked, not waterfall).
+        // Positive bars and non-inverting series keep the solid series fill.
+        string BarFillAttrs(int s, int catIdx, double v)
+        {
+            var seriesColor = BarFill(s, catIdx);
+            if (v < 0 && SeriesInverts(s))
+            {
+                var hollow = plotFillColor != null ? $"#{plotFillColor}" : "#FFFFFF";
+                return $"fill=\"{hollow}\" stroke=\"{seriesColor}\" stroke-width=\"1\"";
+            }
+            return $"fill=\"{seriesColor}\"";
+        }
 
         var allValues = series.SelectMany(s => s.values).ToArray();
         if (allValues.Length == 0) return;
@@ -389,7 +418,7 @@ internal partial class ChartSvgRenderer
                         var valX = ValToX(val);
                         var bx = Math.Min(plotZeroX, valX);
                         var by = oy + c * groupH + gap + (serCount - 1 - s) * pitchH;
-                        sb.AppendLine($"        <rect x=\"{bx:0.#}\" y=\"{by:0.#}\" width=\"{barW:0.#}\" height=\"{barH:0.#}\" fill=\"{BarFill(s, dataIdx)}\" opacity=\"{FillOpacity(s)}\"/>");
+                        sb.AppendLine($"        <rect x=\"{bx:0.#}\" y=\"{by:0.#}\" width=\"{barW:0.#}\" height=\"{barH:0.#}\" {BarFillAttrs(s, dataIdx, val)} opacity=\"{FillOpacity(s)}\"/>");
                         // Data label at the bar's end (grouped horizontal bars).
                         // Mirrors the stacked-branch and vertical-column label logic
                         // which previously left non-stacked horizontal bars unlabeled.
@@ -665,7 +694,7 @@ internal partial class ChartSvgRenderer
                         // (with maxMin the baseline is at the TOP so bars grow downward).
                         var valY = ValToY(val);
                         var by = Math.Min(plotZeroY, valY);
-                        sb.AppendLine($"        <rect x=\"{bx:0.#}\" y=\"{by:0.#}\" width=\"{barW:0.#}\" height=\"{bh:0.#}\" fill=\"{BarFill(s, c)}\" opacity=\"{FillOpacity(s)}\"/>");
+                        sb.AppendLine($"        <rect x=\"{bx:0.#}\" y=\"{by:0.#}\" width=\"{barW:0.#}\" height=\"{bh:0.#}\" {BarFillAttrs(s, c, val)} opacity=\"{FillOpacity(s)}\"/>");
                         if (showDataLabels)
                         {
                             var vlabel = LabelText(rawVal, val);
@@ -2432,6 +2461,10 @@ internal partial class ChartSvgRenderer
         // Per-series fill opacity parsed from the series spPr <a:alpha>. Index =
         // series index (pie/doughnut: per data point). null = no explicit alpha.
         public List<double?> SeriesFillOpacities { get; set; } = [];
+        // Per-series <c:invertIfNegative> (bar/column). Defaults to TRUE when the
+        // element is absent (PowerPoint renders negative bars hollow by default);
+        // FALSE only when explicitly <c:invertIfNegative val="0"/>. Index = series.
+        public List<bool> InvertIfNegative { get; set; } = [];
         public bool IsStacked { get; set; }
         public bool IsPercent { get; set; }
         public bool IsWaterfall { get; set; }
@@ -2758,6 +2791,11 @@ internal partial class ChartSvgRenderer
         // Per-series fill opacity from <a:solidFill><a:alpha val="…"/>. Pie/doughnut
         // alpha lives on per-point dPt spPr; other charts on the series spPr.
         info.SeriesFillOpacities = ExtractFillOpacities(serElements, info.Series, isPieType);
+
+        // Per-series <c:invertIfNegative>. Default TRUE when the element is
+        // absent (PowerPoint renders negative bars hollow by default); FALSE
+        // only when explicitly val="0". Index aligns with info.Series order.
+        info.InvertIfNegative = ExtractInvertIfNegative(serElements, info.Series.Count);
 
         // Axis info
         var valAxes = plotArea.Elements().Where(e => e.LocalName == "valAx").ToList();
@@ -3257,6 +3295,28 @@ internal partial class ChartSvgRenderer
         return result;
     }
 
+    /// <summary>Extract per-series <c:invertIfNegative>. PowerPoint's effective
+    /// default is TRUE (negative bars render hollow) when the element is absent;
+    /// FALSE only when explicitly val="0". Returns one bool per series, aligned
+    /// to series order.</summary>
+    private static List<bool> ExtractInvertIfNegative(List<OpenXmlElement> serElements, int seriesCount)
+    {
+        var result = new List<bool>();
+        for (int i = 0; i < seriesCount; i++)
+        {
+            // Default true when the element is absent. When present, honor its
+            // val (val="0"/false → keep negatives solid; val="1"/absent-attr → true).
+            var invEl = i < serElements.Count
+                ? serElements[i].Elements().FirstOrDefault(e => e.LocalName == "invertIfNegative")
+                : null;
+            if (invEl == null) { result.Add(true); continue; }
+            var valStr = invEl.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
+            // An <c:invertIfNegative/> with no val attribute defaults to true.
+            result.Add(string.IsNullOrEmpty(valStr) || (valStr != "0" && !valStr.Equals("false", StringComparison.OrdinalIgnoreCase)));
+        }
+        return result;
+    }
+
     /// <summary>Extract per-series fill opacity from the series spPr
     /// (pie/doughnut: per data-point dPt spPr) <a:solidFill><a:alpha val="…"/>.
     /// Returns null per entry when no explicit alpha is declared, so the
@@ -3475,6 +3535,7 @@ internal partial class ChartSvgRenderer
         HasExplicitDataLabelPos = info.HasExplicitDataLabelPos;
         FirstSliceAngle = info.FirstSliceAngle;
         SeriesFillOpacities = info.SeriesFillOpacities;
+        InvertIfNegative = info.InvertIfNegative;
 
         // Increase right margin for long axis labels (e.g. "$1,000,000")
         if (!string.IsNullOrEmpty(info.ValNumFmt) && marginRight < 30)
