@@ -2667,6 +2667,31 @@ public static partial class WordBatchEmitter
                 });
                 return true;
             }
+            // BUG-DUMP-WPG-GROUP: an mc:AlternateContent-wrapped DrawingML group
+            // (<wpg:wgp> group of pictures) or shape surfaces as a plain "run"
+            // node — the Drawing lives inside the AltContent so there is no typed
+            // picture node, the no-rel raw-set above skipped it (its blips carry
+            // r:embed), and it is a <w:drawing> not a <w:pict> so the VML carrier
+            // skipped it too. It then fell into the warn-drop below and the WHOLE
+            // group (every nested image) vanished. Ship it through the inlined-
+            // parts carrier: GetDrawingShapeEmitData inlines every referenced
+            // image part and rewrites the rel ids on replay, so the group drawing
+            // round-trips verbatim. Mirrors the wps:wsp shape carrier in the
+            // type=="picture" branch below. GuardCarrierContentTypes returns null
+            // for a drawing referencing an unsupported part (a chart, …), so those
+            // correctly fall through to the warn-drop instead of being mis-routed.
+            if (probeXml.Contains("<w:drawing", StringComparison.Ordinal)
+                && word.GetDrawingShapeEmitData(run.Path) is { } grpData)
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "add",
+                    Parent = sharedAttachPara ?? paraTargetPath,
+                    Type = "inlinedparts",
+                    Props = PackInlinedPartsProps(grpData),
+                });
+                return true;
+            }
             // Drawing-bearing but not safely raw-set-able inline (lives in a
             // header/footer/cell, or carries an external relationship we can't
             // re-anchor). Flag the loss rather than silently dropping it.
@@ -2688,6 +2713,28 @@ public static partial class WordBatchEmitter
         // non-textbox-shape raw-set convention.
         {
             var shapeXml = word.GetElementXml(run.Path);
+            // BUG-DUMP-WPG-GROUP: a DrawingML GROUP (<wpg:wgp> — multiple pictures/
+            // shapes grouped, often mc:AlternateContent-wrapped) surfaces as
+            // type="picture" because GetImageBinary finds the FIRST nested blip.
+            // The picture path below would flatten the whole group to that single
+            // <pic:pic>, dropping every other grouped image AND the group structure.
+            // Route the group through the inlined-parts carrier instead, so all
+            // nested image parts + the verbatim group drawing round-trip. Mirrors
+            // the wps:wsp shape carrier just below; GuardCarrierContentTypes nulls
+            // out a group referencing an unsupported part so it falls through.
+            if (!string.IsNullOrEmpty(shapeXml)
+                && shapeXml.Contains("<wpg:wgp", StringComparison.Ordinal)
+                && word.GetDrawingShapeEmitData(run.Path) is { } wpgData)
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "add",
+                    Parent = sharedAttachPara ?? paraTargetPath,
+                    Type = "inlinedparts",
+                    Props = PackInlinedPartsProps(wpgData),
+                });
+                return true;
+            }
             if (!string.IsNullOrEmpty(shapeXml)
                 && IsWpsShapeDrawing(shapeXml)
                 && ctx != null
@@ -3395,6 +3442,31 @@ public static partial class WordBatchEmitter
                 });
                 return true;
             }
+        }
+
+        // BUG-DUMP-TEXTBOX-IMG: a MODERN DrawingML textbox shape (wps:wsp +
+        // txbxContent, often mc:AlternateContent/wpg-wrapped — e.g. a letterhead
+        // shape pairing a caption box with a logo) that ALSO carries an embedded
+        // picture (<a:blip r:embed>) loses that image on the typed `add textbox`
+        // path below, which extracts only geometry + text. The image binary then
+        // vanishes from the rebuild (this is the wpg-group image-loss class: a
+        // page of grouped letterhead shapes silently dropping their logos). Route
+        // such a shape through the inlined-parts carrier so the embedded image
+        // part + verbatim shape XML (box + text + picture) round-trip, mirroring
+        // the VML carrier above. Plain textboxes (no embedded image) keep the
+        // typed `add textbox` path so they stay cleanly editable.
+        if (rawXml.Contains("r:embed", StringComparison.Ordinal)
+            && (attachParaPath ?? paraTargetPath) is { } tbImgParent
+            && word.GetDrawingShapeEmitData(run.Path) is { } tbImgData)
+        {
+            items.Add(new BatchItem
+            {
+                Command = "add",
+                Parent = tbImgParent,
+                Type = "inlinedparts",
+                Props = PackInlinedPartsProps(tbImgData),
+            });
+            return true;
         }
 
         // Only emit a typed `add textbox` for hosts AddTextbox itself
