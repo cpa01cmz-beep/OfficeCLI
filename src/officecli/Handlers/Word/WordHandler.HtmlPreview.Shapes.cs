@@ -550,6 +550,13 @@ public partial class WordHandler
     /// <summary>
     /// Render a cropped image using a container div with overflow:hidden.
     /// The image is scaled to its original size and positioned to show only the cropped region.
+    /// The image is absolutely positioned inside the container (NOT a baseline-
+    /// dependent inline element with negative margins): a 128px-tall inline img in
+    /// a 128px container sits on the text baseline, so without a vertical-crop
+    /// margin to pull it back (e.g. cropLeft-only crops where margin-top is 0) it
+    /// is pushed out of the overflow:hidden window and vanishes entirely. Absolute
+    /// positioning ties the offset to the container box, not the line box, so every
+    /// crop combination (symmetric / single-side / mixed) clips correctly.
     /// </summary>
     private static void RenderCroppedImage(StringBuilder sb, string dataUri, long displayWidthPx, long displayHeightPx,
         double cropL, double cropT, double cropR, double cropB, string alt, string extraStyle = "")
@@ -567,10 +574,10 @@ public partial class WordHandler
         var offsetX = -imgW * (cropL / 100.0);
         var offsetY = -imgH * (cropT / 100.0);
 
-        var containerStyle = $"display:inline-block;width:{displayWidthPx}px;height:{displayHeightPx}px;overflow:hidden";
+        var containerStyle = $"position:relative;display:inline-block;width:{displayWidthPx}px;height:{displayHeightPx}px;overflow:hidden";
         if (!string.IsNullOrEmpty(extraStyle)) containerStyle += $";{extraStyle}";
         sb.Append($"<div style=\"{containerStyle}\">");
-        sb.Append($"<img src=\"{dataUri}\" alt=\"{alt}\" style=\"width:{imgW:0}px;height:{imgH:0}px;margin-left:{offsetX:0}px;margin-top:{offsetY:0}px\">");
+        sb.Append($"<img src=\"{dataUri}\" alt=\"{alt}\" style=\"position:absolute;left:{offsetX:0}px;top:{offsetY:0}px;width:{imgW:0}px;height:{imgH:0}px;max-width:none\">");
         sb.Append("</div>");
     }
 
