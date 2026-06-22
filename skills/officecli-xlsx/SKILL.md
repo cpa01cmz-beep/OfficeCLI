@@ -285,7 +285,7 @@ Chart types live under `officecli help xlsx chart` — the enum is long (20+). P
 
 **The single-column trap.** `dataRange="Sheet1!B2:B13"` looks like "value column" but the engine rejects it with `Chart requires data`. Either widen the range to include the category column (`A2:B13`), or switch to form (c) with explicit `series1.categories`.
 
-**Chart `anchor` and series are immutable after create.** `set chart[N] --prop anchor=...` is rejected (`UNSUPPORTED props: anchor`); likewise new series cannot be appended. To resize, move, or add a series: `officecli remove` the chart, then `officecli add` with the new anchor / full series list. Also note: `remove chart[1]` shifts `chart[2] → chart[1]`, and re-add **appends at the end** — to preserve chart order, remove all and rebuild in order.
+**Move / resize a chart after create:** `set chart[N] --prop anchor="F5:N25"` (also `--prop x= --prop y= --prop width= --prop height=`). **Series are still immutable** — to add/change a series, `officecli remove` the chart and `officecli add` with the full series list. Note `remove chart[1]` shifts `chart[2] → chart[1]` and re-add **appends at the end** — to preserve chart order, remove all and rebuild in order.
 
 **Anchor sizing.** No auto-fit. A column chart with 5-6 categories + 2 series needs roughly `A5:L22` (12 cols × 18 rows) to show all labels uncut. Narrower and X-axis labels clip; wider and the chart can split across pages on print/export. If in doubt, start narrow, preview via `view html` (Read the returned HTML path), widen in increments. Page layout (below) is the other half of the fix.
 
@@ -440,7 +440,7 @@ EOF
 
 CLI constraints and gaps to work around — not defects in the output file.
 
-- **Chart `anchor` and series are immutable after create** — to resize/move/add-series: `remove` + `add`. `remove chart[N]` shifts subsequent indices down; re-add appends at end.
+- **Chart series are immutable after create** — to add/change a series: `remove` + `add` with the full series list. (Position is mutable: `set chart[N] --prop anchor=` / `x/y/width/height`.) `remove chart[N]` shifts subsequent indices down; re-add appends at end.
 - **`validate` while resident open** — reports spurious `tableParts` / `drawing` errors. Always `close` first.
 - **Batch + resident for formulas — avoid.** Observed deadlocks (CPU 99%, `main pipe busy`, kill -9 required) for cross-sheet formula batches even at 3-5 ops; the prior "≤ 12 ops safe" guideline is **not reliable**. Rule: **cross-sheet formulas go through non-resident one-big-batch OR individual `set`** (100% reliable). Pure value-set batches (no formulas) stay reliable at 50-80+ ops even in resident. **Multiple officecli resident processes on the same machine also contend** — if another agent/session is running resident, expect non-deterministic hangs.
 - **Conditional formatting naming asymmetry** — the element name for `--type` is `conditionalformatting`; the path suffix is `/cf[N]`. Use `officecli help xlsx conditionalformatting` for schema, `/cf[N]` for paths.
