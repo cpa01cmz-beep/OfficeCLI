@@ -588,6 +588,22 @@ public partial class WordHandler
         sb.AppendLine("  function pickHtpl(n){return (etpl&&n%2===0)?etpl:htpl;}");
         sb.AppendLine("  function pickFtpl(n){return (eftpl&&n%2===0)?eftpl:ftpl;}");
         sb.AppendLine(@"
+  // Out-of-flow children (position:absolute/fixed — full-page background
+  // layers, behind-text watermarks, floating anchored drawings) are removed
+  // from the normal document flow and do NOT occupy vertical space for the
+  // content that follows them. A full-page background div
+  // (position:absolute;height:100%) reports offsetHeight==page-height, so if
+  // the pagination height math counted it as flow content it would think the
+  // hosting paragraph is a full page tall and push the real content (title,
+  // body) onto subsequent pages, splitting the cover and shifting the whole
+  // document down. Skip these elements when measuring flow height / picking
+  // split points so they paint where the renderer placed them without
+  // displacing in-flow siblings.
+  function isOutOfFlow(el){
+    if(!el||el.nodeType!==1)return false;
+    var pos=getComputedStyle(el).position;
+    return pos==='absolute'||pos==='fixed';
+  }
   function paginate(){
     var pages=document.querySelectorAll('.page');
     // Sync mode + page filter: bail once pages beyond max-requested exist
@@ -606,6 +622,7 @@ public partial class WordHandler
           var sch=0;
           Array.from(sb_.children).forEach(function(c){
             if(c.classList.contains('footnotes'))return;
+            if(isOutOfFlow(c))return;
             var bt=c.offsetTop+c.offsetHeight-sb_.offsetTop;
             if(bt>sch)sch=bt;
           });
@@ -626,6 +643,7 @@ public partial class WordHandler
       var contentH=0;
       Array.from(body.children).forEach(function(c){
         if(c.classList.contains('footnotes'))return;
+        if(isOutOfFlow(c))return;
         var b=c.offsetTop+c.offsetHeight-body.offsetTop;
         if(b>contentH)contentH=b;
       });
@@ -640,6 +658,7 @@ public partial class WordHandler
       var splitIdx=-1;
       for(var ci=0;ci<children.length;ci++){
         if(children[ci].classList.contains('footnotes'))continue;
+        if(isOutOfFlow(children[ci]))continue;
         var bot=children[ci].offsetTop+children[ci].offsetHeight-body.offsetTop;
         if(bot>availH+2){splitIdx=ci;break;}
       }
@@ -762,6 +781,10 @@ public partial class WordHandler
         var movable=[];
         for(var mi=splitIdx;mi<children.length;mi++){
           if(children[mi].classList.contains('footnotes'))continue;
+          // Out-of-flow layers (full-page background, watermark, floating
+          // drawing) are positioned relative to THIS .page; leave them on the
+          // source page and don't let them participate in split height math.
+          if(isOutOfFlow(children[mi]))continue;
           movable.push({el:children[mi],top:children[mi].offsetTop-bodyT,h:children[mi].offsetHeight});
         }
         if(movable.length===0)continue;
@@ -822,7 +845,9 @@ public partial class WordHandler
         // amortized across event loop turns).
         var toMove=[];
         for(var mi=splitIdx;mi<children.length;mi++){
-          if(!children[mi].classList.contains('footnotes'))toMove.push(children[mi]);
+          if(children[mi].classList.contains('footnotes'))continue;
+          if(isOutOfFlow(children[mi]))continue;
+          toMove.push(children[mi]);
         }
         if(toMove.length===0)continue;
         var nw=document.createElement('div');
@@ -880,6 +905,7 @@ public partial class WordHandler
       var visibleCount=0;
       Array.from(b.children).forEach(function(c){
         if(c.classList.contains('footnotes'))return;
+        if(isOutOfFlow(c))return;
         var bt=c.offsetTop+c.offsetHeight-b.offsetTop;
         if(bt>ch)ch=bt;
         if(c.offsetHeight>0)visibleCount++;
