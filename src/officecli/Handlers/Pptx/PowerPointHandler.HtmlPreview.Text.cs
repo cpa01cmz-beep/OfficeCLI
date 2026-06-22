@@ -221,6 +221,16 @@ public partial class PowerPointHandler
                 // always wins; this only fills the inherited-default gap.
                 paraStyles.Add($"padding-left:{(pProps!.Level!.Value) * 36}pt");
 
+            // marR (right margin): text wraps before the right edge of the text body
+            // by this amount. PowerPoint honors it (a paragraph with a large marR wraps
+            // early, occupying only the left portion of the shape); mirror marL with
+            // padding-right so the wrap boundary matches.
+            long? inheritedMarR = (inheritedLvlPpr as Drawing.TextParagraphPropertiesType)?.RightMargin?.Value;
+            if (pProps?.RightMargin?.HasValue == true)
+                paraStyles.Add($"padding-right:{Units.EmuToPt(pProps.RightMargin.Value)}pt");
+            else if (inheritedMarR.HasValue)
+                paraStyles.Add($"padding-right:{Units.EmuToPt(inheritedMarR.Value)}pt");
+
             // RTL paragraph (Arabic / Hebrew). <a:pPr rtl="1"/> reverses
             // character order; emit CSS so the browser does the same. Without
             // this, Arabic PPT slides rendered visually mirrored in HTML
