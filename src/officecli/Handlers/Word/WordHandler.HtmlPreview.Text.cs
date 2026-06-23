@@ -534,80 +534,67 @@ public partial class WordHandler
             }
             else if (child.LocalName is "sdt" or "smartTag" or "customXml" or "fldSimple")
             {
-                // Content controls, smart tags, custom XML, simple fields —
-                // render hyperlinks with href + their own runs (TOC entries
-                // are authored as <w:fldSimple> wrapping <w:hyperlink>),
-                // then render bare runs. Runs nested inside a hyperlink are
-                // emitted by the hyperlink branch so skip them at the
-                // outer Run pass.
-                var emittedRuns = new HashSet<OpenXmlElement>();
-                foreach (var innerHyp in child.Descendants<Hyperlink>())
+                // Content controls, smart tags, custom XML, simple fields — walk
+                // the wrapper content in DOCUMENT ORDER, recursing into nested
+                // wrappers. A run may be a typed Run, or — for legacy Office-2003
+                // <w:smartTag> that the SDK parses as an OpenXmlUnknownElement — an
+                // unknown <w:r> rebuilt from its OuterXml so its rPr (italic/size/
+                // color) survives (R102-1: "Bucharest"/"Romania"). A nested
+                // address (place > City/State/PostalCode) mixes a typed outer
+                // wrapper with UNKNOWN inner smartTags; the old typed-then-unknown
+                // two-pass dropped the inner runs (the typed pass found the bare
+                // separators, so the unknown pass was skipped) and scrambled order.
+                // Walking once in order handles mixed typed/unknown content and
+                // any nesting depth. TOC entries are <w:fldSimple> wrapping
+                // <w:hyperlink>, rendered in place by the Hyperlink branch.
+                void RenderWrapperContent(OpenXmlElement container)
                 {
-                    RenderHyperlinkHtml(sb, innerHyp, para);
-                    foreach (var r in innerHyp.Descendants<Run>())
-                        emittedRuns.Add(r);
-                }
-                foreach (var innerRun in child.Descendants<Run>())
-                {
-                    if (emittedRuns.Contains(innerRun)) continue;
-                    RenderRunHtml(sb, innerRun, para);
-                }
-                // Legacy Office 2003 smart tags (<w:smartTag>) parse as an
-                // OpenXmlUnknownElement whose nested <w:r> are also unknown, so
-                // Descendants<Run>() finds none. Rebuild each unknown <w:r> as a
-                // typed Run from its OuterXml and render it through the normal
-                // run path so its rPr (italic, size, color, …) is preserved —
-                // emitting child.InnerText here would drop all formatting,
-                // making smartTag-wrapped runs render upright while their
-                // byte-identical direct-child siblings render italic
-                // (R102-1: "Bucharest"/"Romania" upright inside an all-italic
-                // affiliation line). Bare InnerText remains the last resort.
-                if (!child.Descendants<Hyperlink>().Any() && !child.Descendants<Run>().Any())
-                {
-                    bool renderedAny = false;
-                    foreach (var unkRun in child.Descendants<DocumentFormat.OpenXml.OpenXmlUnknownElement>())
+                    foreach (var node in container.ChildElements)
                     {
-                        if (unkRun.LocalName != "r"
-                            || unkRun.NamespaceUri != "http://schemas.openxmlformats.org/wordprocessingml/2006/main")
-                            continue;
-                        // A nested smartTag's runs are picked up by the outer
-                        // Descendants pass already; skip runs that sit inside a
-                        // deeper smartTag/customXml so they aren't rendered twice.
-                        bool nestedDeeper = false;
-                        for (var anc = unkRun.Parent; anc != null && anc != child; anc = anc.Parent)
-                            if (anc is DocumentFormat.OpenXml.OpenXmlUnknownElement uw
-                                && uw.NamespaceUri == "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-                                && (uw.LocalName == "smartTag" || uw.LocalName == "customXml"))
-                            { nestedDeeper = true; break; }
-                        if (nestedDeeper) continue;
-                        Run? typedRun = null;
-                        try
-                        {
-                            // OuterXml of an unknown <w:r> may omit the xmlns:w
-                            // declaration when the prefix is bound on an ancestor;
-                            // new Run(xml) then can't bind the prefix. Inject the
-                            // WordprocessingML namespace when it's missing so the
-                            // fragment parses standalone.
-                            var xml = unkRun.OuterXml;
-                            if (!string.IsNullOrEmpty(xml) && !xml.Contains("xmlns:w=", StringComparison.Ordinal))
-                                xml = xml.Replace("<w:r ",
-                                        "<w:r xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" ",
-                                        StringComparison.Ordinal)
-                                    .Replace("<w:r>",
-                                        "<w:r xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">",
-                                        StringComparison.Ordinal);
-                            typedRun = new Run(xml);
-                        }
-                        catch { typedRun = null; }
-                        if (typedRun != null)
-                        {
+                        if (node is Hyperlink hyp)
+                            RenderHyperlinkHtml(sb, hyp, para);
+                        else if (node is Run typedRun)
                             RenderRunHtml(sb, typedRun, para);
-                            renderedAny = true;
+                        else if (node.LocalName is "sdt" or "smartTag" or "customXml" or "fldSimple"
+                            && node.NamespaceUri == "http://schemas.openxmlformats.org/wordprocessingml/2006/main")
+                            RenderWrapperContent(node);
+                        else if (node is DocumentFormat.OpenXml.OpenXmlUnknownElement unk
+                            && unk.NamespaceUri == "http://schemas.openxmlformats.org/wordprocessingml/2006/main")
+                        {
+                            if (unk.LocalName is "smartTag" or "customXml" or "sdt")
+                            {
+                                RenderWrapperContent(unk);
+                            }
+                            else if (unk.LocalName == "r")
+                            {
+                                Run? rebuilt = null;
+                                try
+                                {
+                                    // OuterXml of an unknown <w:r> may omit the
+                                    // xmlns:w declaration when the prefix is bound on
+                                    // an ancestor; new Run(xml) then can't bind it.
+                                    // Inject the WordprocessingML namespace when
+                                    // missing so the fragment parses standalone.
+                                    var xml = unk.OuterXml;
+                                    if (!string.IsNullOrEmpty(xml) && !xml.Contains("xmlns:w=", StringComparison.Ordinal))
+                                        xml = xml.Replace("<w:r ",
+                                                "<w:r xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" ",
+                                                StringComparison.Ordinal)
+                                            .Replace("<w:r>",
+                                                "<w:r xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">",
+                                                StringComparison.Ordinal);
+                                    rebuilt = new Run(xml);
+                                }
+                                catch { rebuilt = null; }
+                                if (rebuilt != null)
+                                    RenderRunHtml(sb, rebuilt, para);
+                                else if (!string.IsNullOrEmpty(unk.InnerText))
+                                    sb.Append(System.Net.WebUtility.HtmlEncode(unk.InnerText));
+                            }
                         }
                     }
-                    if (!renderedAny && !string.IsNullOrEmpty(child.InnerText))
-                        sb.Append(System.Net.WebUtility.HtmlEncode(child.InnerText));
                 }
+                RenderWrapperContent(child);
             }
         }
 
