@@ -522,14 +522,29 @@ public partial class PowerPointHandler
             }
             else
             {
-                // R26-3: inherited default bold/italic from the master/layout
-                // defRPr, applied as a fallback when the run sets neither.
-                bool? inhBold = inheritedDefRp?.Bold?.HasValue == true ? inheritedDefRp.Bold.Value : null;
-                bool? inhItalic = inheritedDefRp?.Italic?.HasValue == true ? inheritedDefRp.Italic.Value : null;
-                // Inherited caps (e.g. layout/master title defRPr cap="all"): applied
-                // as a fallback when the run sets no cap of its own, so all-caps title
-                // styles render uppercase (matching PowerPoint).
-                Drawing.TextCapsValues? inhCap = inheritedCapsRp?.Capital?.HasValue == true ? inheritedCapsRp.Capital.Value : null;
+                // Paragraph-level default run properties (a:pPr/a:defRPr) supply a
+                // fallback for every run in the paragraph that omits the property. This
+                // applies to ALL shapes (placeholder or not), and sits ABOVE the
+                // master/layout placeholder inheritance but BELOW an explicit run rPr.
+                // Previously dropped entirely (e.g. <a:pPr><a:defRPr u="sng"/></a:pPr>
+                // rendered without the underline PowerPoint applies).
+                var paraDefRp = pProps?.GetFirstChild<Drawing.DefaultRunProperties>();
+                // R26-3: inherited default bold/italic — paragraph defRPr wins over the
+                // master/layout placeholder defRPr; applied when the run sets neither.
+                bool? inhBold = paraDefRp?.Bold?.HasValue == true ? paraDefRp.Bold.Value
+                    : inheritedDefRp?.Bold?.HasValue == true ? inheritedDefRp.Bold.Value : null;
+                bool? inhItalic = paraDefRp?.Italic?.HasValue == true ? paraDefRp.Italic.Value
+                    : inheritedDefRp?.Italic?.HasValue == true ? inheritedDefRp.Italic.Value : null;
+                // Inherited caps (e.g. layout/master title defRPr cap="all", or a
+                // paragraph-local defRPr): applied as a fallback when the run sets no cap.
+                Drawing.TextCapsValues? inhCap = paraDefRp?.Capital?.HasValue == true ? paraDefRp.Capital.Value
+                    : inheritedCapsRp?.Capital?.HasValue == true ? inheritedCapsRp.Capital.Value : null;
+                // Inherited underline / strike from the paragraph defRPr.
+                Drawing.TextUnderlineValues? inhU = paraDefRp?.Underline?.HasValue == true ? paraDefRp.Underline.Value : null;
+                Drawing.TextStrikeValues? inhStrike = paraDefRp?.Strike?.HasValue == true ? paraDefRp.Strike.Value : null;
+                // Paragraph defRPr font size / color override the placeholder defaults.
+                int? paraSize = paraDefRp?.FontSize?.HasValue == true ? paraDefRp.FontSize.Value : defaultFontSizeHundredths;
+                var paraColor = ResolveFillColor(paraDefRp?.GetFirstChild<Drawing.SolidFill>(), themeColors) ?? defaultRunColor;
                 // R63: walk the paragraph's children IN DOCUMENT ORDER so that a
                 // soft line break (<a:br>, Drawing.Break) interleaved between runs
                 // emits its <br> at the right position. Previously runs were all
@@ -541,7 +556,7 @@ public partial class PowerPointHandler
                 {
                     if (child is Drawing.Run run)
                     {
-                        RenderRun(sb, run, themeColors, defaultFontSizeHundredths, placeholderPart, themeFontFallback, fontScale, defaultRunColor, inhBold, inhItalic, tabCtx, inhCap);
+                        RenderRun(sb, run, themeColors, paraSize, placeholderPart, themeFontFallback, fontScale, paraColor, inhBold, inhItalic, tabCtx, inhCap, inhU, inhStrike);
                     }
                     else if (child is Drawing.Break)
                     {
@@ -565,7 +580,7 @@ public partial class PowerPointHandler
                         if (fldRpr != null)
                             fldRun.RunProperties = (Drawing.RunProperties)fldRpr.CloneNode(true);
                         fldRun.Text = new Drawing.Text(fldText);
-                        RenderRun(sb, fldRun, themeColors, defaultFontSizeHundredths, placeholderPart, themeFontFallback, fontScale, defaultRunColor, inhBold, inhItalic, tabCtx, inhCap);
+                        RenderRun(sb, fldRun, themeColors, paraSize, placeholderPart, themeFontFallback, fontScale, paraColor, inhBold, inhItalic, tabCtx, inhCap, inhU, inhStrike);
                     }
                 }
             }
@@ -707,7 +722,8 @@ public partial class PowerPointHandler
     private static void RenderRun(StringBuilder sb, Drawing.Run run, Dictionary<string, string> themeColors,
         int? defaultFontSizeHundredths = null, OpenXmlPart? part = null, string? themeFontFallback = null,
         double fontScale = 1.0, string? defaultRunColor = null,
-        bool? inheritedBold = null, bool? inheritedItalic = null, TabContext? tabCtx = null, Drawing.TextCapsValues? inheritedCap = null)
+        bool? inheritedBold = null, bool? inheritedItalic = null, TabContext? tabCtx = null, Drawing.TextCapsValues? inheritedCap = null,
+        Drawing.TextUnderlineValues? inheritedUnderline = null, Drawing.TextStrikeValues? inheritedStrike = null)
     {
         var text = run.Text?.Text ?? "";
         if (string.IsNullOrEmpty(text)) return;
@@ -835,10 +851,15 @@ public partial class PowerPointHandler
             var decoLines = new List<string>();
             string? decoStyle = null;
             string? decoThickness = null;
-            if (rp.Underline?.HasValue == true && rp.Underline.Value != Drawing.TextUnderlineValues.None)
+            // Effective underline/strike: explicit run rPr wins; otherwise fall back to
+            // the inherited value (paragraph a:pPr/a:defRPr or master/layout defRPr). An
+            // explicit u="none"/strike="noStrike" on the run is respected (overrides the
+            // inherited value), since rp.Underline.HasValue is true in that case.
+            var effU = rp.Underline?.HasValue == true ? rp.Underline.Value : inheritedUnderline;
+            if (effU != null && effU != Drawing.TextUnderlineValues.None)
             {
                 decoLines.Add("underline");
-                var u = rp.Underline.Value;
+                var u = effU.Value;
                 if (u == Drawing.TextUnderlineValues.Double)
                 {
                     // CONSISTENCY(underline-variants): mirrors WordHandler's
@@ -894,10 +915,11 @@ public partial class PowerPointHandler
                 // else: exotic combos (Words, HeavyWords, etc.) fall back to plain underline.
             }
 
-            if (rp.Strike?.HasValue == true && rp.Strike.Value != Drawing.TextStrikeValues.NoStrike)
+            var effStrike = rp.Strike?.HasValue == true ? rp.Strike.Value : inheritedStrike;
+            if (effStrike != null && effStrike != Drawing.TextStrikeValues.NoStrike)
             {
                 decoLines.Add("line-through");
-                if (rp.Strike.Value == Drawing.TextStrikeValues.DoubleStrike && decoStyle == null)
+                if (effStrike == Drawing.TextStrikeValues.DoubleStrike && decoStyle == null)
                 {
                     // CONSISTENCY(underline-variants): like underline `double`,
                     // `line-through double` may render visually identical to
