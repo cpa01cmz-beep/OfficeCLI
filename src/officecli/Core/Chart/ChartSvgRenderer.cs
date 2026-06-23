@@ -1102,7 +1102,8 @@ internal partial class ChartSvgRenderer
         bool scatterMarkersOnly = false, bool stacked = false, bool percent = false,
         string? dataLabelNumFmt = null,
         List<string?>? markerFillColors = null, List<string?>? markerLineColors = null,
-        bool showSerName = false, bool showCatName = false, bool showVal = true)
+        bool showSerName = false, bool showCatName = false, bool showVal = true,
+        int? catLabelRotationDeg = null)
     {
         bool isLog = logBase.HasValue && logBase.Value > 1;
 
@@ -1401,7 +1402,12 @@ internal partial class ChartSvgRenderer
             var label = c < categories.Length ? categories[c] : "";
             if (CatAxisVisible && TickMarkVisible(CatMajorTickMark))
                 EmitHAxisTick(sb, MapX(c), oy + ph, CatMajorTickMark!);
-            sb.AppendLine($"        <text x=\"{MapX(c):0.#}\" y=\"{oy + ph + 16}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\" text-anchor=\"middle\">{HtmlEncode(label)}</text>");
+            // Honor <c:catAx><c:txPr><a:bodyPr rot> via EmitBottomAxisLabel (mirrors
+            // the bar renderer). Previously the line/area renderers emitted a raw
+            // horizontal <text>, dropping the category-axis label rotation that the
+            // bar chart already applied (the bottom-margin reservation already fired
+            // for all chart types, leaving the labels un-rotated in the gap).
+            EmitBottomAxisLabel(sb, MapX(c), oy + ph + 16, CatColor, CatFontPx, label, catLabelRotationDeg);
         }
 
         // Value axis labels (+ major tick marks left of the value axis)
@@ -1773,7 +1779,8 @@ internal partial class ChartSvgRenderer
         bool percent = false,
         double? axisMin = null, double? axisMax = null, double? majorUnit = null, string? valNumFmt = null,
         bool showDataLabels = false, bool showVal = true, bool showSerName = false,
-        bool showCatName = false, string? dataLabelNumFmt = null)
+        bool showCatName = false, string? dataLabelNumFmt = null,
+        int? catLabelRotationDeg = null)
     {
         if (series.Count == 0) return;
         var catCount = Math.Max(categories.Length, series.Max(s => s.values.Length));
@@ -1913,7 +1920,8 @@ internal partial class ChartSvgRenderer
             var lx = ox + (catCount > 1 ? (double)pw * c / (catCount - 1) : pw / 2.0);
             if (TickMarkVisible(CatMajorTickMark))
                 EmitHAxisTick(sb, lx, oy + ph, CatMajorTickMark!);
-            sb.AppendLine($"        <text x=\"{lx:0.#}\" y=\"{oy + ph + 16}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\" text-anchor=\"middle\">{HtmlEncode(label)}</text>");
+            // Honor the category-axis label rotation (mirrors bar/line via EmitBottomAxisLabel).
+            EmitBottomAxisLabel(sb, lx, oy + ph + 16, CatColor, CatFontPx, label, catLabelRotationDeg);
         }
         if (ValAxisVisible)
         for (int t = 0; t <= nTicks; t++)
@@ -4038,7 +4046,8 @@ internal partial class ChartSvgRenderer
                 RenderAreaChartSvg(sb, info.Series, info.Categories, info.Colors, marginLeft, marginTop, areaW, plotH, info.IsStacked, info.IsPercent,
                     info.AxisMin, info.AxisMax, info.MajorUnit, info.ValNumFmt,
                     info.ShowDataLabels, info.ShowDataLabelVal, info.ShowDataLabelSerName,
-                    info.ShowDataLabelCatName, info.DataLabelsNumFmt);
+                    info.ShowDataLabelCatName, info.DataLabelsNumFmt,
+                    info.CatAxisLabelRotationDeg);
         }
         else if (chartType == "combo")
         {
@@ -4090,7 +4099,8 @@ internal partial class ChartSvgRenderer
                     info.IsStacked, info.IsPercent, info.DataLabelsNumFmt,
                     info.MarkerFillColors, info.MarkerLineColors,
                     info.ShowDataLabelSerName, info.ShowDataLabelCatName,
-                    info.ShowDataLabelVal || info.ShowDataLabelPercent);
+                    info.ShowDataLabelVal || info.ShowDataLabelPercent,
+                    info.CatAxisLabelRotationDeg);
         }
         else
         {
