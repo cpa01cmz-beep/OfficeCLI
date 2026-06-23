@@ -774,10 +774,9 @@ public partial class WordHandler
         if (IsTruthy(properties.GetValueOrDefault("referenceCustomMarkFollows")))
             fnRef.CustomMarkFollows = true;
         var fnRefRun = new Run(fnRefRPr, fnRef);
-        if (properties.TryGetValue("referenceCustomMark", out var fnMark)
-            && !string.IsNullOrEmpty(fnMark))
-            fnRefRun.AppendChild(new Text(fnMark) { Space = SpaceProcessingModeValues.Preserve });
-        InsertIntoParagraph(fnPara, fnRefRun, index);
+        properties.TryGetValue("referenceCustomMark", out var fnMark);
+        var fnToInsert = ApplyNoteRefMarkAndRevision(fnRefRun, fnMark, properties);
+        InsertIntoParagraph(fnPara, fnToInsert, index);
 
         var resultPath = $"/footnote[@footnoteId={fnId}]";
         return resultPath;
@@ -878,13 +877,53 @@ public partial class WordHandler
         if (IsTruthy(properties.GetValueOrDefault("referenceCustomMarkFollows")))
             enRef.CustomMarkFollows = true;
         var enRefRun = new Run(enRefRPr, enRef);
-        if (properties.TryGetValue("referenceCustomMark", out var enMark)
-            && !string.IsNullOrEmpty(enMark))
-            enRefRun.AppendChild(new Text(enMark) { Space = SpaceProcessingModeValues.Preserve });
-        InsertIntoParagraph(enPara, enRefRun, index);
+        properties.TryGetValue("referenceCustomMark", out var enMark);
+        var enToInsert = ApplyNoteRefMarkAndRevision(enRefRun, enMark, properties);
+        InsertIntoParagraph(enPara, enToInsert, index);
 
         var resultPath = $"/endnote[@endnoteId={enId}]";
         return resultPath;
+    }
+
+    // BUG-DUMP-NOTEREF-CUSTOMMARK-DEL: append a note reference's custom mark glyph
+    // and, when the source reference run was a tracked revision (reference.revision.*
+    // — most commonly a <w:del> wrapping a deleted reference), re-wrap the rebuilt
+    // run so the deletion/insertion/move survives instead of resurfacing as live,
+    // accepted content. In a deletion the mark glyph must ride in <w:delText>.
+    private OpenXmlElement ApplyNoteRefMarkAndRevision(
+        Run refRun, string? customMark, Dictionary<string, string> properties)
+    {
+        var revType = properties.GetValueOrDefault("reference.revision.type");
+        bool isDel = string.Equals(revType, "del", StringComparison.OrdinalIgnoreCase);
+        if (!string.IsNullOrEmpty(customMark))
+            refRun.AppendChild(isDel
+                ? new DeletedText(customMark) { Space = SpaceProcessingModeValues.Preserve }
+                : (OpenXmlElement)new Text(customMark) { Space = SpaceProcessingModeValues.Preserve });
+
+        if (string.IsNullOrEmpty(revType))
+            return refRun;
+
+        RunTrackChangeType? wrapper = revType.ToLowerInvariant() switch
+        {
+            "del" => new DeletedRun(),
+            "ins" => new InsertedRun(),
+            "movefrom" => new MoveFromRun(),
+            "moveto" => new MoveToRun(),
+            _ => null
+        };
+        if (wrapper == null)
+            return refRun;
+
+        if (properties.TryGetValue("reference.revision.author", out var au) && !string.IsNullOrEmpty(au))
+            wrapper.Author = au;
+        if (properties.TryGetValue("reference.revision.date", out var dt) && !string.IsNullOrEmpty(dt)
+            && DateTime.TryParse(dt, null, System.Globalization.DateTimeStyles.RoundtripKind, out var d))
+            wrapper.Date = d;
+        wrapper.Id = properties.TryGetValue("reference.revision.id", out var rid) && !string.IsNullOrEmpty(rid)
+            ? rid
+            : GenerateRevisionId();
+        wrapper.AppendChild(refRun);
+        return wrapper;
     }
 
     private string AddToc(OpenXmlElement parent, string parentPath, int? index, Dictionary<string, string> properties)

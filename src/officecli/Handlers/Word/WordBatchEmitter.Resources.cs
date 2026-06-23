@@ -2170,6 +2170,18 @@ public static partial class WordBatchEmitter
         // Carry the run's verbatim <w:rPr> so the apply side restores it.
         if (bodyRefRun != null)
         {
+            // BUG-DUMP-NOTEREF-CUSTOMMARK-DEL: the body reference run may itself be a
+            // TRACKED REVISION (most commonly a <w:del> wrapping a deleted note
+            // reference). EmitNoteReference routes the run to `add footnote`/`add
+            // endnote`, bypassing the normal run emit's revision wrapping — so without
+            // this the deletion attribution was lost and the deleted reference
+            // resurfaced as a live, accepted reference (and its custom mark, which
+            // rides in <w:delText>, became live <w:t>). Carry revision.* so the apply
+            // re-wraps the rebuilt reference run.
+            foreach (var rk in new[] { "revision.type", "revision.author", "revision.date", "revision.id" })
+                if (bodyRefRun.Format.TryGetValue(rk, out var rv) && rv != null
+                    && !string.IsNullOrEmpty(rv.ToString()))
+                    noteProps["reference." + rk] = rv.ToString()!;
             var bodyRunXml = word.GetElementXml(bodyRefRun.Path);
             if (!string.IsNullOrEmpty(bodyRunXml))
             {
@@ -2194,8 +2206,16 @@ public static partial class WordBatchEmitter
                     if (cmf is "1" or "true" or "on")
                     {
                         noteProps["referenceCustomMarkFollows"] = "1";
+                        // BUG-DUMP-NOTEREF-CUSTOMMARK-DEL: in a TRACKED-DELETION
+                        // reference run (<w:del>) the custom mark glyph rides in
+                        // <w:delText>, not <w:t> — reading only <w:t> dropped the
+                        // mark (e.g. a deleted footnote "1" silently lost the "1").
+                        // Concat both so the mark survives whether the run is live
+                        // or a deletion.
                         var markText = string.Concat(
-                            runEl.Elements(wNs2 + "t").Select(t => t.Value));
+                            runEl.Elements()
+                                .Where(e => e.Name == wNs2 + "t" || e.Name == wNs2 + "delText")
+                                .Select(e => e.Value));
                         noteProps["referenceCustomMark"] = markText;
                     }
                 }
