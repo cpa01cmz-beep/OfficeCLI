@@ -2209,7 +2209,8 @@ internal partial class ChartSvgRenderer
         bool showDataLabels, double? axisMin, double? axisMax, double? majorUnit, string? valNumFmt,
         List<bool>? smooth = null, List<TrendlineInfo?>? trendlines = null, List<ErrorBarInfo?>? errorBars = null,
         List<string?>? markerFillColors = null, List<string?>? markerLineColors = null,
-        string? dataLabelNumFmt = null)
+        string? dataLabelNumFmt = null,
+        bool showVal = true, bool showSerName = false, bool showCatName = false)
     {
         var scatterSeries = plotArea.Descendants<OpenXmlCompositeElement>()
             .Where(e => e.LocalName == "ser" && e.Parent?.LocalName == "scatterChart").ToList();
@@ -2339,10 +2340,22 @@ internal partial class ChartSvgRenderer
                     // fall back to the value-axis numFmt, then the bare shortcut —
                     // mirrors the line/bubble renderers. Previously hardcoded, so a
                     // currency/percent data label rendered as a bare number.
-                    var vlabel = !string.IsNullOrEmpty(dataLabelNumFmt) ? FormatAxisValue(p.yv, dataLabelNumFmt)
-                        : !string.IsNullOrEmpty(valNumFmt) ? FormatAxisValue(p.yv, valNumFmt)
-                        : p.yv % 1 == 0 ? $"{(int)p.yv}" : $"{p.yv:0.#}";
-                    sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{p.x:0.#}\" y=\"{p.y - 6:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\">{vlabel}</text>");
+                    string Fmt(double v) => !string.IsNullOrEmpty(dataLabelNumFmt) ? FormatAxisValue(v, dataLabelNumFmt)
+                        : !string.IsNullOrEmpty(valNumFmt) ? FormatAxisValue(v, valNumFmt)
+                        : v % 1 == 0 ? $"{(int)v}" : $"{v:0.#}";
+                    // Assemble the enabled label parts in PowerPoint's order
+                    // (series name, category = X value, value = Y). Previously only
+                    // the Y value was emitted, ignoring showSerName/showCatName and
+                    // an explicit showVal=0. Mirrors the bubble renderer's lparts.
+                    var lparts = new List<string>();
+                    if (showSerName && s < series.Count) lparts.Add(series[s].name);
+                    if (showCatName) lparts.Add(Fmt(p.xv));
+                    if (showVal) lparts.Add(Fmt(p.yv));
+                    if (lparts.Count > 0)
+                    {
+                        var vlabel = string.Join(", ", lparts);
+                        sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{p.x:0.#}\" y=\"{p.y - 6:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\">{HtmlEncode(vlabel)}</text>");
+                    }
                 }
             }
         }
@@ -4058,7 +4071,8 @@ internal partial class ChartSvgRenderer
                 info.AxisMin, info.AxisMax, info.MajorUnit, info.ValNumFmt,
                 info.Smooth, info.Trendlines, info.ErrorBars,
                 info.MarkerFillColors, info.MarkerLineColors,
-                info.DataLabelsNumFmt);
+                info.DataLabelsNumFmt,
+                info.ShowDataLabelVal, info.ShowDataLabelSerName, info.ShowDataLabelCatName);
         }
         else if (chartType.Contains("line") || chartType == "scatter")
         {
