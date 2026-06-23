@@ -1066,7 +1066,8 @@ public partial class WordHandler
         // those as inline SVG overlays using the shape's fill/border colors.
         var svgPrst = prst is "line" or "straightConnector1"
             or "rightArrow" or "leftArrow" or "upArrow" or "downArrow"
-            or "wedgeRoundRectCallout";
+            or "wedgeRoundRectCallout"
+            or "diamond" or "flowChartDecision";
         if (svgPrst)
         {
             // Defer fill/border to the SVG so the host div stays transparent.
@@ -1396,6 +1397,13 @@ public partial class WordHandler
                 break;
             case "upArrow":
                 sb.Append($"<polygon points=\"30,100 70,100 70,30 90,30 50,0 10,30 30,30\" fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{sw}\" vector-effect=\"non-scaling-stroke\"/>");
+                break;
+            case "diamond":
+            case "flowChartDecision":
+                // Flowchart decision node / rhombus: vertices at the midpoint of
+                // each box edge (top, right, bottom, left). flowChartDecision is
+                // the same rhombus geometry as diamond.
+                sb.Append($"<polygon points=\"50,0 100,50 50,100 0,50\" fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{sw}\" vector-effect=\"non-scaling-stroke\"/>");
                 break;
             case "wedgeRoundRectCallout":
                 // Rounded rect (80% height) + triangular pointer down-left.
