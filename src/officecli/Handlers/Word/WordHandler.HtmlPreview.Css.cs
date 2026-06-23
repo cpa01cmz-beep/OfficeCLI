@@ -2119,7 +2119,7 @@ public partial class WordHandler
     private string GetTableCellInlineCss(TableCell cell, bool tableBordersNone, TableBorders? tblBorders = null,
         Dictionary<string, TableConditionalFormat>? condFormats = null, List<string>? condTypes = null,
         int rowIdx = 0, int colIdx = 0, int totalRows = 1, int totalCols = 1,
-        double? exactRowHeightPt = null)
+        double? exactRowHeightPt = null, TableCellMarginDefault? tblCellMar = null)
     {
         var parts = new List<string>();
         var tcPr = cell.TableCellProperties;
@@ -2198,7 +2198,27 @@ public partial class WordHandler
             }
         }
 
-        if (tcPr == null) return string.Join(";", parts);
+        if (tcPr == null)
+        {
+            // No cell properties at all: the global `th,td { padding:0 5.4pt }`
+            // CSS rule already supplies the Word default, so we normally emit
+            // nothing. But an explicit table-level tblCellMar (incl. 0) must
+            // still win over that CSS default — emit it inline so a tblCellMar
+            // L/R=0 table with bare cells doesn't fall back to 5.4pt.
+            if (tblCellMar != null)
+            {
+                var tTop = tblCellMar.TopMargin?.Width?.Value;
+                var tBot = tblCellMar.BottomMargin?.Width?.Value;
+                var tLeft = tblCellMar.TableCellLeftMargin?.Width?.Value;
+                var tRight = tblCellMar.TableCellRightMargin?.Width?.Value;
+                var pTop = tTop != null ? $"{Units.TwipsToPt(tTop):0.#}pt" : "0pt";
+                var pBot = tBot != null ? $"{Units.TwipsToPt(tBot):0.#}pt" : "0pt";
+                var pLeft = tLeft != null ? $"{Units.TwipsToPt((int)tLeft):0.#}pt" : "5.4pt";
+                var pRight = tRight != null ? $"{Units.TwipsToPt((int)tRight):0.#}pt" : "5.4pt";
+                parts.Add($"padding:{pTop} {pRight} {pBot} {pLeft}");
+            }
+            return string.Join(";", parts);
+        }
 
         // Shading / fill (supports theme colors) — direct cell shading overrides conditional
         var cellFill = ResolveShadingFill(tcPr.Shading);
@@ -2290,20 +2310,33 @@ public partial class WordHandler
             parts.Add("align-items:stretch");
         }
 
-        // Padding mirrors Word's tcMar exactly. Word's TableNormal default is
-        // top=0 left=108(=5.4pt) bottom=0 right=108(=5.4pt) twips, used when
-        // tcMar is absent. (An older CellPadVComp=3pt vertical compensation
-        // for line-height:1 ascender clipping is no longer needed since cli
-        // emits unitless line-height per font ratio.)
+        // Padding resolution mirrors Word's per-edge cell-margin cascade:
+        //   cell tcMar slot (incl. 0) > table tblCellMar slot (incl. 0) > Word
+        //   TableNormal default (top=0 left=108(=5.4pt) bottom=0 right=108).
+        // The earlier code consulted only the cell-level tcMar and fell back to
+        // the hardcoded 5.4pt L/R default whenever a cell lacked its own tcMar —
+        // ignoring an explicit table-level tblCellMar of 0 and stealing 10.8pt
+        // of horizontal content width per column under table-layout:fixed +
+        // box-sizing:border-box (header/number wrap+clip). A document that
+        // declares tblCellMar L/R=0 must yield td padding L/R=0. (The older
+        // CellPadVComp=3pt vertical compensation for line-height:1 ascender
+        // clipping is no longer needed since cli emits unitless line-height.)
         var margins = tcPr?.TableCellMargin;
         {
-            var padTop = Units.TwipsToPt(margins?.TopMargin?.Width?.Value ?? "0");
-            var padBot = Units.TwipsToPt(margins?.BottomMargin?.Width?.Value ?? "0");
-            var leftVal = margins?.LeftMargin?.Width?.Value ?? margins?.StartMargin?.Width?.Value;
-            var rightVal = margins?.RightMargin?.Width?.Value ?? margins?.EndMargin?.Width?.Value;
+            // top/bottom: TopMargin/BottomMargin on both tcMar and tblCellMar.
+            var topVal = margins?.TopMargin?.Width?.Value ?? tblCellMar?.TopMargin?.Width?.Value;
+            var botVal = margins?.BottomMargin?.Width?.Value ?? tblCellMar?.BottomMargin?.Width?.Value;
+            // left/right: tcMar exposes Left/Start + Right/End; tblCellMar uses
+            // the distinct TableCellLeftMargin / TableCellRightMargin children.
+            var leftVal = margins?.LeftMargin?.Width?.Value ?? margins?.StartMargin?.Width?.Value
+                          ?? tblCellMar?.TableCellLeftMargin?.Width?.Value.ToString();
+            var rightVal = margins?.RightMargin?.Width?.Value ?? margins?.EndMargin?.Width?.Value
+                           ?? tblCellMar?.TableCellRightMargin?.Width?.Value.ToString();
+            var padTop = topVal != null ? $"{Units.TwipsToPt(topVal):0.#}pt" : "0pt";
+            var padBot = botVal != null ? $"{Units.TwipsToPt(botVal):0.#}pt" : "0pt";
             var padLeft = leftVal != null ? $"{Units.TwipsToPt(leftVal):0.#}pt" : "5.4pt";
             var padRight = rightVal != null ? $"{Units.TwipsToPt(rightVal):0.#}pt" : "5.4pt";
-            parts.Add($"padding:{padTop:0.#}pt {padRight} {padBot:0.#}pt {padLeft}");
+            parts.Add($"padding:{padTop} {padRight} {padBot} {padLeft}");
         }
 
         // hRule="exact": constrain cell to fixed height with overflow clipping.

@@ -39,6 +39,14 @@ public partial class WordHandler
         if (tblBorders == null && styleId != null)
             tblBorders = ResolveTableStyleBorders(styleId);
         bool tableBordersNone = IsTableBorderless(tblBorders);
+        // Table-level default cell margin (<w:tblCellMar>), with style fallback
+        // mirroring tblBorders. Cells consult this when they lack their own
+        // tcMar; an explicit value (incl. 0) overrides the hardcoded 5.4pt L/R
+        // td-padding default so a tblCellMar=0 invoice table doesn't lose
+        // content width to phantom padding under table-layout:fixed.
+        var tblCellMar = tblPr?.TableCellMarginDefault;
+        if (tblCellMar == null && styleId != null)
+            tblCellMar = ResolveTableStyleCellMargin(styleId);
 
         // Parse tblLook bitmask for conditional formatting
         var tblLook = ParseTableLook(tblPr);
@@ -357,7 +365,7 @@ public partial class WordHandler
                 var tag = isHeader ? "th" : "td";
                 var condTypes = GetConditionalTypes(tblLook, rowIdx, colIdx, totalRows, totalCols);
                 var cellStyle = GetTableCellInlineCss(cell, tableBordersNone, tblBorders, condFormats, condTypes,
-                    rowIdx, colIdx, totalRows, totalCols, exactRowHeightPt);
+                    rowIdx, colIdx, totalRows, totalCols, exactRowHeightPt, tblCellMar);
 
                 // Check if conditional format overrides font-size (needs class for CSS override)
                 bool hasTsf = cellStyle.Contains("__TSF__");
@@ -546,6 +554,24 @@ public partial class WordHandler
             if (style == null) break;
             var borders = style.StyleTableProperties?.TableBorders;
             if (borders != null) return borders;
+            currentId = style.BasedOn?.Val?.Value;
+        }
+        return null;
+    }
+
+    /// <summary>Resolve the default cell margin (&lt;w:tblCellMar&gt;) from a
+    /// table style (walking the basedOn chain). Mirrors ResolveTableStyleBorders
+    /// — the first style in the chain that declares a tblCellMar wins.</summary>
+    private TableCellMarginDefault? ResolveTableStyleCellMargin(string styleId)
+    {
+        var visited = new HashSet<string>();
+        var currentId = styleId;
+        while (currentId != null && visited.Add(currentId))
+        {
+            var style = FindStyleById(currentId);
+            if (style == null) break;
+            var cm = style.StyleTableProperties?.TableCellMarginDefault;
+            if (cm != null) return cm;
             currentId = style.BasedOn?.Val?.Value;
         }
         return null;
