@@ -850,10 +850,20 @@ public partial class PowerPointHandler
         // it as empty: a content placeholder with only prompt text and no
         // fill/outline isn't worth an empty box on the slide.
         var text = suppressText ? "" : GetShapeText(shape);
-        var hasFill = shape.ShapeProperties?.GetFirstChild<Drawing.SolidFill>() != null
-            || shape.ShapeProperties?.GetFirstChild<Drawing.GradientFill>() != null
-            || shape.ShapeProperties?.GetFirstChild<Drawing.BlipFill>() != null;
-        var hasLine = shape.ShapeProperties?.GetFirstChild<Drawing.Outline>()?.GetFirstChild<Drawing.SolidFill>() != null;
+        var spPr = shape.ShapeProperties;
+        var hasFill = spPr?.GetFirstChild<Drawing.SolidFill>() != null
+            || spPr?.GetFirstChild<Drawing.GradientFill>() != null
+            || spPr?.GetFirstChild<Drawing.BlipFill>() != null
+            || spPr?.GetFirstChild<Drawing.PatternFill>() != null;
+        // A visible outline needs a fill (solid OR gradient) — a width-only <a:ln w="X"/>
+        // with no fill child renders NOTHING in PowerPoint (verified), so it must NOT
+        // count as a line here. Previously only SolidFill was checked, so a layout/master
+        // decoration whose only outline was a GRADIENT was silently dropped while
+        // RenderShape/ParseOutline would have drawn it.
+        var ln = spPr?.GetFirstChild<Drawing.Outline>();
+        var hasLine = ln != null && ln.GetFirstChild<Drawing.NoFill>() == null
+            && (ln.GetFirstChild<Drawing.SolidFill>() != null
+                || ln.GetFirstChild<Drawing.GradientFill>() != null);
 
         if (string.IsNullOrWhiteSpace(text) && !hasFill && !hasLine)
             return;
