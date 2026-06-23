@@ -2572,8 +2572,16 @@ public partial class PowerPointHandler
                     return $"clip-path:polygon(0 0,{P(100 - hx)}% 0,100% {P(vy)}%,100% 100%,0 100%)";
                 case "snip2SameRect":
                 {
-                    // top-left + top-right snipped (adj1 = top corners)
-                    return $"clip-path:polygon({P(hx)}% 0,{P(100 - hx)}% 0,100% {P(vy)}%,100% 100%,0 100%,0 {P(vy)}%)";
+                    // adj1 = top corner pair (TL+TR), adj2 = bottom corner pair (BL+BR).
+                    // Previously only adj1 was read, so the bottom corners always
+                    // rendered square. Read adj2 like the snip2DiagRect sibling and,
+                    // when present, snip the bottom pair too (full 8-point octagon).
+                    var a2 = ReadAdj(1, 0);
+                    if (a2 == 0)
+                        return $"clip-path:polygon({P(hx)}% 0,{P(100 - hx)}% 0,100% {P(vy)}%,100% 100%,0 100%,0 {P(vy)}%)";
+                    var hx2 = AdjPct(a2, true);
+                    var vy2 = AdjPct(a2, false);
+                    return $"clip-path:polygon({P(hx)}% 0,{P(100 - hx)}% 0,100% {P(vy)}%,100% {P(100 - vy2)}%,{P(100 - hx2)}% 100%,{P(hx2)}% 100%,0 {P(100 - vy2)}%,0 {P(vy)}%)";
                 }
                 case "snip2DiagRect":
                 {
