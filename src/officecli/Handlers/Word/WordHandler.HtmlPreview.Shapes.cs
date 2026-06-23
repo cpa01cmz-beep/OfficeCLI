@@ -584,14 +584,19 @@ public partial class WordHandler
 
         // Border from a:ln. An <a:ln> with <a:noFill/> (or w="0") is an EXPLICIT
         // declaration of "no outline" — Word renders no border, so we must NOT
-        // emit a default one. Only emit a border when the line actually paints.
+        // emit a default one. A bare self-closing <a:ln/> (no w, no fill child)
+        // is likewise NOT a paintable outline: with neither a width nor a fill
+        // it inherits nothing meaningful for a style-less picture and Word draws
+        // nothing, so we must require an explicit width OR fill before emitting.
         var ln = spPr.Elements().FirstOrDefault(e => e.LocalName == "ln");
         if (ln != null)
         {
             var noFill = ln.Elements().Any(e => e.LocalName == "noFill");
             var wAttr = ln.GetAttributes().FirstOrDefault(a => a.LocalName == "w").Value;
             var hasZeroWidth = long.TryParse(wAttr, out var wEmu0) && wEmu0 == 0;
-            if (!noFill && !hasZeroWidth)
+            var hasWidth = long.TryParse(wAttr, out var wEmuPos) && wEmuPos > 0;
+            var hasFill = ln.Elements().Any(e => e.LocalName is "solidFill" or "gradFill" or "pattFill");
+            if (!noFill && !hasZeroWidth && (hasWidth || hasFill))
             {
                 double borderPx = 1;
                 if (long.TryParse(wAttr, out var wEmu) && wEmu > 0)
