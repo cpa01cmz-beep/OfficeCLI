@@ -753,8 +753,10 @@ public partial class WordHandler
         {
             listStyleParts += ";list-style-image:none";
             // CONSISTENCY(bullet-glyph-map): shared with body path and
-            // GetCustomListStyleString; null => disc.
-            var bulletType = BulletGlyphToCssKeyword(lvlText ?? "") ?? "disc";
+            // GetCustomListStyleString; default disc. Symbol-font bullets
+            // resolve to the custom glyph string so an inline keyword doesn't
+            // override the ::marker font-family.
+            var bulletType = GetUlListStyleTypeCss(numId, ilvl, lvlText);
             listStyleParts += $";list-style-type:{bulletType}";
         }
 

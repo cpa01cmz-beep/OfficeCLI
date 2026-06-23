@@ -2215,8 +2215,10 @@ public partial class WordHandler
                         listStyleParts += ";list-style-image:none"; // reset inherited picture bullet
                         // Map Word bullet character to CSS list-style-type.
                         // CONSISTENCY(bullet-glyph-map): shared with table-cell
-                        // path and GetCustomListStyleString; null => disc.
-                        var bulletType = BulletGlyphToCssKeyword(lvlText ?? "") ?? "disc";
+                        // path and GetCustomListStyleString; default disc.
+                        // Symbol-font bullets resolve to the custom glyph string
+                        // so an inline keyword doesn't override the ::marker.
+                        var bulletType = GetUlListStyleTypeCss(numId, ilvl, lvlText);
                         listStyleParts += $";list-style-type:{bulletType}";
                     }
                     var indentStyle = $" style=\"{listStyleParts}\"";
