@@ -503,6 +503,24 @@ public partial class WordHandler
         var vSpacingPropBefore = "margin-top";
         var vSpacingPropAfter = "margin-bottom";
 
+        // Continuous-shaded-box margin suppression. When consecutive paragraphs
+        // share an identical pBdr (the OOXML §17.3.1.24 border-merge condition
+        // handled below at the border block) AND each carries a paragraph-level
+        // shd fill, Word renders them as ONE continuous shaded box with no
+        // internal gap — the fill of one paragraph abuts the next. HTML paints
+        // a paragraph's background only inside its content/padding box, never
+        // into vertical margins, so any spaceBefore/spaceAfter (here typically
+        // an inherited docDefaults `w:after`) opens a white band between the
+        // strips and visually shreds the box. Mirror Word by zeroing the
+        // inter-paragraph margin on the joined edge — the same mechanism
+        // contextualSpacing uses — so the shaded strips touch. Scoped to the
+        // shd+identical-pBdr pair (a lone shaded paragraph, or shaded paragraphs
+        // with differing/absent borders, keeps its normal margin), so it does
+        // not perturb normal spacing, R66 border merge, or R80 table-style shd
+        // (table cells, not body paragraphs).
+        bool continuousShadeBefore = ParagraphJoinsShadedBox(para, para.PreviousSibling() as Paragraph);
+        bool continuousShadeAfter = ParagraphJoinsShadedBox(para, para.NextSibling() as Paragraph);
+
         if (spacing != null)
         {
             // contextualSpacing: when enabled and adjacent paragraph has the same style,
@@ -515,10 +533,10 @@ public partial class WordHandler
             var nextPara = para.NextSibling<Paragraph>();
             var prevStyleId = prevPara?.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
             var nextStyleId = nextPara?.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
-            bool suppressBefore = hasContextualSpacing && prevPara != null
-                && (prevStyleId ?? "") == (styleId ?? "");
-            bool suppressAfter = hasContextualSpacing && nextPara != null
-                && (nextStyleId ?? "") == (styleId ?? "");
+            bool suppressBefore = (hasContextualSpacing && prevPara != null
+                && (prevStyleId ?? "") == (styleId ?? "")) || continuousShadeBefore;
+            bool suppressAfter = (hasContextualSpacing && nextPara != null
+                && (nextStyleId ?? "") == (styleId ?? "")) || continuousShadeAfter;
 
             // Before/after spacing: w:before is in twips; w:beforeLines is in
             // hundredths of a line. Per ECMA-376 §17.3.1.33 beforeLines
@@ -685,10 +703,10 @@ public partial class WordHandler
             var nextPara = para.NextSibling<Paragraph>();
             var prevStyleId = prevPara?.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
             var nextStyleId = nextPara?.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
-            bool suppressBefore = hasContextualSpacing && prevPara != null
-                && (prevStyleId ?? "") == (styleId ?? "");
-            bool suppressAfter = hasContextualSpacing && nextPara != null
-                && (nextStyleId ?? "") == (styleId ?? "");
+            bool suppressBefore = (hasContextualSpacing && prevPara != null
+                && (prevStyleId ?? "") == (styleId ?? "")) || continuousShadeBefore;
+            bool suppressAfter = (hasContextualSpacing && nextPara != null
+                && (nextStyleId ?? "") == (styleId ?? "")) || continuousShadeAfter;
 
             // Word collapses adjacent spaceBefore/spaceAfter to max(prev.after, cur.before).
             // The HTML paragraphs are normal block-flow siblings, so their vertical margins
@@ -2858,6 +2876,36 @@ public partial class WordHandler
             current = style.BasedOn?.Val?.Value;
         }
         return null;
+    }
+
+    // Resolve a paragraph's effective shd fill (direct shd, else style chain).
+    private string? ResolveParagraphShadeFill(Paragraph? para)
+    {
+        if (para == null) return null;
+        return ResolveShadingFill(para.ParagraphProperties?.Shading)
+            ?? ResolveParagraphShadingFromStyle(para);
+    }
+
+    // True when `para` and an adjacent `sibling` form ONE continuous shaded box
+    // (OOXML §17.3.1.24 border merge over a paragraph-shd fill): both carry a
+    // resolved shd fill AND an identical four-side pBdr with no w:between. This
+    // is the precondition for suppressing the inter-paragraph margin so the
+    // shaded strips abut (HTML never paints background into a vertical margin).
+    // The pBdr-equality + no-between gate matches the border-merge suppression
+    // in GetParagraphInlineCss, so the margin join and the border join stay in
+    // lockstep. A lone shaded paragraph, or shaded paragraphs whose borders
+    // differ/are absent, returns false and keeps its normal margin.
+    private bool ParagraphJoinsShadedBox(Paragraph para, Paragraph? sibling)
+    {
+        if (sibling == null) return false;
+        if (ResolveParagraphShadeFill(para) == null) return false;
+        if (ResolveParagraphShadeFill(sibling) == null) return false;
+        var pBdr = para.ParagraphProperties?.ParagraphBorders
+            ?? ResolveStyleParagraphBorders(para.ParagraphProperties?.ParagraphStyleId?.Val?.Value);
+        if (pBdr == null || pBdr.BetweenBorder != null) return false;
+        var sibBdr = ResolveSiblingParagraphBorders(sibling);
+        if (sibBdr?.BetweenBorder != null) return false;
+        return ParagraphBordersEqual(pBdr, sibBdr);
     }
 
     // Resolve a sibling paragraph's effective pBdr (direct pBdr, else style
