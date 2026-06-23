@@ -639,21 +639,16 @@ public partial class WordHandler
                     // floor, the natural value applies.
                     var emitPt = rule == "atLeast" ? ResolveAtLeastPt(linePt, para) : linePt;
                     parts.Add($"line-height:{emitPt:0.##}pt");
-                    // #7b0001: when lineRule=exact pins the line box below
-                    // ~120% of the paragraph's font size, Word clips
-                    // over-tall glyphs. Emit overflow:hidden so tall glyphs
-                    // don't leak into neighboring lines.
-                    if (rule == "exact")
-                    {
-                        // Use the paragraph's principal (run) size, not the
-                        // style/doc-default, so an over-tall run triggers
-                        // clipping. Word clips when the exact box sits below
-                        // ~120% of the content's font size.
-                        var runSizePt = ResolveParaPrincipalSizePt(para)
-                            ?? ReadDocDefaults().SizePt;
-                        if (runSizePt > 0 && linePt < runSizePt * 1.2)
-                            parts.Add("overflow:hidden");
-                    }
+                    // lineRule=exact pins the line box to a fixed height, but
+                    // Word still shows the text — it does NOT erase a line whose
+                    // content is taller than the exact box; over-tall glyphs are
+                    // visually clipped at the box edge, not blanked out. The
+                    // earlier overflow:hidden (on a fixed box) blanked whole
+                    // labels/list-rows when the natural content height exceeded
+                    // the exact value (content loss). line-height alone reproduces
+                    // the fixed leading while keeping content visible; we no
+                    // longer emit overflow:hidden here. Priority: content visible
+                    // over strict exact height (R49/R31 don't-clip-content rule).
                 }
             }
 
@@ -789,8 +784,22 @@ public partial class WordHandler
             ?? ResolveStyleParagraphBorders(pProps.ParagraphStyleId?.Val?.Value);
         if (pBdr != null)
         {
-            RenderBorderCss(parts, pBdr.TopBorder, "border-top");
-            RenderBorderCss(parts, pBdr.BottomBorder, "border-bottom");
+            // OOXML §17.3.1.24 border merging: when consecutive paragraphs carry
+            // an identical pBdr (same val/color/sz/space on each side, no explicit
+            // w:between), Word renders them as ONE continuous box — no internal
+            // top/bottom rule between the stacked paragraphs. HTML emits per-para
+            // borders, so without suppression the shared box shows a doubled
+            // horizontal divider that splits the logical box into stacked
+            // sub-boxes. Suppress the inner edge when the adjacent sibling shares
+            // the same pBdr: drop border-top if the previous sibling matches, drop
+            // border-bottom if the next sibling matches. Left/right always emit.
+            var prevBdr = ResolveSiblingParagraphBorders(para.PreviousSibling() as Paragraph);
+            var nextSiblingBdr = ResolveSiblingParagraphBorders(para.NextSibling() as Paragraph);
+            var suppressTop = pBdr.BetweenBorder == null && ParagraphBordersEqual(pBdr, prevBdr);
+            var suppressBottom = pBdr.BetweenBorder == null && ParagraphBordersEqual(pBdr, nextSiblingBdr);
+
+            if (!suppressTop) RenderBorderCss(parts, pBdr.TopBorder, "border-top");
+            if (!suppressBottom) RenderBorderCss(parts, pBdr.BottomBorder, "border-bottom");
             RenderBorderCss(parts, pBdr.LeftBorder, "border-left");
             RenderBorderCss(parts, pBdr.RightBorder, "border-right");
             // w:between draws a rule BETWEEN consecutive paragraphs that share
@@ -1272,14 +1281,9 @@ public partial class WordHandler
                             var linePt = Units.TwipsToPt(lv);
                             var emitPt = rule == "atLeast" ? ResolveAtLeastPt(linePt, para) : linePt;
                             parts.Add($"line-height:{emitPt:0.##}pt");
-                            // exact pins the box and clips over-tall glyphs.
-                            if (rule == "exact")
-                            {
-                                var runSizePt = ResolveParaPrincipalSizePt(para)
-                                    ?? ReadDocDefaults().SizePt;
-                                if (runSizePt > 0 && linePt < runSizePt * 1.2)
-                                    parts.Add("overflow:hidden");
-                            }
+                            // exact pins the leading but keeps content visible;
+                            // no overflow:hidden (would blank over-tall content —
+                            // see content-loss note in the paragraph path above).
                         }
                     }
                 }
@@ -1352,14 +1356,9 @@ public partial class WordHandler
                         var linePt = Units.TwipsToPt(lv);
                         var emitPt = rule == "atLeast" ? ResolveAtLeastPt(linePt, para) : linePt;
                         parts.Add($"line-height:{emitPt:0.##}pt");
-                        // exact pins the box and clips over-tall glyphs.
-                        if (rule == "exact")
-                        {
-                            var runSizePt = ResolveParaPrincipalSizePt(para)
-                                ?? ReadDocDefaults().SizePt;
-                            if (runSizePt > 0 && linePt < runSizePt * 1.2)
-                                parts.Add("overflow:hidden");
-                        }
+                        // exact pins the leading but keeps content visible;
+                        // no overflow:hidden (would blank over-tall content —
+                        // see content-loss note in the paragraph path above).
                     }
                 }
             }
@@ -2339,13 +2338,17 @@ public partial class WordHandler
             parts.Add($"padding:{padTop} {padRight} {padBot} {padLeft}");
         }
 
-        // hRule="exact": constrain cell to fixed height with overflow clipping.
-        // Browsers ignore max-height on <tr>, so this MUST live on the cell.
+        // hRule="exact": Word pins the row to the exact height but still SHOWS
+        // the cell text — it does not blank a cell whose content is taller than
+        // the exact value. The earlier fixed height + max-height + overflow:hidden
+        // hard-clipped over-tall cells to empty (lost evaluation labels, list
+        // rows). Emit the exact value as a min-height floor instead: normal cells
+        // (content ≤ exact) keep the exact height unchanged, while over-tall cells
+        // grow to show their content rather than going blank. Priority: content
+        // visible over strict exact height (R49/R31 don't-clip-content rule).
         if (exactRowHeightPt is double exH)
         {
-            parts.Add($"height:{exH:0.#}pt");
-            parts.Add($"max-height:{exH:0.#}pt");
-            parts.Add("overflow:hidden");
+            parts.Add($"min-height:{exH:0.#}pt");
         }
 
         return string.Join(";", parts);
@@ -2845,6 +2848,43 @@ public partial class WordHandler
             current = style.BasedOn?.Val?.Value;
         }
         return null;
+    }
+
+    // Resolve a sibling paragraph's effective pBdr (direct pBdr, else style
+    // chain) — same resolution as the main pBdr lookup, for border-merge
+    // comparison against the current paragraph.
+    private ParagraphBorders? ResolveSiblingParagraphBorders(Paragraph? sibling)
+    {
+        if (sibling == null) return null;
+        return sibling.ParagraphProperties?.ParagraphBorders
+            ?? ResolveStyleParagraphBorders(sibling.ParagraphProperties?.ParagraphStyleId?.Val?.Value);
+    }
+
+    // Two pBdr blocks are "the same continuous box" (OOXML §17.3.1.24 merge)
+    // when their four outer sides each match on val/color/sz/space. A null
+    // sibling pBdr never matches. Border elements are compared by their
+    // material attributes (not OuterXml) so namespace/attribute-order noise
+    // doesn't defeat the match.
+    private static bool ParagraphBordersEqual(ParagraphBorders? a, ParagraphBorders? b)
+    {
+        if (a == null || b == null) return false;
+        return BorderAttrsEqual(a.TopBorder, b.TopBorder)
+            && BorderAttrsEqual(a.BottomBorder, b.BottomBorder)
+            && BorderAttrsEqual(a.LeftBorder, b.LeftBorder)
+            && BorderAttrsEqual(a.RightBorder, b.RightBorder);
+    }
+
+    private static bool BorderAttrsEqual(OpenXmlElement? x, OpenXmlElement? y)
+    {
+        if (x == null && y == null) return true;
+        if (x == null || y == null) return false;
+        static string? Attr(OpenXmlElement e, string name) =>
+            e.GetAttributes().FirstOrDefault(at => at.LocalName == name).Value;
+        return Attr(x, "val") == Attr(y, "val")
+            && Attr(x, "color") == Attr(y, "color")
+            && Attr(x, "themeColor") == Attr(y, "themeColor")
+            && Attr(x, "sz") == Attr(y, "sz")
+            && Attr(x, "space") == Attr(y, "space");
     }
 
     // Resolved bold state for a pStyle chain: true → chain explicitly bold,
