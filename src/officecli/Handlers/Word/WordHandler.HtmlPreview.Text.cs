@@ -759,8 +759,19 @@ public partial class WordHandler
                         .Where(t => t.Val?.InnerText != "clear" && t.Position?.HasValue == true)
                         .OrderBy(t => t.Position!.Value).ToList();
                     int aIdx = _ctx.CurrentParagraphTabIndex;
-                    var nextVal = (alignedStops != null && aIdx < alignedStops.Count)
-                        ? alignedStops[aIdx].Val?.InnerText : null;
+                    // A tab that runs PAST the last defined stop (more <w:tab/>
+                    // runs than custom stops — e.g. a single right stop driving a
+                    // " \t Curriculum Vitae \t Replace…" header) keeps the LAST
+                    // stop's alignment rather than silently dropping to left. Word
+                    // pushes the overflow segment to a default tab stop, but the
+                    // governing stop's alignment (here right) still pins the field
+                    // to the right edge; falling back to null→left instead glued
+                    // the final field flush-left against the previous segment.
+                    var nextVal = (alignedStops != null && alignedStops.Count > 0)
+                        ? (aIdx < alignedStops.Count
+                            ? alignedStops[aIdx].Val?.InnerText
+                            : alignedStops[alignedStops.Count - 1].Val?.InnerText)
+                        : null;
                     _ctx.CurrentAlignedTabAlign = nextVal switch
                     {
                         "center" => "center",
