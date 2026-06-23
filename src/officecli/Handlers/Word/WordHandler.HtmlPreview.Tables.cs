@@ -507,13 +507,30 @@ public partial class WordHandler
                         }
                         CloseCellList();
                         var text = GetParagraphText(cellPara);
-                        var runs = GetAllRuns(cellPara);
                         var pCss = GetParagraphInlineCss(cellPara);
                         sb.Append("<div");
                         if (!string.IsNullOrEmpty(pCss))
                             sb.Append($" style=\"{pCss}\"");
                         sb.Append(">");
-                        bool hasVisibleContent = runs.Count > 0 || !string.IsNullOrWhiteSpace(text);
+                        // Emptiness must be judged by *visible* content, not raw
+                        // run count: a paragraph holding only a textless run (e.g.
+                        // an empty form-fill answer box whose <w:r> carries just an
+                        // rPr) has runs.Count > 0 yet renders nothing, so the div
+                        // collapsed to ~0 height and the row floor disappeared.
+                        // Word still draws a one-line-tall empty box (line height =
+                        // paragraph-mark run font). Treat a run as visible only when
+                        // it carries text/drawing/break/tab/symbol/picture/field, so
+                        // such empties get the &nbsp; placeholder and the line box
+                        // forms at the resolved line-height (pCss carries it).
+                        bool hasVisibleContent = !string.IsNullOrWhiteSpace(text)
+                            || GetAllRuns(cellPara).Any(r =>
+                                r.Descendants<Text>().Any(t => !string.IsNullOrEmpty(t.Text))
+                                || r.Descendants<Drawing>().Any()
+                                || r.Descendants<Break>().Any()
+                                || r.Descendants<TabChar>().Any()
+                                || r.Descendants<SymbolChar>().Any()
+                                || r.GetFirstChild<FieldChar>() != null
+                                || r.ChildElements.Any(c => c.LocalName == "pict"));
                         RenderParagraphContentHtml(sb, cellPara);
                         if (!hasVisibleContent) sb.Append("&nbsp;");
                         sb.Append("</div>");
