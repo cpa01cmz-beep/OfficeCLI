@@ -953,6 +953,24 @@ public static partial class WordBatchEmitter
             }
         }
 
+        // BUG-DUMP-BLOCK-PERM: replay body-direct <w:permStart>/<w:permEnd>
+        // (editable-region markers between top-level paragraphs/tables — never
+        // visited by the paragraph walk) via raw-set at their positional anchor, so
+        // a protected doc's editable ranges stay balanced. The body paragraphs are
+        // already emitted above, so //w:body/w:p[N] resolves. (Table-direct perm
+        // markers ride EmitTable's GetTableStructuralBookmarks.)
+        foreach (var (permXml, relXpath, action) in word.GetBodyStructuralPermMarkers())
+        {
+            items.Add(new BatchItem
+            {
+                Command = "raw-set",
+                Part = "/document",
+                Xpath = relXpath == "." ? "//w:body" : $"//w:body/{relXpath}",
+                Action = action,
+                Xml = permXml,
+            });
+        }
+
         // BUG-DUMP10-04: flush deferred cross-paragraph bookmark rows. They
         // are emitted last so AddBookmark sees the full sibling list when
         // walking forward to the BookmarkEnd's target paragraph.
