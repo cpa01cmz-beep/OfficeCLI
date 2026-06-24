@@ -1122,7 +1122,8 @@ internal partial class ChartSvgRenderer
         string? dataLabelNumFmt = null,
         List<string?>? markerFillColors = null, List<string?>? markerLineColors = null,
         bool showSerName = false, bool showCatName = false, bool showVal = true,
-        int? catLabelRotationDeg = null, int? valLabelRotationDeg = null)
+        int? catLabelRotationDeg = null, int? valLabelRotationDeg = null,
+        List<bool>? lineHide = null)
     {
         bool isLog = logBase.HasValue && logBase.Value > 1;
 
@@ -1311,8 +1312,9 @@ internal partial class ChartSvgRenderer
             var lw = lineWidths != null && s < lineWidths.Count ? lineWidths[s] : 2;
 
             // R16c: scatterStyle=marker draws dots only — skip the connecting
-            // line/path entirely. Markers are still emitted below.
-            if (scatterMarkersOnly)
+            // line/path entirely. Markers are still emitted below. Also skip when this
+            // SERIES has a:ln/a:noFill (PowerPoint "No line" — markers only for that series).
+            if (scatterMarkersOnly || (lineHide != null && s < lineHide.Count && lineHide[s]))
             {
                 // no line
             }
@@ -2954,6 +2956,11 @@ internal partial class ChartSvgRenderer
         // --- Line width per series (in points, from a:ln w="...") ---
         public List<double> LineWidths { get; set; } = [];
 
+        // --- Per-series "no connecting line" flag (a:ln/a:noFill on the series spPr) ---
+        // PowerPoint's "Format Data Series -> Line -> No line": the series shows markers
+        // only, no polyline. Distinct from the chart-wide scatterStyle=marker.
+        public List<bool> SeriesLineHide { get; set; } = [];
+
         // --- Axis features ---
         public double? LogBase { get; set; }
         public bool IsReversed { get; set; }       // value axis maxMin
@@ -3574,6 +3581,10 @@ internal partial class ChartSvgRenderer
                 // Per-series line width (a:ln w="..." in EMU, convert to pt: 1pt = 12700 EMU)
                 var lnWidth = ln?.GetAttributes().FirstOrDefault(a => a.LocalName == "w").Value;
                 info.LineWidths.Add(lnWidth != null && int.TryParse(lnWidth, out var lw) ? Math.Round(lw / EmuConverter.EmuPerPointF, 1) : 2);
+
+                // Per-series "no line" (a:ln/a:noFill): PowerPoint hides the connecting
+                // polyline (markers only). The renderer always drew the polyline, ignoring it.
+                info.SeriesLineHide.Add(ln?.Elements().Any(e => e.LocalName == "noFill") == true);
 
                 // Per-series trendline
                 var trendlineEl = ser.Elements().FirstOrDefault(e => e.LocalName == "trendline");
@@ -4215,7 +4226,8 @@ internal partial class ChartSvgRenderer
                     info.MarkerFillColors, info.MarkerLineColors,
                     info.ShowDataLabelSerName, info.ShowDataLabelCatName,
                     info.ShowDataLabelVal || info.ShowDataLabelPercent,
-                    info.CatAxisLabelRotationDeg, info.ValAxisLabelRotationDeg);
+                    info.CatAxisLabelRotationDeg, info.ValAxisLabelRotationDeg,
+                    info.SeriesLineHide);
         }
         else
         {
