@@ -1799,7 +1799,8 @@ internal partial class ChartSvgRenderer
         double? axisMin = null, double? axisMax = null, double? majorUnit = null, string? valNumFmt = null,
         bool showDataLabels = false, bool showVal = true, bool showSerName = false,
         bool showCatName = false, string? dataLabelNumFmt = null,
-        int? catLabelRotationDeg = null, int? valLabelRotationDeg = null)
+        int? catLabelRotationDeg = null, int? valLabelRotationDeg = null,
+        bool isReversed = false)
     {
         if (series.Count == 0) return;
         var catCount = Math.Max(categories.Length, series.Max(s => s.values.Length));
@@ -1858,8 +1859,16 @@ internal partial class ChartSvgRenderer
         var nTicks = percent ? tickCount : (int)Math.Round((niceMax - niceMin) / tickInterval);
         if (nTicks < 1) nTicks = 1;
 
-        // Helper: map a data value to a y-coordinate within [oy, oy+ph]
-        double DataToY(double v) => oy + ph - (v - niceMin) / axisRange * ph;
+        // Helper: map a data value to a y-coordinate within [oy, oy+ph]. When the value
+        // axis is reversed (<c:scaling><c:orientation val="maxMin"/>), the mapping flips
+        // so max sits at the bottom — mirrors RenderLineChartSvg's isReversed MapY.
+        // Previously area ignored isReversed (no param) and rendered upside-down vs
+        // PowerPoint. Gridlines and value-axis tick labels route through DataToY so they
+        // flip consistently. (Category labels stay at the bottom, matching the line/bar
+        // renderers' reversed behavior.)
+        double DataToY(double v) => isReversed
+            ? oy + (v - niceMin) / axisRange * ph
+            : oy + ph - (v - niceMin) / axisRange * ph;
         double ZeroY() => DataToY(0.0);
         // Like DataToY but clamped to the plot rect — for stacked-area polygons whose
         // baseline (data value 0) can fall below an explicit axisMin (PowerPoint clips
@@ -1869,14 +1878,14 @@ internal partial class ChartSvgRenderer
         if (ShowValGridlines && ValAxisVisible)
         for (int t = 1; t <= nTicks; t++)
         {
-            var gy = oy + ph - (double)ph * t / nTicks;
+            var gy = DataToY(niceMin + axisRange * t / nTicks);
             sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{gy:0.#}\" x2=\"{ox + pw}\" y2=\"{gy:0.#}\" stroke=\"{GridColor}\" stroke-width=\"{GridlineWidthPx:0.##}\"{ValGridDashAttr}/>");
         }
         if (ShowValMinorGridlines && ValAxisVisible)
         for (int t = 0; t < nTicks; t++)
             for (int m = 1; m < MinorGridlineCount; m++)
             {
-                var gy = oy + ph - (double)ph * (t + (double)m / MinorGridlineCount) / nTicks;
+                var gy = DataToY(niceMin + axisRange * (t + (double)m / MinorGridlineCount) / nTicks);
                 sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{gy:0.#}\" x2=\"{ox + pw}\" y2=\"{gy:0.#}\" stroke=\"{GridColor}\" stroke-width=\"0.25\" opacity=\"0.5\"/>");
             }
         // Category-axis major gridlines (vertical) — at the category-slot
@@ -1951,7 +1960,7 @@ internal partial class ChartSvgRenderer
             if (val > niceMax + 1e-9) continue; // BUG1(R25): no label past axisMax
             var label = percent ? (val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}")
                 : FmtValAxis(val, valNumFmt);
-            var ty = oy + ph - (double)ph * t / nTicks;
+            var ty = DataToY(val);
             if (TickMarkVisible(ValMajorTickMark))
                 EmitVAxisTick(sb, ox, ty, ValMajorTickMark!);
             EmitLeftAxisLabel(sb, ox - 4, ty, AxisColor, ValFontPx, label, valLabelRotationDeg);
@@ -4091,7 +4100,8 @@ internal partial class ChartSvgRenderer
                     info.AxisMin, info.AxisMax, info.MajorUnit, info.ValNumFmt,
                     info.ShowDataLabels, info.ShowDataLabelVal, info.ShowDataLabelSerName,
                     info.ShowDataLabelCatName, info.DataLabelsNumFmt,
-                    info.CatAxisLabelRotationDeg, info.ValAxisLabelRotationDeg);
+                    info.CatAxisLabelRotationDeg, info.ValAxisLabelRotationDeg,
+                    info.IsReversed);
         }
         else if (chartType == "combo")
         {
