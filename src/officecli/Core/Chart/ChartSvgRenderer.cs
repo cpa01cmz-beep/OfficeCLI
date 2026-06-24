@@ -3701,7 +3701,11 @@ internal partial class ChartSvgRenderer
             // Chart-level smooth (lineChart > smooth val="1")
             var chartSmooth = chartTypeEl.Elements().FirstOrDefault(e => e.LocalName == "smooth");
             var chartSmoothVal = chartSmooth?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
-            var chartIsSmooth = chartSmoothVal == "1" || chartSmoothVal == "true";
+            // CT_Boolean defaults to true: a bare <c:smooth/> (no val attr) means ON.
+            // PowerPoint emits the bare form; the old `== "1"` read it as straight lines.
+            var chartIsSmooth = chartSmooth != null
+                && (string.IsNullOrEmpty(chartSmoothVal)
+                    || (chartSmoothVal != "0" && !chartSmoothVal.Equals("false", StringComparison.OrdinalIgnoreCase)));
 
             // PowerPoint's <c:lineChart>/<c:scatterChart> emit a chart-level
             // <c:marker val="1"/> after all <c:ser> to opt every series into
@@ -3766,7 +3770,8 @@ internal partial class ChartSvgRenderer
                 var serSmooth = ser.Elements().FirstOrDefault(e => e.LocalName == "smooth");
                 var serSmoothVal = serSmooth?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
                 info.Smooth.Add(serSmooth != null
-                    ? (serSmoothVal == "1" || serSmoothVal == "true")
+                    ? (string.IsNullOrEmpty(serSmoothVal)
+                        || (serSmoothVal != "0" && !serSmoothVal.Equals("false", StringComparison.OrdinalIgnoreCase)))
                     : chartIsSmooth);
 
                 // Per-series dash pattern and line width
