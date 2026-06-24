@@ -86,6 +86,10 @@ internal partial class ChartSvgRenderer
     // ticks. Synced from ChartInfo; only drawn when the element is present.
     public string? ValMajorTickMark { get; set; }
     public string? CatMajorTickMark { get; set; }
+    // Category-axis label skip interval (<c:catAx><c:tickLblSkip val="N"/>): show
+    // only every Nth category label (PowerPoint keeps all bars/points, only thins
+    // the labels). 1 = every label. Synced from ChartInfo.
+    public int CatTickLabelSkip { get; set; } = 1;
     // Length of a major tick mark in px (PowerPoint draws ~4-5px).
     public const int MajorTickLen = 4;
     public string AxisLineColor { get; set; } = "#555";
@@ -608,7 +612,8 @@ internal partial class ChartSvgRenderer
                 // Horizontal bars: category axis is VERTICAL on the left (x=plotOx).
                 if (TickMarkVisible(CatMajorTickMark))
                     EmitVAxisTick(sb, plotOx, ly, CatMajorTickMark!);
-                sb.AppendLine($"        <text x=\"{plotOx - 4}\" y=\"{ly:0.#}\" fill=\"{CatColor}\" font-size=\"{catFontSize}\" text-anchor=\"end\" dominant-baseline=\"middle\">{HtmlEncode(label)}</text>");
+                if (CatTickLabelSkip <= 1 || dataIdx % CatTickLabelSkip == 0)
+                    sb.AppendLine($"        <text x=\"{plotOx - 4}\" y=\"{ly:0.#}\" fill=\"{CatColor}\" font-size=\"{catFontSize}\" text-anchor=\"end\" dominant-baseline=\"middle\">{HtmlEncode(label)}</text>");
             }
             if (ValAxisVisible)
             for (int t = 0; t <= nTicks; t++)
@@ -891,7 +896,8 @@ internal partial class ChartSvgRenderer
                 // Vertical columns: category axis is HORIZONTAL at the bottom (y=oy+ph).
                 if (TickMarkVisible(CatMajorTickMark))
                     EmitHAxisTick(sb, lx, oy + ph, CatMajorTickMark!);
-                EmitBottomAxisLabel(sb, lx, oy + ph + 16, CatColor, catFontSize, label, catLabelRotationDeg);
+                if (CatTickLabelSkip <= 1 || c % CatTickLabelSkip == 0)
+                    EmitBottomAxisLabel(sb, lx, oy + ph + 16, CatColor, catFontSize, label, catLabelRotationDeg);
             }
             if (ValAxisVisible)
             for (int t = 0; t <= nTicks; t++)
@@ -1497,7 +1503,8 @@ internal partial class ChartSvgRenderer
             // horizontal <text>, dropping the category-axis label rotation that the
             // bar chart already applied (the bottom-margin reservation already fired
             // for all chart types, leaving the labels un-rotated in the gap).
-            EmitBottomAxisLabel(sb, MapX(c), oy + ph + 16, CatColor, CatFontPx, label, catLabelRotationDeg);
+            if (CatTickLabelSkip <= 1 || c % CatTickLabelSkip == 0)
+                EmitBottomAxisLabel(sb, MapX(c), oy + ph + 16, CatColor, CatFontPx, label, catLabelRotationDeg);
         }
 
         // Value axis labels (+ major tick marks left of the value axis)
@@ -2020,7 +2027,8 @@ internal partial class ChartSvgRenderer
             if (TickMarkVisible(CatMajorTickMark))
                 EmitHAxisTick(sb, lx, oy + ph, CatMajorTickMark!);
             // Honor the category-axis label rotation (mirrors bar/line via EmitBottomAxisLabel).
-            EmitBottomAxisLabel(sb, lx, oy + ph + 16, CatColor, CatFontPx, label, catLabelRotationDeg);
+            if (CatTickLabelSkip <= 1 || c % CatTickLabelSkip == 0)
+                EmitBottomAxisLabel(sb, lx, oy + ph + 16, CatColor, CatFontPx, label, catLabelRotationDeg);
         }
         if (ValAxisVisible)
         for (int t = 0; t <= nTicks; t++)
@@ -3009,6 +3017,7 @@ internal partial class ChartSvgRenderer
         public string? ValMajorTickMark { get; set; }
         /// <summary>Category axis &lt;c:majorTickMark val="..."/&gt; ("out"/"in"/"cross"/"none"). Null when absent.</summary>
         public string? CatMajorTickMark { get; set; }
+        public int CatTickLabelSkip { get; set; } = 1;
         public int DataLabelFontPx { get; set; } = 8;
         /// <summary>Reference-line overlays (horizontal dashed lines at constant values).
         /// Filled by ExtractChartInfo from any ref-line-only LineChart in the plot area.</summary>
@@ -3470,6 +3479,12 @@ internal partial class ChartSvgRenderer
             info.CatMinorGridlines = catAxis.Elements().Any(e => e.LocalName == "minorGridlines");
             var catTickEl = catAxis.Elements().FirstOrDefault(e => e.LocalName == "majorTickMark");
             info.CatMajorTickMark = catTickEl?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
+            // tickLblSkip: thin category labels to every Nth (read but never rendered before).
+            var catLblSkipEl = catAxis.Elements().FirstOrDefault(e => e.LocalName == "tickLblSkip");
+            if (catLblSkipEl != null
+                && int.TryParse(catLblSkipEl.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value, out var catLblSkip)
+                && catLblSkip > 1)
+                info.CatTickLabelSkip = catLblSkip;
             var catDeleteEl = catAxis.Elements().FirstOrDefault(e => e.LocalName == "delete");
             var catDelVal = catDeleteEl?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
             info.CatAxisVisible = catDelVal != "1";
@@ -4187,6 +4202,7 @@ internal partial class ChartSvgRenderer
         CatAxisVisible = info.CatAxisVisible;
         ValMajorTickMark = info.ValMajorTickMark;
         CatMajorTickMark = info.CatMajorTickMark;
+        CatTickLabelSkip = info.CatTickLabelSkip;
         if (info.AxisLineColor != null) AxisLineColor = CssHexColor(info.AxisLineColor);
         DataLabelFontPx = info.DataLabelFontPx;
         DataLabelPos = info.DataLabelPos;
