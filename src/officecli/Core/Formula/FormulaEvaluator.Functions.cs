@@ -8,7 +8,7 @@ namespace OfficeCli.Core;
 
 internal partial class FormulaEvaluator
 {
-    // ==================== Function Dispatch (150+ functions) ====================
+    // ==================== Function Dispatch (350+ functions) ====================
 
     private FormulaResult? EvalFunction(string name, List<object> args)
     {
