@@ -58,6 +58,13 @@ internal partial class ChartSvgRenderer
     public string ValueColor { get; set; } = "#D0D8E0";
     public string CatColor { get; set; } = "#C8D0D8";
     public string AxisColor { get; set; } = "#B0B8C0";
+    // Axis tick-label bold (<c:catAx>/<c:valAx><c:txPr>…<a:defRPr b="1">). PowerPoint
+    // renders bold tick labels; previously dropped. Paired with CatColor/AxisColor
+    // respectively so the weight tracks the same axis as the color, orientation-independent.
+    public bool CatTickLabelsBold { get; set; }
+    public bool ValTickLabelsBold { get; set; }
+    private string CatTickWeightAttr => CatTickLabelsBold ? " font-weight=\"bold\"" : "";
+    private string ValTickWeightAttr => ValTickLabelsBold ? " font-weight=\"bold\"" : "";
     public string SecondaryAxisColor { get; set; } = "#aaa";
     public string GridColor { get; set; } = "#333";
     // Value-axis major-gridline dash name (<a:prstDash val="...">). Null/"solid"
@@ -203,17 +210,17 @@ internal partial class ChartSvgRenderer
     /// null/0 the output is byte-for-byte the unrotated centered label
     /// (regression-safe).</summary>
     private static void EmitBottomAxisLabel(StringBuilder sb, double x, double y,
-        string color, int fontSize, string label, int? rotationDeg)
+        string color, int fontSize, string label, int? rotationDeg, string weightAttr = "")
     {
         var enc = HtmlEncode(label);
         if (rotationDeg is not int rot || rot == 0)
         {
-            sb.AppendLine($"        <text x=\"{x:0.#}\" y=\"{y:0.#}\" fill=\"{color}\" font-size=\"{fontSize}\" text-anchor=\"middle\">{enc}</text>");
+            sb.AppendLine($"        <text x=\"{x:0.#}\" y=\"{y:0.#}\" fill=\"{color}\" font-size=\"{fontSize}\"{weightAttr} text-anchor=\"middle\">{enc}</text>");
             return;
         }
         var ay = y + 4;                          // nudge anchor just below the axis
         var anchor = rot < 0 ? "end" : "start";  // rot<0 trails down-left, reads up-right
-        sb.AppendLine($"        <text x=\"{x:0.#}\" y=\"{ay:0.#}\" fill=\"{color}\" font-size=\"{fontSize}\" text-anchor=\"{anchor}\" transform=\"rotate({rot} {x:0.#} {ay:0.#})\">{enc}</text>");
+        sb.AppendLine($"        <text x=\"{x:0.#}\" y=\"{ay:0.#}\" fill=\"{color}\" font-size=\"{fontSize}\"{weightAttr} text-anchor=\"{anchor}\" transform=\"rotate({rot} {x:0.#} {ay:0.#})\">{enc}</text>");
     }
 
     /// <summary>
@@ -224,15 +231,15 @@ internal partial class ChartSvgRenderer
     /// anchor. Mirrors EmitBottomAxisLabel for the bottom (category) axis.
     /// </summary>
     private static void EmitLeftAxisLabel(StringBuilder sb, double x, double y,
-        string color, int fontSize, string label, int? rotationDeg)
+        string color, int fontSize, string label, int? rotationDeg, string weightAttr = "")
     {
         var enc = HtmlEncode(label);
         if (rotationDeg is not int rot || rot == 0)
         {
-            sb.AppendLine($"        <text x=\"{x:0.#}\" y=\"{y:0.#}\" fill=\"{color}\" font-size=\"{fontSize}\" text-anchor=\"end\" dominant-baseline=\"middle\">{enc}</text>");
+            sb.AppendLine($"        <text x=\"{x:0.#}\" y=\"{y:0.#}\" fill=\"{color}\" font-size=\"{fontSize}\"{weightAttr} text-anchor=\"end\" dominant-baseline=\"middle\">{enc}</text>");
             return;
         }
-        sb.AppendLine($"        <text x=\"{x:0.#}\" y=\"{y:0.#}\" fill=\"{color}\" font-size=\"{fontSize}\" text-anchor=\"end\" dominant-baseline=\"middle\" transform=\"rotate({rot} {x:0.#} {y:0.#})\">{enc}</text>");
+        sb.AppendLine($"        <text x=\"{x:0.#}\" y=\"{y:0.#}\" fill=\"{color}\" font-size=\"{fontSize}\"{weightAttr} text-anchor=\"end\" dominant-baseline=\"middle\" transform=\"rotate({rot} {x:0.#} {y:0.#})\">{enc}</text>");
     }
 
     public void RenderBarChartSvg(StringBuilder sb, List<(string name, double[] values)> series,
@@ -673,7 +680,7 @@ internal partial class ChartSvgRenderer
                 if (TickMarkVisible(CatMajorTickMark))
                     EmitVAxisTick(sb, plotOx, ly, CatMajorTickMark!);
                 if (!CatTickLabelsHidden && (CatTickLabelSkip <= 1 || dataIdx % CatTickLabelSkip == 0))
-                    sb.AppendLine($"        <text x=\"{plotOx - 4}\" y=\"{ly:0.#}\" fill=\"{CatColor}\" font-size=\"{catFontSize}\" text-anchor=\"end\" dominant-baseline=\"middle\">{HtmlEncode(label)}</text>");
+                    sb.AppendLine($"        <text x=\"{plotOx - 4}\" y=\"{ly:0.#}\" fill=\"{CatColor}\" font-size=\"{catFontSize}\"{CatTickWeightAttr} text-anchor=\"end\" dominant-baseline=\"middle\">{HtmlEncode(label)}</text>");
             }
             if (ValAxisVisible)
             for (int t = 0; t <= nTicks; t++)
@@ -686,7 +693,7 @@ internal partial class ChartSvgRenderer
                 if (TickMarkVisible(ValMajorTickMark))
                     EmitHAxisTick(sb, tx, oy + ph, ValMajorTickMark!);
                 if (!ValTickLabelsHidden)
-                    EmitBottomAxisLabel(sb, tx, oy + ph + 16, AxisColor, valFontSize, label, valLabelRotationDeg);
+                    EmitBottomAxisLabel(sb, tx, oy + ph + 16, AxisColor, valFontSize, label, valLabelRotationDeg, ValTickWeightAttr);
             }
             // Reference-line overlays: horizontal bars → vertical line at value position on the X (value) axis.
             // For percentStacked charts, the value axis is 0–1 in OOXML but we display 0–100, so scale accordingly.
@@ -976,7 +983,7 @@ internal partial class ChartSvgRenderer
                 if (TickMarkVisible(CatMajorTickMark))
                     EmitHAxisTick(sb, lx, oy + ph, CatMajorTickMark!);
                 if (!CatTickLabelsHidden && (CatTickLabelSkip <= 1 || c % CatTickLabelSkip == 0))
-                    EmitBottomAxisLabel(sb, lx, oy + ph + 16, CatColor, catFontSize, label, catLabelRotationDeg);
+                    EmitBottomAxisLabel(sb, lx, oy + ph + 16, CatColor, catFontSize, label, catLabelRotationDeg, CatTickWeightAttr);
             }
             if (ValAxisVisible)
             for (int t = 0; t <= nTicks; t++)
@@ -994,7 +1001,7 @@ internal partial class ChartSvgRenderer
                 if (TickMarkVisible(ValMajorTickMark))
                     EmitVAxisTick(sb, ox, ty, ValMajorTickMark!);
                 if (!ValTickLabelsHidden)
-                    EmitLeftAxisLabel(sb, ox - 4, ty, AxisColor, valFontSize, label, valLabelRotationDeg);
+                    EmitLeftAxisLabel(sb, ox - 4, ty, AxisColor, valFontSize, label, valLabelRotationDeg, ValTickWeightAttr);
             }
             // Reference-line overlays: vertical bars/columns → horizontal line at value position on the Y (value) axis.
             if (referenceLines != null)
@@ -1593,7 +1600,7 @@ internal partial class ChartSvgRenderer
             // bar chart already applied (the bottom-margin reservation already fired
             // for all chart types, leaving the labels un-rotated in the gap).
             if (!CatTickLabelsHidden && (CatTickLabelSkip <= 1 || c % CatTickLabelSkip == 0))
-                EmitBottomAxisLabel(sb, MapX(c), oy + ph + 16, CatColor, CatFontPx, label, catLabelRotationDeg);
+                EmitBottomAxisLabel(sb, MapX(c), oy + ph + 16, CatColor, CatFontPx, label, catLabelRotationDeg, CatTickWeightAttr);
         }
 
         // Value axis labels (+ major tick marks left of the value axis)
@@ -1617,7 +1624,7 @@ internal partial class ChartSvgRenderer
             if (ValAxisVisible && TickMarkVisible(ValMajorTickMark))
                 EmitVAxisTick(sb, ox, ty, ValMajorTickMark!);
             if (!ValTickLabelsHidden)
-                EmitLeftAxisLabel(sb, ox - 4, ty, AxisColor, ValFontPx, label, valLabelRotationDeg);
+                EmitLeftAxisLabel(sb, ox - 4, ty, AxisColor, ValFontPx, label, valLabelRotationDeg, ValTickWeightAttr);
         }
     }
 
@@ -2133,7 +2140,7 @@ internal partial class ChartSvgRenderer
                 EmitHAxisTick(sb, lx, oy + ph, CatMajorTickMark!);
             // Honor the category-axis label rotation (mirrors bar/line via EmitBottomAxisLabel).
             if (!CatTickLabelsHidden && (CatTickLabelSkip <= 1 || c % CatTickLabelSkip == 0))
-                EmitBottomAxisLabel(sb, lx, oy + ph + 16, CatColor, CatFontPx, label, catLabelRotationDeg);
+                EmitBottomAxisLabel(sb, lx, oy + ph + 16, CatColor, CatFontPx, label, catLabelRotationDeg, CatTickWeightAttr);
         }
         if (ValAxisVisible)
         for (int t = 0; t <= nTicks; t++)
@@ -2148,7 +2155,7 @@ internal partial class ChartSvgRenderer
             if (TickMarkVisible(ValMajorTickMark))
                 EmitVAxisTick(sb, ox, ty, ValMajorTickMark!);
             if (!ValTickLabelsHidden)
-                EmitLeftAxisLabel(sb, ox - 4, ty, AxisColor, ValFontPx, label, valLabelRotationDeg);
+                EmitLeftAxisLabel(sb, ox - 4, ty, AxisColor, ValFontPx, label, valLabelRotationDeg, ValTickWeightAttr);
         }
 
         // Data labels at each vertex (parity with bar/line/pie). The label TEXT is
@@ -2288,7 +2295,7 @@ internal partial class ChartSvgRenderer
         {
             var val = maxVal * frac;
             var tickLabel = val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}";
-            sb.AppendLine($"        <text x=\"{cx + 2:0.#}\" y=\"{cy - r * frac:0.#}\" fill=\"{AxisColor}\" font-size=\"8\" dominant-baseline=\"middle\">{tickLabel}</text>");
+            sb.AppendLine($"        <text x=\"{cx + 2:0.#}\" y=\"{cy - r * frac:0.#}\" fill=\"{AxisColor}\" font-size=\"8\"{ValTickWeightAttr} dominant-baseline=\"middle\">{tickLabel}</text>");
         }
         var labelOffset = Math.Max(18, r * 0.15);
         for (int c = 0; c < catCount; c++)
@@ -2298,7 +2305,7 @@ internal partial class ChartSvgRenderer
             var lx = cx + (r + labelOffset) * Math.Cos(angle);
             var ly = cy + (r + labelOffset) * Math.Sin(angle);
             var anchor = Math.Abs(Math.Cos(angle)) < 0.1 ? "middle" : (Math.Cos(angle) > 0 ? "start" : "end");
-            sb.AppendLine($"        <text x=\"{lx:0.#}\" y=\"{ly:0.#}\" fill=\"{CatColor}\" font-size=\"{labelSize}\" text-anchor=\"{anchor}\" dominant-baseline=\"middle\">{HtmlEncode(label)}</text>");
+            sb.AppendLine($"        <text x=\"{lx:0.#}\" y=\"{ly:0.#}\" fill=\"{CatColor}\" font-size=\"{labelSize}\"{CatTickWeightAttr} text-anchor=\"{anchor}\" dominant-baseline=\"middle\">{HtmlEncode(label)}</text>");
         }
     }
 
@@ -2426,13 +2433,13 @@ internal partial class ChartSvgRenderer
         {
             var val = minX + xStep * t;
             var label = val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}";
-            sb.AppendLine($"        <text x=\"{MapX(val):0.#}\" y=\"{oy + ph + 16}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\" text-anchor=\"middle\">{label}</text>");
+            sb.AppendLine($"        <text x=\"{MapX(val):0.#}\" y=\"{oy + ph + 16}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\"{CatTickWeightAttr} text-anchor=\"middle\">{label}</text>");
         }
         for (int t = 0; t <= nTicksY; t++)
         {
             var val = minY + tickStepY * t;
             var label = val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}";
-            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{MapY(val):0.#}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
+            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{MapY(val):0.#}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\"{ValTickWeightAttr} text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
         }
     }
 
@@ -2609,13 +2616,13 @@ internal partial class ChartSvgRenderer
         for (int t = 0; t <= xTicks; t++)
         {
             var val = minX + xStep * t;
-            sb.AppendLine($"        <text x=\"{MapX(val):0.#}\" y=\"{oy + ph + 16}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\" text-anchor=\"middle\">{FormatAxisValue(val, valNumFmt)}</text>");
+            sb.AppendLine($"        <text x=\"{MapX(val):0.#}\" y=\"{oy + ph + 16}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\"{CatTickWeightAttr} text-anchor=\"middle\">{FormatAxisValue(val, valNumFmt)}</text>");
         }
         // Numeric Y axis labels
         for (int t = 0; t <= nTicksY; t++)
         {
             var val = minY + tickStepY * t;
-            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{MapY(val):0.#}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\" text-anchor=\"end\" dominant-baseline=\"middle\">{FormatAxisValue(val, valNumFmt)}</text>");
+            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{MapY(val):0.#}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\"{ValTickWeightAttr} text-anchor=\"end\" dominant-baseline=\"middle\">{FormatAxisValue(val, valNumFmt)}</text>");
         }
     }
 
@@ -2791,14 +2798,14 @@ internal partial class ChartSvgRenderer
         {
             var label = c < categories.Length ? categories[c] : "";
             var lx = ox + (double)pw * c / Math.Max(catCount, 1) + (double)pw / Math.Max(catCount, 1) / 2;
-            sb.AppendLine($"        <text x=\"{lx:0.#}\" y=\"{oy + ph + 16}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\" text-anchor=\"middle\">{HtmlEncode(label)}</text>");
+            sb.AppendLine($"        <text x=\"{lx:0.#}\" y=\"{oy + ph + 16}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\"{CatTickWeightAttr} text-anchor=\"middle\">{HtmlEncode(label)}</text>");
         }
         // Primary Y-axis labels (left)
         for (int t = 0; t <= AxisTickCount; t++)
         {
             var val = priNiceMax * t / AxisTickCount;
             var label = FmtValAxis(val);
-            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{oy + ph - (double)ph * t / AxisTickCount:0.#}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
+            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{oy + ph - (double)ph * t / AxisTickCount:0.#}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\"{ValTickWeightAttr} text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
         }
         // Secondary Y-axis labels (right side, lighter color). R16-5: these used
         // to overlay the primary labels on the left (x=ox+2); placing them at the
@@ -2946,13 +2953,13 @@ internal partial class ChartSvgRenderer
         for (int c = 0; c < catCount; c++)
         {
             var label = c < categories.Length ? categories[c] : "";
-            sb.AppendLine($"        <text x=\"{ox + c * groupW + groupW / 2:0.#}\" y=\"{oy + ph + 16}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\" text-anchor=\"middle\">{HtmlEncode(label)}</text>");
+            sb.AppendLine($"        <text x=\"{ox + c * groupW + groupW / 2:0.#}\" y=\"{oy + ph + 16}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\"{CatTickWeightAttr} text-anchor=\"middle\">{HtmlEncode(label)}</text>");
         }
         for (int t = 0; t <= 4; t++)
         {
             var val = minVal + range * t / 4;
             var label = val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}";
-            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{oy + ph - (double)ph * t / 4:0.#}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
+            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{oy + ph - (double)ph * t / 4:0.#}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\"{ValTickWeightAttr} text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
         }
     }
 
@@ -3109,8 +3116,10 @@ internal partial class ChartSvgRenderer
         public bool LegendFontBold { get; set; }
         public int ValFontPx { get; set; } = 9;
         public string? ValFontColor { get; set; }
+        public bool ValFontBold { get; set; }
         public int CatFontPx { get; set; } = 9;
         public string? CatFontColor { get; set; }
+        public bool CatFontBold { get; set; }
         /// <summary>Category-axis tick-label rotation in degrees, read from
         /// &lt;c:catAx&gt;&lt;c:txPr&gt;&lt;a:bodyPr rot="..."/&gt; (OOXML rot is
         /// 1/60000 degree). Null = no rotation (labels horizontal, default).</summary>
@@ -3600,6 +3609,7 @@ internal partial class ChartSvgRenderer
             if (valDefRPr?.FontSize?.HasValue == true)
                 info.ValFontPx = (int)(valDefRPr.FontSize.Value / 100.0);
             info.ValFontColor = ExtractFontColor(valDefRPr, themeColors);
+            if (valDefRPr?.Bold?.HasValue == true) info.ValFontBold = valDefRPr.Bold.Value;
             info.ValAxisLabelRotationDeg = ExtractAxisLabelRotationDeg(valTxPr);
 
             // Gridline color
@@ -3701,6 +3711,7 @@ internal partial class ChartSvgRenderer
             if (catDefRPr?.FontSize?.HasValue == true)
                 info.CatFontPx = (int)(catDefRPr.FontSize.Value / 100.0);
             info.CatFontColor = ExtractFontColor(catDefRPr, themeColors);
+            if (catDefRPr?.Bold?.HasValue == true) info.CatFontBold = catDefRPr.Bold.Value;
             info.CatAxisLabelRotationDeg = ExtractAxisLabelRotationDeg(catTxPr);
         }
 
@@ -4459,6 +4470,8 @@ internal partial class ChartSvgRenderer
         // "FF0000" becomes "#FF0000" while named/already-#'d values pass through.
         if (info.ValFontColor != null) AxisColor = CssHexColor(info.ValFontColor);
         if (info.CatFontColor != null) CatColor = CssHexColor(info.CatFontColor);
+        ValTickLabelsBold = info.ValFontBold;
+        CatTickLabelsBold = info.CatFontBold;
         if (info.GridlineColor != null) GridColor = CssHexColor(info.GridlineColor);
         GridlineDash = info.GridlineDash;
         GridlineWidthPx = info.GridlineWidthEmu.HasValue ? EmuToStrokePx(info.GridlineWidthEmu) : 0.5;
@@ -4700,12 +4713,12 @@ internal partial class ChartSvgRenderer
             if (isHorizBar || isXY)
             {
                 var uy = svgH - (string.IsNullOrEmpty(bottomTitle) ? 4 : 14);
-                sb.AppendLine($"    <text x=\"{svgW / 2}\" y=\"{uy}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\" text-anchor=\"middle\">{HtmlEncode(info.ValueAxisUnitLabel)}</text>");
+                sb.AppendLine($"    <text x=\"{svgW / 2}\" y=\"{uy}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\"{ValTickWeightAttr} text-anchor=\"middle\">{HtmlEncode(info.ValueAxisUnitLabel)}</text>");
             }
             else
             {
                 var ux = string.IsNullOrEmpty(leftTitle) ? 12 : 26;
-                sb.AppendLine($"    <text x=\"{ux}\" y=\"{svgH / 2}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"rotate(-90,{ux},{svgH / 2})\">{HtmlEncode(info.ValueAxisUnitLabel)}</text>");
+                sb.AppendLine($"    <text x=\"{ux}\" y=\"{svgH / 2}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\"{ValTickWeightAttr} text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"rotate(-90,{ux},{svgH / 2})\">{HtmlEncode(info.ValueAxisUnitLabel)}</text>");
             }
         }
     }
@@ -4985,13 +4998,13 @@ internal partial class ChartSvgRenderer
             for (int c = 0; c < catCount; c++)
             {
                 var label = c < categories.Length ? categories[c] : "";
-                sb.AppendLine($"        <text x=\"{plotOx - 4}\" y=\"{oy + c * groupH + groupH / 2:0.#}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\" text-anchor=\"end\" dominant-baseline=\"middle\">{HtmlEncode(label)}</text>");
+                sb.AppendLine($"        <text x=\"{plotOx - 4}\" y=\"{oy + c * groupH + groupH / 2:0.#}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\"{CatTickWeightAttr} text-anchor=\"end\" dominant-baseline=\"middle\">{HtmlEncode(label)}</text>");
             }
             for (int t = 0; t <= tickCount; t++)
             {
                 var val = minVal + majorUnit * t;
                 var label = FmtValAxis(val, valNumFmt);
-                sb.AppendLine($"        <text x=\"{plotOx + (double)plotPw * t / tickCount:0.#}\" y=\"{oy + ph + 16}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\" text-anchor=\"middle\">{label}</text>");
+                sb.AppendLine($"        <text x=\"{plotOx + (double)plotPw * t / tickCount:0.#}\" y=\"{oy + ph + 16}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\"{ValTickWeightAttr} text-anchor=\"middle\">{label}</text>");
             }
         }
         else
@@ -5070,7 +5083,7 @@ internal partial class ChartSvgRenderer
             for (int c = 0; c < catCount; c++)
             {
                 var label = c < categories.Length ? categories[c] : "";
-                sb.AppendLine($"        <text x=\"{ox + c * groupW + groupW / 2:0.#}\" y=\"{oy + ph + 16}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\" text-anchor=\"middle\">{HtmlEncode(label)}</text>");
+                sb.AppendLine($"        <text x=\"{ox + c * groupW + groupW / 2:0.#}\" y=\"{oy + ph + 16}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\"{CatTickWeightAttr} text-anchor=\"middle\">{HtmlEncode(label)}</text>");
             }
             // Value axis labels
             for (int t = 0; t <= tickCount; t++)
@@ -5078,7 +5091,7 @@ internal partial class ChartSvgRenderer
                 var val = minVal + majorUnit * t;
                 var label = FmtValAxis(val, valNumFmt);
                 var ty = oy + ph - ((val - minVal) / range) * ph;
-                sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
+                sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\"{ValTickWeightAttr} text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
             }
         }
     }
@@ -5234,7 +5247,7 @@ internal partial class ChartSvgRenderer
         {
             var label = c < categories.Length ? categories[c] : "";
             var lx = ox + (catCount > 1 ? (double)pw * c / (catCount - 1) : pw / 2.0);
-            sb.AppendLine($"        <text x=\"{lx:0.#}\" y=\"{oy + ph + 16}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\" text-anchor=\"middle\">{HtmlEncode(label)}</text>");
+            sb.AppendLine($"        <text x=\"{lx:0.#}\" y=\"{oy + ph + 16}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\"{CatTickWeightAttr} text-anchor=\"middle\">{HtmlEncode(label)}</text>");
         }
 
         // Y-axis value labels
@@ -5243,7 +5256,7 @@ internal partial class ChartSvgRenderer
             var val = maxVal * t / 4;
             var label = val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}";
             var ty = oy + ph - (double)ph * t / 4;
-            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
+            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\"{ValTickWeightAttr} text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
         }
     }
 
@@ -5395,7 +5408,7 @@ internal partial class ChartSvgRenderer
         {
             var label = c < categories.Length ? categories[c] : "";
             var lx = ox + (catCount > 1 ? (double)plotW * c / (catCount - 1) : plotW / 2.0);
-            sb.AppendLine($"        <text x=\"{lx:0.#}\" y=\"{oy + plotH + 16}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\" text-anchor=\"middle\">{HtmlEncode(label)}</text>");
+            sb.AppendLine($"        <text x=\"{lx:0.#}\" y=\"{oy + plotH + 16}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\"{CatTickWeightAttr} text-anchor=\"middle\">{HtmlEncode(label)}</text>");
         }
         // Value axis
         for (int t = 0; t <= 4; t++)
@@ -5403,7 +5416,7 @@ internal partial class ChartSvgRenderer
             var val = maxVal * t / 4;
             var label = val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}";
             var ty = oy + plotH - (double)plotH * t / 4;
-            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
+            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\"{ValTickWeightAttr} text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
         }
     }
 
