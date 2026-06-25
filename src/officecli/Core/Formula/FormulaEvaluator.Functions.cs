@@ -290,6 +290,18 @@ internal partial class FormulaEvaluator
             "DOLLARDE" => EvalDollar(args, toDecimal: true), "DOLLARFR" => EvalDollar(args, toDecimal: false),
             "ISPMT" => EvalIspmt(args),
 
+            // ===== Securities / coupon bonds (W3b) =====
+            "COUPDAYS" => EvalCoupDays(args), "COUPDAYBS" => EvalCoupDayBs(args),
+            "COUPDAYSNC" => EvalCoupDaysNc(args), "COUPNCD" => EvalCoupNcd(args),
+            "COUPPCD" => EvalCoupPcd(args), "COUPNUM" => EvalCoupNum(args),
+            "ACCRINT" => EvalAccrInt(args), "ACCRINTM" => EvalAccrIntM(args),
+            "DISC" => EvalDisc(args), "INTRATE" => EvalIntRate(args), "RECEIVED" => EvalReceived(args),
+            "PRICEDISC" => EvalPriceDisc(args), "YIELDDISC" => EvalYieldDisc(args),
+            "PRICEMAT" => EvalPriceMat(args), "YIELDMAT" => EvalYieldMat(args),
+            "TBILLEQ" => EvalTBillEq(args), "TBILLPRICE" => EvalTBillPrice(args), "TBILLYIELD" => EvalTBillYield(args),
+            "PRICE" => EvalPrice(args), "YIELD" => EvalYield(args),
+            "DURATION" => EvalDuration(args, modified: false), "MDURATION" => EvalDuration(args, modified: true),
+
             // ===== Database (Dxxx) — aggregate a table column over criteria =====
             "DSUM" => EvalDatabase(args, DbAgg.Sum), "DCOUNT" => EvalDatabase(args, DbAgg.Count),
             "DCOUNTA" => EvalDatabase(args, DbAgg.CountA), "DAVERAGE" => EvalDatabase(args, DbAgg.Average),
@@ -1312,7 +1324,9 @@ internal partial class FormulaEvaluator
         if (args.Count < 2) return null;
         var d1 = args[0] is FormulaResult r1 ? DateTime.FromOADate(r1.AsNumber()) : DateTime.Today;
         var d2 = args[1] is FormulaResult r2 ? DateTime.FromOADate(r2.AsNumber()) : DateTime.Today;
-        return FR(Math.Abs((d2 - d1).TotalDays / 365.25));
+        int basis = args.Count > 2 && args[2] is FormulaResult b ? (int)b.AsNumber() : 0;
+        if (basis is < 0 or > 4) return FormulaResult.Error("#NUM!");
+        return FR(Math.Abs(YearFracBasis(d1, d2, basis)));
     }
 
     // ==================== Financial ====================
