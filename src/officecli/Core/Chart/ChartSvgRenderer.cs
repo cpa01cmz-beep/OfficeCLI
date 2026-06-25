@@ -3233,7 +3233,7 @@ internal partial class ChartSvgRenderer
         info.ChartType = ChartHelper.DetectChartType(info.PlotArea) ?? "column";
         info.Categories = ChartHelper.ReadCategories(info.PlotArea) ?? [];
         info.Series = ChartHelper.ReadAllSeries(info.PlotArea);
-        info.ReferenceLines = ChartHelper.ReadReferenceLines(info.PlotArea);
+        info.ReferenceLines = ChartHelper.ReadReferenceLines(info.PlotArea, themeColors);
 
         // Filter reference-line series out of the renderer's data series list. They
         // are drawn as overlays via info.ReferenceLines so they must not contribute to

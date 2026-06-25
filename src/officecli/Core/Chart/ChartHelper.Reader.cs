@@ -1618,7 +1618,7 @@ internal static partial class ChartHelper
     /// line width in points, and dash style name. Colors come back as 6-digit hex without
     /// the '#' prefix; dash name is the OOXML PresetLineDashValues InnerText (e.g. "sysDash").
     /// </summary>
-    internal static List<(string Name, double Value, string Color, double WidthPt, string Dash)> ReadReferenceLines(C.PlotArea plotArea)
+    internal static List<(string Name, double Value, string Color, double WidthPt, string Dash)> ReadReferenceLines(C.PlotArea plotArea, Dictionary<string, string>? themeColors = null)
     {
         var result = new List<(string, double, string, double, string)>();
         foreach (var lineChart in plotArea.Elements<C.LineChart>())
@@ -1644,10 +1644,21 @@ internal static partial class ChartHelper
                 var widthEmu = outline?.Width?.Value ?? 19050;
                 var widthPt = widthEmu / EmuConverter.EmuPerPointF;
 
-                // Color: solidFill srgbClr val
+                // Color: solidFill srgbClr hex, or schemeClr resolved through the theme map
+                // (this secondary reader previously handled only srgbClr, so a themed reference
+                // line fell back to the red default instead of its accent color).
                 var color = "FF0000";
-                var srgb = outline?.GetFirstChild<Drawing.SolidFill>()?.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
-                if (!string.IsNullOrEmpty(srgb)) color = srgb;
+                var refFill = outline?.GetFirstChild<Drawing.SolidFill>();
+                var srgb = refFill?.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
+                if (!string.IsNullOrEmpty(srgb))
+                    color = srgb;
+                else if (refFill?.GetFirstChild<Drawing.SchemeColor>()?.Val?.InnerText is string schemeName
+                         && themeColors != null)
+                {
+                    var canonical = ParseHelpers.NormalizeSchemeColorName(schemeName) ?? schemeName;
+                    if (themeColors.TryGetValue(canonical, out var hex) || themeColors.TryGetValue(schemeName, out hex))
+                        color = hex;
+                }
 
                 var dashVal = outline?.GetFirstChild<Drawing.PresetDash>()?.Val;
                 var dash = dashVal?.InnerText ?? "dash";
