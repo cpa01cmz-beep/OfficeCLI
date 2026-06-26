@@ -504,7 +504,9 @@ NR=$(officecli query "$FILE" namedrange --json | jq '.data.results | length')
 [ "$NR" -ge 3 ] && echo "Gate 6 OK ($NR named ranges)" || echo "WARN Gate 6: only $NR named ranges"
 DEAD=0
 for NR_NAME in $(officecli query "$FILE" namedrange --json | jq -r '.data.results[].format.name'); do
-  USES=$(officecli query "$FILE" "cell:has(formula):contains(\"$NR_NAME\")" --json | jq '.data.results | length')
+  # Match the formula SOURCE (`formula~=`), not the cached/displayed RESULT — `:contains` would scan
+  # the computed value and report every name as dead (false reject).
+  USES=$(officecli query "$FILE" "cell[formula~=$NR_NAME]" --json | jq '.data.results | length')
   [ "$USES" -ge 1 ] && echo "  $NR_NAME: $USES uses OK" || { echo "  WARN: $NR_NAME unused"; DEAD=$((DEAD+1)); }
 done
 [ "$DEAD" -eq 0 ] && echo "Gate 6 named-range audit OK" || { echo "REJECT Gate 6: $DEAD dead-decoration name(s)"; exit 1; }

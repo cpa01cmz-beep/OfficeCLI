@@ -287,7 +287,7 @@ The 10 slides every pitch deck carries. Each recipe below gives: **visual outcom
 
 **Long-title wrap rule.** A 36pt+ title that wraps to 2 lines: add `height` (e.g. 2cm → 3.5cm) — never drop the font below 36pt. Titles < 36pt on a pitch deck read as timid regardless of content.
 
-> **Chart `series1.color=` on `add` works** (applies to every chart recipe below). Passing `--prop series1.color=` (or `series2.color=`, …) on chart `add` applies the series color and exits 0. Verify with a readback if you like: `officecli query "$FILE" "/slide[N]/chart[1]/series[1]" --json | jq .format.color`.
+> **Chart `series1.color=` on `add` works** (applies to every chart recipe below). Passing `--prop series1.color=` (or `series2.color=`, …) on chart `add` applies the series color and exits 0. Verify with a readback if you like: `officecli get "$FILE" "/slide[N]/chart[1]/series[1]" --json | jq '.data.results[0].format.color'`.
 
 ### (1) Cover slide — company · tagline · round · date
 

@@ -294,10 +294,10 @@ officecli add "$FILE" /body --type chart --prop chartType=bar --prop title="Reve
 External links go via `hyperlink`:
 
 ```bash
-officecli add "$FILE" "/body/p[2]" --type hyperlink --prop uri="https://example.com" --prop text="our site"
+officecli add "$FILE" "/body/p[2]" --type hyperlink --prop url="https://example.com" --prop text="our site"
 ```
 
-**Internal links** (to a bookmark) use `--prop anchor=bookmarkName` — not a `#fragment` in `uri`:
+**Internal links** (to a bookmark) use `--prop anchor=bookmarkName` — not a `#fragment` in `url`:
 
 ```bash
 officecli add "$FILE" "/body/p[2]" --type hyperlink --prop anchor=chapter1 --prop text="See Chapter 1"
@@ -419,7 +419,7 @@ officecli add "$FILE" /body --type equation --prop formula="\\frac{a}{b} + \\sum
 officecli add "$FILE" "/body/p[3]" --type footnote --prop text="See Appendix A for methodology."
 ```
 
-**Comments and tracked changes.** Bulk accept/reject: `set / --prop accept-changes=all` (or `reject-changes=all`). Locate individual changes with `query ins` and `query del` (`trackedchange` is not a selector). Create tracked changes on a run with `--prop revision.type=ins|del --prop revision.author=…` (`help docx run` for the full `revision.*` set — `format`/`moveFrom`/`moveTo` too). Add a comment: `add "/body/p[4]" --type comment --prop author=… --prop text=…`; reply-thread it with `--prop parentId=N` and mark it resolved with `set "/comments/comment[N]" --prop done=true` (resolve rather than delete to keep the audit trail — `query 'comment[done=false]'` then lists what's still open). Prop schema: `help docx comment` / `help docx run`.
+**Comments and tracked changes.** Bulk accept/reject: `set "$FILE" /revision --prop revision.action=accept` (or `--prop revision.action=reject`); narrow with a selector like `/revision[@author=Alice]` or `/revision[@type=ins]`. Locate individual changes with `query ins` and `query del` (`trackedchange` is not a selector). Create tracked changes on a run with `--prop revision.type=ins|del --prop revision.author=…` (`help docx run` for the full `revision.*` set — `format`/`moveFrom`/`moveTo` too). Add a comment: `add "/body/p[4]" --type comment --prop author=… --prop text=…`; reply-thread it with `--prop parentId=N` and mark it resolved with `set "/comments/comment[N]" --prop done=true` (resolve rather than delete to keep the audit trail — `query 'comment[done=false]'` then lists what's still open). Prop schema: `help docx comment` / `help docx run`.
 
 **Watermark.** `add / --type watermark --prop text="DRAFT" --prop color=BFBFBF --prop opacity=0.8` in one command (default opacity 0.5); `set /watermark --prop opacity=…` adjusts it later.
 

@@ -301,7 +301,7 @@ Three common flavors, each with its own prop shape (consult `officecli help xlsx
 
 - **Color scales**: cells shaded on a gradient by value — `type=colorscale` with `minColor` / `midColor` / `maxColor`.
 - **Data bars**: in-cell bars showing magnitude — `type=databar`. Set explicit `min` / `max` for consistent scaling across a column; defaults are valid if you omit them.
-- **Formula rules**: highlight row when a condition is true — `type=formulacf` with `formula="$C2>1000"` and a fill/font.
+- **Formula rules** (the `formulacf` element): highlight row when a condition is true — `type=formula` with `formula="$C2>1000"` and a fill/font.
 
 Rule: apply CF sparingly. A workbook where every cell is colored tells the reader nothing.
 

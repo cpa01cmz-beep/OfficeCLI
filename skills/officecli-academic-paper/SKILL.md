@@ -325,8 +325,8 @@ Live fields carry **cached values** that render stale until a human presses F9 i
 ```bash
 # Footnote anchored to paragraph N
 officecli add "$FILE" "/body/p[3]" --type footnote --prop text="Smith et al. reported similar findings in their 2023 review."
-# Endnote
-officecli add "$FILE" /endnotes --type endnote --prop text="Extended derivation of equation (4) is available at the project repository."
+# Endnote — anchored to paragraph N (like footnote); lands at /endnote[@endnoteId=N]
+officecli add "$FILE" "/body/p[3]" --type endnote --prop text="Extended derivation of equation (4) is available at the project repository."
 ```
 
 Both appear as empty-string runs in `view annotated` output (`r[N] ""`) — the run carries a `<w:footnoteReference>` XML element, not visible text. Confirm insertion with `officecli query "$FILE" 'footnote'` or `officecli get "$FILE" "/footnotes/footnote[N]"`. Footnotes do NOT shift paragraph indices; add them in any order after body content is in place. Full schema: `officecli help docx footnote` / `officecli help docx endnote`.

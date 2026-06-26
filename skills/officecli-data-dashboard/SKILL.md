@@ -340,8 +340,15 @@ If scene keywords include print / 一页 / board / 投资人 / 董事会, extend
 ```bash
 if echo "$USER_REQ" | grep -qiE 'print|一页|投资人|董事会|board'; then
   # Every non-Dashboard sheet must be hidden or veryHidden.
-  LEAKING=$(officecli query "$FILE" 'sheet' --json | jq -r '.data.results[] | select(.name != "Dashboard" and (.state // "visible") == "visible") | .name')
-  [ -n "$LEAKING" ] && { echo "REJECT Gate 7 print-scope: visible non-Dashboard sheet(s): $LEAKING — hide before delivery"; exit 1; }
+  # query sheet --json carries the name in .preview (no .name/.state); visibility lives in
+  # each sheet's own get .format.hidden (absent => visible), so iterate + probe per sheet.
+  LEAKING=""
+  while IFS=$'\t' read -r SPATH SNAME; do
+    [ "$SNAME" = "Dashboard" ] && continue
+    HIDDEN=$(officecli get "$FILE" "$SPATH" --json | jq -r '.data.results[0].format.hidden // false')
+    [ "$HIDDEN" != "true" ] && LEAKING="$LEAKING $SNAME"
+  done < <(officecli query "$FILE" 'sheet' --json | jq -r '.data.results[] | [.path, .preview] | @tsv')
+  [ -n "$LEAKING" ] && { echo "REJECT Gate 7 print-scope: visible non-Dashboard sheet(s):$LEAKING — hide before delivery"; exit 1; }
   # Dashboard must carry an explicit Print_Area named range.
   PA=$(officecli query "$FILE" 'namedrange[name="_xlnm.Print_Area"]' --json | jq '.data.results | length')
   [ "$PA" -ge 1 ] || { echo "REJECT Gate 7 print-scope: no _xlnm.Print_Area set"; exit 1; }

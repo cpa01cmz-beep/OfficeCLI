@@ -39,7 +39,7 @@ This skill teaches what a real form needs, not every CLI flag. When a prop / ali
 
 ## Mental Model & Inheritance
 
-A Word form is a `.docx` plus four OpenXML payload layers plain-docx skills do not touch: **`<w:sdt>`** content controls (types: text / richtext / dropdown / combobox / date / picture / group), **`<w:ffData>`** legacy FormField (still the only way to get a real checkbox — SDT `type=checkbox` is not implemented), **`<w:fldChar>`** complex fields (MERGEFIELD, REF, PAGEREF, SEQ, IF — template-time, not user-fill), and **`documentProtection`** (the lock that makes non-field text read-only in Word — and, on the CLI, blocks `set`/`add` without `--force`).
+A Word form is a `.docx` plus four OpenXML payload layers plain-docx skills do not touch: **`<w:sdt>`** content controls (types: text / richtext / dropdown / combobox / date / picture / group), **`<w:ffData>`** legacy FormField (still the only way to get a real checkbox — SDT `type=checkbox` is not implemented), **`<w:fldChar>`** complex fields (MERGEFIELD, REF, PAGEREF, SEQ, IF — template-time, not user-fill), and **`documentProtection`** (the lock that makes non-field text read-only in Word — and, on the CLI, `protection=forms` locks non-field content edits (those need `--force` or `raw-set`) but still allows form-field (SDT) edits, which is the point of forms protection).
 
 **No inheritance from docx v2.** docx's Delivery Gate (cover-fill %, live-PAGE check) does NOT apply — form QA is `view forms` + `query sdt alias+tag` + `protectionEnforced`.
 
@@ -57,7 +57,7 @@ A Word form is a `.docx` plus four OpenXML payload layers plain-docx skills do n
 
 **`WARNING: UNSUPPORTED` (exit 2) is a silently-wrong element.** The CLI created the element *without* the rejected prop. Any UNSUPPORTED in your build log means a prop name the current CLI does not accept on that element — stop, check `help docx <element>` for the right prop name (most SDT props such as `items`/`format`/`lock` ARE accepted now; `maxlength` is not), fix the command, and re-run. Do not ship on top.
 
-**`protection=forms` is the LAST command.** Once it is set, the CLI **blocks** further `set` / `add` (`ERROR: Document is protected … use --force`) — only `raw-set` bypasses protection. So finish all field edits first, then lock; if you must edit afterward, pass `--force` (or temporarily clear protection, edit, re-lock).
+**`protection=forms` is the LAST structural command.** Once it is set, `protection=forms` locks non-field content (those edits need `--force` or `raw-set`) but still allows form-field (SDT) edits — which is the point of forms protection. A non-field content edit (e.g. `set /body/p[N] --prop text=`) is refused (`ERROR: Document is protected … use --force`); a form-field edit (e.g. `set /body/sdt[N] --prop text=` / `--prop alias=`) succeeds (exit 0). Use `Query("editable")` to find fillable fields. So finish all non-field (static layout) edits first, then lock; if you must edit static content afterward, pass `--force` (or temporarily clear protection, edit, re-lock).
 
 ### `--after find:` micro-playbook
 
@@ -395,13 +395,13 @@ officecli get "$FILE" /                                  # look for: protectionE
 
 | Mode | Word user can | CLI behavior |
 |---|---|---|
-| `forms` | Fill SDT + formfield only | All ops work; no `--force` needed |
-| `readOnly` | Read only | All ops work |
-| `comments` | Add comments only | All ops work |
-| `trackedChanges` | Edit with tracked changes only | All ops work |
+| `forms` | Fill SDT + formfield only | Form-field (SDT) edits work (exit 0); non-field content edits need `--force` or `raw-set` |
+| `readOnly` | Read only | Non-field edits need `--force`; raw-set bypasses |
+| `comments` | Add comments only | Non-field edits need `--force`; raw-set bypasses |
+| `trackedChanges` | Edit with tracked changes only | Non-field edits need `--force`; raw-set bypasses |
 | `none` | Full editing | All ops work |
 
-**KEY:** Document protection restricts Word users AND the CLI. Under `protection=forms`, `set` / `add` are refused with `ERROR: Document is protected (mode: forms). … use --force to override`; pass `--force` to edit anyway. `raw-set` is the only verb that bypasses protection. Use `Query("editable")` to find the fields a Word user could still fill.
+**KEY:** Document protection restricts Word users AND the CLI. Under `protection=forms`, form-field (SDT) edits — `set /body/sdt[N] --prop text=` / `--prop alias=` — succeed (exit 0); this is the point of forms protection. Only NON-field content edits (e.g. `set /body/p[N] --prop text=`) are refused with `ERROR: Document is protected (mode: forms). … use --force to override`; pass `--force` (or `raw-set`, the only verb that fully bypasses protection) to edit static content anyway. Use `Query("editable")` to find the fields a Word user could still fill.
 
 ### Lock values (settable on `add` and `set`)
 
@@ -438,7 +438,19 @@ PID=$(officecli query "$FILE" paragraph --json | jq -r '.data.results[-1].format
 # No `wrap` action — two-step instead: (1) insertbefore an empty <w:sdt><w:sdtContent/></w:sdt>,
 # (2) move the original <w:p> inside by `replace` on the sdtContent with a copy of the paragraph XML.
 # Simpler alternative: read the paragraph XML via `officecli raw`, then `replace` the whole <w:p> with <w:sdt>...<w:sdtContent>[original w:p]</w:sdtContent></w:sdt>:
-PARA_XML=$(officecli raw "$FILE" /document | awk "/w14:paraId=\"$PID\"/,/<\\/w:p>/" | tr -d '\n')
+# NOTE: this needs an XML-aware extraction, NOT awk. `raw /document` emits the whole document on ONE line,
+# so an awk range like `/paraId=.../,/<\/w:p>/` grabs the entire <w:document> (schema-invalid). Parse the XML
+# and pull the single <w:p> by paraId instead:
+PARA_XML=$(officecli raw "$FILE" /document | python3 -c '
+import sys, xml.etree.ElementTree as ET
+xml = sys.stdin.read(); pid = sys.argv[1]
+ns = {"w":"http://schemas.openxmlformats.org/wordprocessingml/2006/main","w14":"http://schemas.microsoft.com/office/word/2010/wordml"}
+for p, u in ns.items(): ET.register_namespace(p, u)
+root = ET.fromstring(xml); key = "{%s}paraId" % ns["w14"]
+for p in root.iter("{%s}p" % ns["w"]):
+    if p.attrib.get(key) == pid:
+        sys.stdout.write(ET.tostring(p, encoding="unicode")); break
+' "$PID")
 officecli raw-set "$FILE" /document \
   --xpath "//w:p[@w14:paraId='$PID']" \
   --action replace \
