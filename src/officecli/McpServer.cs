@@ -603,26 +603,21 @@ public static class McpServer
                 if (items == null || items.Count == 0)
                     throw new ArgumentException("No commands found in input.");
                 using var handler = DocumentHandlerFactory.Open(file, editable: true);
-                // Defer per-mutation Document.Save() so N commands serialize the
-                // part once (at Dispose) instead of N times — mirrors the
-                // non-resident CLI batch path (CommandBuilder.Batch.cs). Without
-                // this the MCP batch is an O(N²) re-serialize on large replays.
-                if (handler is OfficeCli.Handlers.WordHandler mcpBatchWh) mcpBatchWh.DeferSave = true;
-                var results = new List<BatchResult>();
-                for (int bi = 0; bi < items.Count; bi++)
+                // Protection gate against the just-opened in-memory DOM, mirroring
+                // the CLI and resident batch paths: a protected .docx rejects
+                // batch mutations unless force=true. Surfaced as a thrown
+                // CliException → MCP isError, the same way other command errors
+                // propagate here.
+                var mcpForce = string.Equals(forceStr, "true", StringComparison.OrdinalIgnoreCase);
+                if (!mcpForce && file.EndsWith(".docx", StringComparison.OrdinalIgnoreCase))
                 {
-                    var item = items[bi];
-                    try
-                    {
-                        var output = CommandBuilder.ExecuteBatchItem(handler, item, true);
-                        results.Add(new BatchResult { Index = bi, Success = true, Output = output });
-                    }
-                    catch (Exception ex)
-                    {
-                        results.Add(new BatchResult { Index = bi, Success = false, Item = item, Error = ex.Message });
-                        if (stopOnError) break;
-                    }
+                    var protBlock = CommandBuilder.GetBatchProtectionBlock(handler, items);
+                    if (protBlock != null) throw new CliException(protBlock) { Code = "document_protected" };
                 }
+                // DeferSave + replay loop, shared with the non-resident CLI batch
+                // path (CommandBuilder.RunNonResidentBatch). The using-Dispose
+                // performs the single FinalizeDeferredIds + Save flush.
+                var results = CommandBuilder.RunNonResidentBatch(handler, items, stopOnError, json: true);
                 var sw = new System.IO.StringWriter();
                 CommandBuilder.PrintBatchResults(results, json: true, totalCount: items.Count, output: sw);
                 return sw.ToString().Trim();

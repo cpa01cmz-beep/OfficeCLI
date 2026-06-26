@@ -960,7 +960,6 @@ public class ResidentServer : IDisposable
                 throw new CliException(protBlock) { Code = "document_protected" };
         }
 
-        var results = new List<BatchResult>();
         // Defer per-mutation Document.Save() across the whole batch so N resident
         // mutations serialize once (at the next save/close) instead of N times —
         // the per-op Save was an O(N²) re-serialize of the growing part. Mirrors
@@ -968,37 +967,20 @@ public class ResidentServer : IDisposable
         // live in-memory DOM, so they observe every just-added element; the
         // resident only flushes to disk on `save`/`close`, which go through
         // _doc.Save() directly (bypassing the deferred SaveDoc()).
+        //
+        // Unlike the dispose-based CLI/MCP surfaces (which leave DeferSave on and
+        // let Dispose finalize), the resident handler is long-lived: it must
+        // restore the previous DeferSave and run ReconcileGlobalIds (below)
+        // explicitly. The replay loop itself is shared via ApplyBatchItems;
+        // skipResidentOnlyCommands drops in-batch open/close that would conflict
+        // with the already-open file.
         var deferHandler = _handler as OfficeCli.Handlers.WordHandler;
         var prevDefer = deferHandler?.DeferSave ?? false;
         if (deferHandler != null) deferHandler.DeferSave = true;
+        List<BatchResult> results;
         try
         {
-        for (int bi = 0; bi < items.Count; bi++)
-        {
-            var item = items[bi];
-            // Skip open/close commands inside batch — the resident already
-            // holds the file open; issuing open/close would conflict.
-            var cmd = (item.Command ?? "").ToLowerInvariant();
-            if (cmd is "open" or "close")
-            {
-                results.Add(new BatchResult { Index = bi, Success = true, Output = $"Skipped '{cmd}' (resident mode)" });
-                continue;
-            }
-            try
-            {
-                var output = CommandBuilder.ExecuteBatchItem(_handler, item, json);
-                results.Add(new BatchResult { Index = bi, Success = true, Output = output });
-            }
-            catch (Exception ex)
-            {
-                results.Add(new BatchResult
-                {
-                    Index = bi, Success = false, Item = item,
-                    Error = ex.Message
-                });
-                if (stopOnError) break;
-            }
-        }
+            results = CommandBuilder.ApplyBatchItems(_handler, items, stopOnError, json, skipResidentOnlyCommands: true);
         }
         finally
         {
