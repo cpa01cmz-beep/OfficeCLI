@@ -56,14 +56,20 @@ const IS_MAC = process.platform === 'darwin';
 const BUSY_CONNECT_TIMEOUT_MS = 30000; // = ResidentBusyConnectTimeoutMs
 const BUSY_MAX_RETRIES = 3;            // = ResidentBusyMaxRetries
 
-const INSTALL_URL =
-  'https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.sh';
+// Installer scripts: the d.officecli.ai mirror is primary; GitHub raw is only a
+// fallback (same order as install.sh / install-binary.js). The mirror is
+// Cloudflare-fronted and reachable where raw.githubusercontent.com may be
+// rate-limited or blocked.
+const INSTALL_SH_MIRROR = 'https://d.officecli.ai/install.sh';
+const INSTALL_SH_GITHUB = 'https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.sh';
+const INSTALL_PS1_MIRROR = 'https://d.officecli.ai/install.ps1';
+const INSTALL_PS1_GITHUB = 'https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.ps1';
 const MISSING_CLI =
   "officecli CLI not found: {bin} is not on PATH nor in the default install " +
   'location (~/.local/bin, or %LOCALAPPDATA%\\OfficeCLI on Windows). This SDK only ' +
   'forwards commands to the officecli binary, which must be installed separately. Install it:\n' +
   '    node -e "require(\'@officecli/sdk\').install()"   # runs the official installer\n' +
-  '    # or: curl -fsSL ' + INSTALL_URL + ' | bash\n' +
+  '    # or: curl -fsSL ' + INSTALL_SH_MIRROR + ' | bash\n' +
   '    # (npm i @officecli/sdk already pulls @officecli/officecli, which bundles the binary)\n' +
   'Already installed elsewhere? pass { binary: "/path/to/officecli" }.';
 
@@ -344,8 +350,8 @@ async function ensureCliBinary(binary, autoInstall) {
       /* not there */
     }
   }
-  if (autoInstall && binary === 'officecli' && !IS_WIN) {
-    install(); // official installer (install.sh) → ~/.local/bin
+  if (autoInstall && binary === 'officecli') {
+    install(); // official installer (install.sh on unix, install.ps1 on Windows)
     const after = installDirCandidate('officecli');
     if (after && fs.existsSync(after)) return after;
   }
@@ -514,18 +520,30 @@ async function open(filePath, { binary = 'officecli', timeoutMs = 30000, autoIns
  */
 function install() {
   if (IS_WIN) {
-    throw new OfficeCliError(
-      1,
-      "Automatic install isn't supported on Windows (install.sh needs bash). " +
-        'Download officecli from https://github.com/iOfficeAI/OfficeCLI/releases and put it on PATH.'
-    );
+    process.stderr.write(`Installing officecli via ${INSTALL_PS1_MIRROR} (github fallback) ...\n`);
+    // Fetch the script mirror-first, github fallback, then run it. The whole
+    // try/catch is assigned so a mirror failure transparently falls back.
+    const ps = `$s = try { irm '${INSTALL_PS1_MIRROR}' } catch { irm '${INSTALL_PS1_GITHUB}' }; $s | iex`;
+    const r = spawnSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps], {
+      stdio: 'inherit',
+    });
+    if (r.status !== 0) {
+      throw new OfficeCliError(
+        r.status == null ? -1 : r.status,
+        `officecli install failed. Run manually:\n    irm ${INSTALL_PS1_MIRROR} | iex`
+      );
+    }
+    return;
   }
-  process.stderr.write(`Installing officecli via ${INSTALL_URL} ...\n`);
-  const r = spawnSync('bash', ['-c', `curl -fsSL ${INSTALL_URL} | bash`], { stdio: 'inherit' });
+  process.stderr.write(`Installing officecli via ${INSTALL_SH_MIRROR} (github fallback) ...\n`);
+  // (curl mirror || curl github) | bash — the subshell emits whichever script
+  // fetch succeeds; the group keeps the pipe bound to the whole fallback.
+  const sh = `(curl -fsSL ${INSTALL_SH_MIRROR} 2>/dev/null || curl -fsSL ${INSTALL_SH_GITHUB}) | bash`;
+  const r = spawnSync('bash', ['-c', sh], { stdio: 'inherit' });
   if (r.status !== 0) {
     throw new OfficeCliError(
       r.status == null ? -1 : r.status,
-      `officecli install failed. Run manually:\n    curl -fsSL ${INSTALL_URL} | bash`
+      `officecli install failed. Run manually:\n    curl -fsSL ${INSTALL_SH_MIRROR} | bash`
     );
   }
 }

@@ -65,13 +65,20 @@ _builtin_open = open   # preserved; this module defines its own open() below
 
 # officecli's official installer (README one-liner). install() shells out to it;
 # the missing-CLI error points users at it / at install().
-_INSTALL_URL = "https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.sh"
+# Installer scripts: the d.officecli.ai mirror is primary; GitHub raw is only a
+# fallback (same order as install.sh / install.ps1 themselves). The mirror is
+# Cloudflare-fronted and reachable where raw.githubusercontent.com may be
+# rate-limited or blocked.
+_INSTALL_SH_MIRROR = "https://d.officecli.ai/install.sh"
+_INSTALL_SH_GITHUB = "https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.sh"
+_INSTALL_PS1_MIRROR = "https://d.officecli.ai/install.ps1"
+_INSTALL_PS1_GITHUB = "https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.ps1"
 _MISSING_CLI = (
     "officecli CLI not found: {bin!r} is not on PATH nor in the default install "
     "location (~/.local/bin, or %LOCALAPPDATA%\\OfficeCLI on Windows). This SDK only forwards "
     "commands to the officecli binary, which must be installed separately. Install it:\n"
     "    python -m officecli install            # runs the official installer\n"
-    "    # or: curl -fsSL " + _INSTALL_URL + " | bash\n"
+    "    # or: curl -fsSL " + _INSTALL_SH_MIRROR + " | bash\n"
     "Already installed elsewhere? pass binary=\"/path/to/officecli\"."
 )
 
@@ -267,6 +274,23 @@ def _resolve_binary(binary):
     return binary                           # give up; _run_cli raises the helpful error
 
 
+def _ensure_binary(binary, auto_install=True):
+    """Resolve the binary and, if it can't be found anywhere AND auto_install is
+    set, provision it via the official installer before giving up. Parallels the
+    Node SDK's auto-install. An explicit path (with a separator) and a bare name
+    found on PATH / in the install dir are returned as-is — install only runs
+    when nothing is found. install() picks install.sh (unix) or install.ps1
+    (Windows), so auto-install works on both."""
+    resolved = _resolve_binary(binary)
+    explicit = os.sep in binary or (os.altsep and os.altsep in binary)
+    if resolved != binary or explicit:
+        return resolved              # found (or an explicit path we trust)
+    if auto_install:
+        install()                    # CLI absent everywhere → official installer
+        resolved = _resolve_binary(binary)
+    return resolved                  # may still be the bare name; _run_cli then raises
+
+
 def _run_cli(binary, argv):
     """Run `binary <argv...>` (capturing output). A missing binary surfaces as a
     clear OfficeCliError with install guidance, not a raw FileNotFoundError."""
@@ -409,7 +433,7 @@ class Document:
         self.close()
 
 
-def create(path, *args, binary="officecli", timeout=30.0):
+def create(path, *args, binary="officecli", timeout=30.0, auto_install=True):
     """Create a blank Office document and return a live `Document` handle for it.
 
     Parallel to `open`: both return the session handle you actually work with —
@@ -428,7 +452,7 @@ def create(path, *args, binary="officecli", timeout=30.0):
         another owner's active session.
       • file exists without --force → file_exists (pass "--force" to overwrite)."""
     full = os.path.abspath(path)
-    binary = _resolve_binary(binary)
+    binary = _ensure_binary(binary, auto_install)
     r = _run_cli(binary, ["create", full, *args])
     if r.returncode != 0:
         raise OfficeCliError(r.returncode, r.stderr or r.stdout)
@@ -437,7 +461,7 @@ def create(path, *args, binary="officecli", timeout=30.0):
     return Document(full, binary=binary, timeout=timeout)
 
 
-def open(path, binary="officecli", timeout=30.0):
+def open(path, binary="officecli", timeout=30.0, auto_install=True):
     """Open an EXISTING document and return a live `Document` handle (parallel to
     `create`, which makes a new file). `officecli open` is idempotent: it reuses a
     resident already serving this file or starts one — and if a live resident is
@@ -458,32 +482,43 @@ def open(path, binary="officecli", timeout=30.0):
     officecli's TrySend; the reply read itself blocks (a busy resident answers in
     turn). Override per call via send(..., timeout=...) / batch(..., timeout=...);
     use alive() to probe liveness."""
-    return Document(path, binary=binary, timeout=timeout)
+    return Document(path, binary=_ensure_binary(binary, auto_install), timeout=timeout)
 
 
 def install():
-    """Install the officecli CLI binary via its OFFICIAL installer — explicit by
-    design (this SDK never auto-downloads a binary behind your back). Reuses
-    officecli's own install.sh (platform detection + checksum + ~/.local/bin),
-    rather than reimplementing download logic that would drift from upstream.
+    """Install the officecli CLI binary via its OFFICIAL installer — install.sh on
+    unix, install.ps1 on Windows. Reuses officecli's own installers (platform
+    detection + checksum + ~/.local/bin or %LOCALAPPDATA%\\OfficeCLI), rather than
+    reimplementing download logic that would drift from upstream.
 
-    Equivalent to `python -m officecli install`, or the README one-liner
-    `curl -fsSL <install.sh> | bash`. Returns None on success; raises
-    OfficeCliError on failure. Not supported on Windows (install.sh needs bash) —
-    download from GitHub Releases and put officecli on PATH instead."""
+    Called automatically by open()/create() when the CLI is missing (pass
+    auto_install=False to disable), and exposed directly as `python -m officecli
+    install`. Returns None on success; raises OfficeCliError on failure. Output is
+    NOT captured, so the installer's progress and checksum lines stream to the
+    user."""
     if _IS_WIN:
-        raise OfficeCliError(1,
-            "Automatic install isn't supported on Windows (install.sh needs bash). "
-            "Download officecli from https://github.com/iOfficeAI/OfficeCLI/releases "
-            "and put it on PATH.")
-    print(f"Installing officecli via {_INSTALL_URL} ...", file=sys.stderr)
-    # Reuse the official installer verbatim; do NOT capture, so its progress and
-    # checksum output stream to the user (this is an explicit, interactive action).
-    r = subprocess.run(["bash", "-c", f"curl -fsSL {_INSTALL_URL} | bash"])
+        print(f"Installing officecli via {_INSTALL_PS1_MIRROR} (github fallback) ...", file=sys.stderr)
+        # Windows PowerShell (powershell.exe) ships with the OS; -ExecutionPolicy
+        # Bypass lets the remote script run without changing machine policy. Fetch
+        # the script mirror-first, github fallback, then run it.
+        ps = (f"$s = try {{ irm '{_INSTALL_PS1_MIRROR}' }} "
+              f"catch {{ irm '{_INSTALL_PS1_GITHUB}' }}; $s | iex")
+        r = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps])
+        if r.returncode != 0:
+            raise OfficeCliError(r.returncode,
+                f"officecli install failed (exit {r.returncode}). Run manually:\n"
+                f"    irm {_INSTALL_PS1_MIRROR} | iex")
+        return None
+    print(f"Installing officecli via {_INSTALL_SH_MIRROR} (github fallback) ...", file=sys.stderr)
+    # (curl mirror || curl github) | bash — the subshell emits whichever fetch
+    # succeeds; the group keeps the pipe bound to the whole fallback. Output is
+    # NOT captured, so progress and checksum lines stream to the user.
+    sh = f"(curl -fsSL {_INSTALL_SH_MIRROR} 2>/dev/null || curl -fsSL {_INSTALL_SH_GITHUB}) | bash"
+    r = subprocess.run(["bash", "-c", sh])
     if r.returncode != 0:
         raise OfficeCliError(r.returncode,
             f"officecli install failed (exit {r.returncode}). Run manually:\n"
-            f"    curl -fsSL {_INSTALL_URL} | bash")
+            f"    curl -fsSL {_INSTALL_SH_MIRROR} | bash")
     return None
 
 
