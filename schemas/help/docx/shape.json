@@ -8,7 +8,7 @@
   "parent": "body",
   "operations": {
     "add": true,
-    "set": false,
+    "set": true,
     "get": true,
     "query": false,
     "remove": true
@@ -18,7 +18,7 @@
       "/body/shape[N]"
     ]
   },
-  "note": "Floating geometric shape — a DrawingML anchored shape (wps:wsp) with a preset geometry, fill and outline, but no text body. Created via `add --type shape`; Get returns the raw drawing tree and Remove deletes the host paragraph. Property edits after creation are not supported through Set (use Remove + re-Add, or the raw-set path). For a shape that carries text use `textbox`; for inline images use `picture`.",
+  "note": "Floating geometric shape — a DrawingML anchored shape (wps:wsp) with a preset geometry, fill and outline, but no text body. Created via `add --type shape`; Get returns the raw drawing tree and Remove deletes the host paragraph. Set supports the spPr surface (fill / line / line.* / width / height / geometry) in place; position/anchor/wrap/rotation props are add-only (use Remove + re-Add, or the raw-set path, to change those). For a shape that carries text use `textbox`; for inline images use `picture`.",
   "properties": {
     "geometry": {
       "type": "string",
@@ -26,18 +26,21 @@
       "aliases": ["preset"],
       "default": "rect",
       "add": true,
+      "set": true,
       "examples": ["--prop geometry=ellipse", "--prop geometry=roundRect"]
     },
     "width": {
       "type": "length",
       "description": "shape width (cm/in/pt/EMU). Default ~1in.",
       "add": true,
+      "set": true,
       "examples": ["--prop width=4cm"]
     },
     "height": {
       "type": "length",
       "description": "shape height (cm/in/pt/EMU). Default ~1in.",
       "add": true,
+      "set": true,
       "examples": ["--prop height=4cm"]
     },
     "wrap": {
@@ -100,31 +103,36 @@
       "type": "color",
       "description": "fill color (hex/name), or 'none' for no fill.",
       "add": true,
+      "set": true,
       "examples": ["--prop fill=FF0000", "--prop fill=none"]
     },
     "line": {
       "type": "string",
       "description": "composite outline 'STYLE;SIZE;COLOR' (or 'none'); split keys line.style/line.width/line.color also accepted.",
       "add": true,
+      "set": true,
       "examples": ["--prop line=solid;1pt;000000"]
     },
     "line.color": {
       "type": "color",
       "description": "outline color. Alias: linecolor.",
       "aliases": ["linecolor"],
-      "add": true
+      "add": true,
+      "set": true
     },
     "line.width": {
       "type": "length",
       "description": "outline width. Alias: linewidth.",
       "aliases": ["linewidth"],
-      "add": true
+      "add": true,
+      "set": true
     },
     "line.style": {
       "type": "string",
       "description": "outline dash style. Alias: linestyle.",
       "aliases": ["linestyle"],
-      "add": true
+      "add": true,
+      "set": true
     },
     "alt": {
       "type": "string",

@@ -8,7 +8,7 @@
   "parent": "body",
   "operations": {
     "add": true,
-    "set": false,
+    "set": true,
     "get": true,
     "query": false,
     "remove": true
@@ -18,7 +18,7 @@
       "/body/textbox[N]"
     ]
   },
-  "note": "Floating text box — a DrawingML anchored shape (wps:wsp) that carries a text body, added inside a run+paragraph. Created via `add --type textbox`; Get returns the raw drawing tree and Remove deletes the host paragraph. Property edits after creation are not supported through Set (use Remove + re-Add, or the raw-set path). For an empty graphic shape with no text body use `shape`; for inline pictures use `picture`.",
+  "note": "Floating text box — a DrawingML anchored shape (wps:wsp) that carries a text body, added inside a run+paragraph. Created via `add --type textbox`; Get returns the raw drawing tree and Remove deletes the host paragraph. Set supports the spPr surface (fill / line.* / width / height / geometry) in place; position/anchor/wrap/inset/text/rotation/shadow props are add-only (use Remove + re-Add, or the raw-set path, to change those). For an empty graphic shape with no text body use `shape`; for inline pictures use `picture`.",
   "properties": {
     "text": {
       "type": "string",
@@ -30,12 +30,14 @@
       "type": "length",
       "description": "box width (cm/in/pt/EMU). Default ~6cm.",
       "add": true,
+      "set": true,
       "examples": ["--prop width=6cm"]
     },
     "height": {
       "type": "length",
       "description": "box height (cm/in/pt/EMU). Default ~2.4cm.",
       "add": true,
+      "set": true,
       "examples": ["--prop height=3cm"]
     },
     "geometry": {
@@ -43,6 +45,7 @@
       "description": "preset shape outline of the box (rect, roundRect, ellipse, ...). Aliases: shape.",
       "aliases": ["shape"],
       "add": true,
+      "set": true,
       "examples": ["--prop geometry=roundRect"]
     },
     "wrap": {
@@ -104,6 +107,7 @@
       "description": "fill color (hex/name), or 'none' for no fill. Alias: fillcolor.",
       "aliases": ["fillcolor"],
       "add": true,
+      "set": true,
       "examples": ["--prop fill=EAF2FF", "--prop fill=none"]
     },
     "fill.gradient": {
@@ -124,6 +128,7 @@
       "description": "outline color. Alias: linecolor.",
       "aliases": ["linecolor"],
       "add": true,
+      "set": true,
       "examples": ["--prop line.color=2B579A"]
     },
     "line.width": {
@@ -131,13 +136,15 @@
       "description": "outline width. Alias: linewidth.",
       "aliases": ["linewidth"],
       "add": true,
+      "set": true,
       "examples": ["--prop line.width=1pt"]
     },
     "line.style": {
       "type": "string",
       "description": "outline dash style. Alias: linestyle.",
       "aliases": ["linestyle"],
-      "add": true
+      "add": true,
+      "set": true
     },
     "inset.left": {
       "type": "length",
