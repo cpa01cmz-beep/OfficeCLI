@@ -332,6 +332,7 @@ async function ensureCliBinary(binary, autoInstall) {
       const p = cli.binaryPath();
       if (fs.existsSync(p)) return p;
       if (autoInstall) {
+        process.stderr.write('[officecli] CLI not found — installing from d.officecli.ai …\n');
         await cli.ensureBinary(); // download the vendored, auto-updating binary
         return cli.binaryPath();
       }
@@ -351,6 +352,7 @@ async function ensureCliBinary(binary, autoInstall) {
     }
   }
   if (autoInstall && binary === 'officecli') {
+    process.stderr.write('[officecli] CLI not found — installing from d.officecli.ai …\n');
     install(); // official installer (install.sh on unix, install.ps1 on Windows)
     const after = installDirCandidate('officecli');
     if (after && fs.existsSync(after)) return after;

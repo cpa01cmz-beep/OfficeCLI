@@ -286,6 +286,7 @@ def _ensure_binary(binary, auto_install=True):
     if resolved != binary or explicit:
         return resolved              # found (or an explicit path we trust)
     if auto_install:
+        print("officecli CLI not found — installing from d.officecli.ai ...", file=sys.stderr)
         install()                    # CLI absent everywhere → official installer
         resolved = _resolve_binary(binary)
     return resolved                  # may still be the bare name; _run_cli then raises
