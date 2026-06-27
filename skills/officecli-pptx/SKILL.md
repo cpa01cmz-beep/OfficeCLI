@@ -200,13 +200,13 @@ Copy-level tells live in "Copy reads human".
 
 ## Common Workflow
 
-1. **Open/close lifecycle.** `officecli open <file>` at the start, `officecli close <file>` at the end. Close when you finish — it's always safe (the backend handles when bytes hit disk; closing never errors or loses work). Use `batch` for repetitive shape grids.
+1. **Open/save lifecycle.** `officecli open <file>` at the start, `officecli save <file>` at the end to flush your edits to disk. `save` only writes — it leaves the resident warm for any follow-up edit; reach for `officecli close <file>` only when you want to release the resident immediately (a one-shot handoff). Both are always safe — they never error or lose work. Use `batch` for repetitive shape grids.
 2. **Orient.** New deck: `officecli create "$FILE"`. Existing: `officecli view "$FILE" outline` first. Never edit blind.
 3. **Title sequence first (plan, don't build yet).** Before creating any slide or shape, write out the full ordered list of slide titles. If someone reading ONLY the titles can't follow the argument, fix the arc now — cheaper in a list than after 14 slides. Pick ONE title grammar — all topic noun-phrases or all action statements, never a mix — and hold it throughout (see "Copy reads human").
 4. **Build in display order.** Add slides in audience-view order: cover → agenda → section-1 divider → section-1 content → section-2 divider → … → closing. `--index` on slide add works, but linear append keeps the build script readable and avoids index-arithmetic bugs. **Before final delivery, confirm slide count + narrative arc match your build plan.** Gate 3's order-sanity check catches cases where the cover ends up as slide 11 of 14 instead of slide 1.
 5. **Incremental per slide.** Create slide + background, then title, then supporting shapes / charts / connectors. Always `layout=blank` for custom designs. After each structural op, `get /slide[N] --depth 1` to confirm shape IDs.
 6. **Format to spec.** Per the Requirements table; formatting is deliverable, not polish.
-7. **Close + verify.** `officecli close` ends the session and ensures the file is on disk. Always open in the target presentation viewer before shipping — chart colors, animations, fonts, and zoom are runtime features `view html` can't render. Full verification in QA below.
+7. **Save + verify.** `officecli save` flushes the file to disk (or `officecli close` to flush and also end the session). Always open in the target presentation viewer before shipping — chart colors, animations, fonts, and zoom are runtime features `view html` can't render. Full verification in QA below.
 8. **QA — assume there are problems.** Fix-and-verify until a cycle finds zero new issues.
 
 ## Quick Start
@@ -234,11 +234,11 @@ officecli add "$FILE" /slide[2] --type shape --prop text="Enterprise renewals + 
   --prop font=Calibri --prop size=20 --prop color=333333
 officecli add "$FILE" /slide[2] --type notes --prop text="Lead with the 18% beat, preview EMEA."
 
-officecli close "$FILE"
+officecli save "$FILE"
 officecli validate "$FILE"
 ```
 
-Shape of every build: open → slide+background → title → body → notes → close → validate.
+Shape of every build: open → slide+background → title → body → notes → save → validate.
 
 ## Reading & Analysis
 
@@ -552,7 +552,7 @@ REJECT with `slide N: <issue>` lines, else "Gate 3 PASS" (HTML-text fallback add
 
 **Fix-verify (mandatory, max 3 cycles).** Fix → re-run Gate 3 → repeat until zero new issues; one fix often surfaces another. After 3 rounds without convergence, **stop** — likely seesaw, template-level cause, or agent misread. Report `slide N: <issue> — attempted: <fixes> — likely root: <template|design-conflict|ambiguous>` and let the user decide.
 
-**Then flush (part of the gate).** Once Gate 3 converges, end with `officecli save "<file>"` or `officecli close "<file>"` — this guarantees your edits are written to disk before delivery. Required final step, not optional. Always safe: never errors or loses work.
+**Then flush (part of the gate).** Once Gate 3 converges, end with `officecli save "<file>"` — this guarantees your edits are written to disk before delivery (use `officecli close "<file>"` instead to also release the resident on a one-shot handoff). Required final step, not optional. Always safe: never errors or loses work.
 
 ## Common Pitfalls
 

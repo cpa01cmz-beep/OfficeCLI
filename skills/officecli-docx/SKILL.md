@@ -43,7 +43,7 @@ If in doubt, `view text` after writing and compare character-for-character.
 
 **Incremental execution.** `officecli` mutates the file on every call. Run commands one at a time and check each exit code — a 50-command script that fails at command 3 cascades silently. After any structural op (new style, table, TOC, section break) run `get` on it before stacking more.
 
-**Open/close lifecycle:** `officecli open <file>` at the start, `officecli close <file>` at the end — keeps the doc in memory between commands and ensures a clean finish. Close when done; it's always safe (closing never errors or loses work). For many paragraphs of one style, use `batch` (one open/save cycle for the whole array).
+**Open/save lifecycle:** `officecli open <file>` at the start, `officecli save <file>` at the end to flush to disk — `save` only writes and leaves the resident warm for follow-up edits; reach for `officecli close <file>` only to release the resident on a one-shot handoff. Both are always safe (never error or lose work). For many paragraphs of one style, use `batch` (one open/save cycle for the whole array).
 
 **`$FILE` convention.** All commands use `"$FILE"` — set it once (`FILE="your-doc.docx"`). Never copy a literal `doc.docx` / `review.docx` into output — always substitute your actual target.
 
@@ -85,7 +85,7 @@ Six steps. Every non-trivial build follows this shape.
 2. **Orient.** Existing file: `officecli view "$FILE" outline` — heading tree, section count, whether a TOC / watermark / tracked changes already exist. Never edit blind.
 3. **Build incrementally.** Structural first, content next, formatting last: styles & numbering defs → sections / page setup → headings & body → tables / images / fields / TOC → headers / footers → comments. After each structural op, `get` it back before stacking on top.
 4. **Format to spec.** Explicit heading sizes, spacing, widths, alignment, tabs, list indents — formatting is part of the deliverable, not optional polish.
-5. **Close, then trust structure over cached text.** `officecli close "$FILE"` writes the XML. TOC / PAGE / NUMPAGES / SEQ / PAGEREF fields carry **cached values** that may be stale or empty until a human recalculates (F9 in Word). Confirm fields *exist* (`get --depth 3` finds `<w:fldChar>`) rather than trusting the visible text.
+5. **Save, then trust structure over cached text.** `officecli save "$FILE"` writes the XML. TOC / PAGE / NUMPAGES / SEQ / PAGEREF fields carry **cached values** that may be stale or empty until a human recalculates (F9 in Word). Confirm fields *exist* (`get --depth 3` finds `<w:fldChar>`) rather than trusting the visible text.
 6. **QA — assume there are problems.** You are done after one fix-and-verify cycle finds zero new issues, not when your last command exited 0. See QA.
 
 ## Quick Start
@@ -102,7 +102,7 @@ officecli add "$FILE" /body --type paragraph --prop text="Key Drivers" --prop st
 officecli add "$FILE" /body --type paragraph --prop text="Enterprise renewals, upsell, and a new EMEA region." --prop size=11pt
 officecli add "$FILE" / --type footer --prop type=default --prop size=9pt --prop text="Page " --prop field=page
 officecli set "$FILE" "/footer[1]/p[1]" --prop align=center
-officecli close "$FILE"
+officecli save "$FILE"
 officecli validate "$FILE"
 ```
 
