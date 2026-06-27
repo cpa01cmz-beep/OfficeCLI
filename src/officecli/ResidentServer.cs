@@ -960,7 +960,6 @@ public class ResidentServer : IDisposable
                 throw new CliException(protBlock) { Code = "document_protected" };
         }
 
-        var results = new List<BatchResult>();
         // Defer per-mutation Document.Save() across the whole batch so N resident
         // mutations serialize once (at the next save/close) instead of N times —
         // the per-op Save was an O(N²) re-serialize of the growing part. Mirrors
@@ -968,37 +967,20 @@ public class ResidentServer : IDisposable
         // live in-memory DOM, so they observe every just-added element; the
         // resident only flushes to disk on `save`/`close`, which go through
         // _doc.Save() directly (bypassing the deferred SaveDoc()).
+        //
+        // Unlike the dispose-based CLI/MCP surfaces (which leave DeferSave on and
+        // let Dispose finalize), the resident handler is long-lived: it must
+        // restore the previous DeferSave and run ReconcileGlobalIds (below)
+        // explicitly. The replay loop itself is shared via ApplyBatchItems;
+        // skipResidentOnlyCommands drops in-batch open/close that would conflict
+        // with the already-open file.
         var deferHandler = _handler as OfficeCli.Handlers.WordHandler;
         var prevDefer = deferHandler?.DeferSave ?? false;
         if (deferHandler != null) deferHandler.DeferSave = true;
+        List<BatchResult> results;
         try
         {
-        for (int bi = 0; bi < items.Count; bi++)
-        {
-            var item = items[bi];
-            // Skip open/close commands inside batch — the resident already
-            // holds the file open; issuing open/close would conflict.
-            var cmd = (item.Command ?? "").ToLowerInvariant();
-            if (cmd is "open" or "close")
-            {
-                results.Add(new BatchResult { Index = bi, Success = true, Output = $"Skipped '{cmd}' (resident mode)" });
-                continue;
-            }
-            try
-            {
-                var output = CommandBuilder.ExecuteBatchItem(_handler, item, json);
-                results.Add(new BatchResult { Index = bi, Success = true, Output = output });
-            }
-            catch (Exception ex)
-            {
-                results.Add(new BatchResult
-                {
-                    Index = bi, Success = false, Item = item,
-                    Error = ex.Message
-                });
-                if (stopOnError) break;
-            }
-        }
+            results = CommandBuilder.ApplyBatchItems(_handler, items, stopOnError, json, skipResidentOnlyCommands: true);
         }
         finally
         {
@@ -1734,21 +1716,14 @@ public class ResidentServer : IDisposable
         // The handler selector branch throws on an empty match, so no silent no-op.
         // Agent-safety: reject a bare unscoped selector (mirrors CommandBuilder).
         OfficeCli.Core.MutationSelectorGuard.EnsureScoped(path, "set");
-        var unsupported = _handler.Set(path, properties);
-        // CONSISTENCY(unsupported-key-extract): mirrored in CommandBuilder.Set.cs.
-        // Handler entries may be "key (reason)" or "key=value (reason)" (e.g.
-        // geometry=invalid_preset). Trim trailing help text, then strip the
-        // optional "=value" so the membership test below matches the raw
-        // property key in `properties`.
-        var unsupportedKeys = unsupported
-            .Select(u =>
-            {
-                var head = u.Contains(' ') ? u[..u.IndexOf(' ')] : u;
-                var eq = head.IndexOf('=');
-                return eq >= 0 ? head[..eq] : head;
-            })
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var applied = properties.Where(kv => !unsupportedKeys.Contains(kv.Key)).ToList();
+        // Shared core: apply + prop-autocorrect + categorise — one copy across
+        // CLI / batch / MCP / resident (CommandBuilder.ApplySetWithCorrection).
+        // This also gives the resident the distance-1 typo auto-correction it
+        // previously lacked, so `set colot=color` behaves the same whether or
+        // not a resident is alive. The resident's own envelope (find-count,
+        // selector-count, watch, overflow, --json wrapping) stays below.
+        var (applied, unsupported, autoCorrected) =
+            CommandBuilder.ApplySetWithCorrection(_handler, path, properties);
 
         // CONSISTENCY(find-match-count): mirrored in CommandBuilder.Set.cs.
         // The resident path is hit whenever a resident process is open
@@ -1786,6 +1761,12 @@ public class ResidentServer : IDisposable
             : (unsupported.Count > 0 ? $"No properties applied to {path}" : $"Updated {path}");
 
         var warnings = new List<OfficeCli.Core.CliWarning>();
+        foreach (var ac in autoCorrected)
+            warnings.Add(new OfficeCli.Core.CliWarning
+            {
+                Message = $"Auto-corrected '{ac.Original}' to '{ac.Corrected}'",
+                Code = "auto_corrected",
+            });
         if (findMatchCount is 0)
         {
             warnings.Add(new OfficeCli.Core.CliWarning
@@ -1821,6 +1802,8 @@ public class ResidentServer : IDisposable
         else
         {
             if (applied.Count > 0 || unsupported.Count > 0) Console.WriteLine(message);
+            foreach (var ac in autoCorrected)
+                Console.Error.WriteLine($"WARNING: Auto-corrected '{ac.Original}' to '{ac.Corrected}'");
             if (findMatchCount is 0)
                 Console.Error.WriteLine($"WARNING: find pattern matched 0 occurrences at {path}");
             if (overflow != null)

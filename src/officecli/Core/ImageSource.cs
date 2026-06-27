@@ -137,9 +137,6 @@ internal static class ImageSource
         return (new MemoryStream(bytes), contentType);
     }
 
-    // Cap on a fetched image to bound memory use on a hostile/huge response.
-    private const long MaxRemoteImageBytes = 100L * 1024 * 1024; // 100 MB
-
     private static (Stream, PartTypeInfo) ResolveUrl(string url)
     {
         // SSRF guard lives in the shared SsrfGuard so image and file fetch can
@@ -153,11 +150,13 @@ internal static class ImageSource
         var response = client.GetAsync(url).GetAwaiter().GetResult();
         response.EnsureSuccessStatusCode();
 
-        // Enforce the size cap whether or not the server sends Content-Length.
+        // Enforce the shared size cap whether or not the server sends
+        // Content-Length. ReadBounded lives in SsrfGuard so image and file
+        // fetch share one limit (see SsrfGuard.MaxRemoteBytes).
         var declared = response.Content.Headers.ContentLength;
-        if (declared is > MaxRemoteImageBytes)
-            throw new ArgumentException($"Remote image exceeds {MaxRemoteImageBytes / (1024 * 1024)} MB limit.");
-        var bytes = ReadBounded(response.Content.ReadAsStream(), MaxRemoteImageBytes, url);
+        if (declared is > SsrfGuard.MaxRemoteBytes)
+            throw new ArgumentException($"Remote image exceeds {SsrfGuard.MaxRemoteBytes / (1024 * 1024)} MB limit.");
+        var bytes = SsrfGuard.ReadBounded(response.Content.ReadAsStream(), SsrfGuard.MaxRemoteBytes, url, "image");
         var stream = new MemoryStream(bytes);
 
         // Try content-type header first
@@ -176,22 +175,6 @@ internal static class ImageSource
             return (stream, sniffed);
 
         throw new ArgumentException($"Cannot determine image type from URL: {url}. Specify format via file extension or content-type header.");
-    }
-
-    private static byte[] ReadBounded(Stream src, long max, string url)
-    {
-        using var ms = new MemoryStream();
-        var buf = new byte[81920];
-        long total = 0;
-        int n;
-        while ((n = src.Read(buf, 0, buf.Length)) > 0)
-        {
-            total += n;
-            if (total > max)
-                throw new ArgumentException($"Remote image at {url} exceeds {max / (1024 * 1024)} MB limit.");
-            ms.Write(buf, 0, n);
-        }
-        return ms.ToArray();
     }
 
     private static PartTypeInfo MimeToContentType(string mime)

@@ -47,7 +47,8 @@ static partial class CommandBuilder
             if (ResidentClient.TryConnect(filePath, out _))
             {
                 ResidentClient.SendSetIdleTimeout(filePath, DefaultOpenIdleSeconds);
-                var msg = $"Opened {file.Name} (reusing running resident, idle timeout set to 12min)";
+                var msg = $"Opened {file.Name} (reusing running resident, idle timeout set to 12min). "
+                        + $"Still pass the file path on every command (e.g. get \"{file.Name}\" /body); run 'close {file.Name}' when done.";
                 if (json) Console.WriteLine(OutputFormatter.WrapEnvelopeText(msg));
                 else Console.WriteLine(msg);
                 return 0;
@@ -56,7 +57,8 @@ static partial class CommandBuilder
             if (!TryStartResidentProcess(filePath, idleSeconds: null, out var startError))
                 throw new InvalidOperationException(startError);
 
-            var startedMsg = $"Opened {file.Name} (remember to call close when done)";
+            var startedMsg = $"Opened {file.Name} (resident started). "
+                           + $"Still pass the file path on every command (e.g. get \"{file.Name}\" /body); run 'close {file.Name}' when done.";
             if (json) Console.WriteLine(OutputFormatter.WrapEnvelopeText(startedMsg));
             else Console.WriteLine(startedMsg);
             return 0;
@@ -97,7 +99,15 @@ static partial class CommandBuilder
             }
             else
             {
-                throw new InvalidOperationException($"No resident running for {file.Name}");
+                // No resident is holding this file. In the non-resident model
+                // every mutation already eager-saved to disk, so there is
+                // nothing to flush or shut down — treat close as an idempotent
+                // no-op SUCCESS, not an error. This lets "edit, then close when
+                // done" be a safe habit regardless of whether a resident was
+                // ever started; erroring here used to actively discourage it.
+                var msg = $"{file.Name} is already saved to disk; nothing to close.";
+                if (json) Console.WriteLine(OutputFormatter.WrapEnvelopeText(msg));
+                else Console.WriteLine(msg);
             }
             return 0;
         }, json); });
@@ -201,10 +211,17 @@ static partial class CommandBuilder
         // parent to child, so the caller's shell pipe (e.g. `| tail -1`,
         // $(...)) is NOT inherited and EOFs promptly when the client exits.
         // See ResidentStdoutInheritanceTests for the regression lock-in.
+        // CONSISTENCY(child-process-args): forward verb + path via ArgumentList,
+        // not a hand-quoted Arguments string. .NET re-parses the Arguments
+        // string with Windows-style quoting rules even on Unix, so a filePath
+        // containing a literal '"' (legal on macOS/Linux) or a trailing '\'
+        // would split into stray argv and the resident would reject startup.
+        // ArgumentList passes argv losslessly. Matches BlankDocCreator /
+        // FormatHandlerSession, which fork this same exe the same way.
         var startInfo = new ProcessStartInfo
         {
             FileName = exePath,
-            Arguments = $"__resident-serve__ \"{filePath}\"",
+            ArgumentList = { "__resident-serve__", filePath },
             UseShellExecute = false,
             CreateNoWindow = true,
             RedirectStandardOutput = true,
@@ -458,6 +475,90 @@ static partial class CommandBuilder
         }
     }
 
+    /// <summary>
+    /// Remove a path, honouring a prop-carried <c>shift</c> (Excel cell delete
+    /// with shift=left|up). The CLI exposes shift via a dedicated --shift option
+    /// that routes to <c>RemoveCellWithShift</c>; the MCP single-command and
+    /// batch surfaces carry it inside props, so without this they silently
+    /// dropped it (plain <c>Remove</c> ignores props["shift"]). Shared so all
+    /// three surfaces behave identically. Returns the handler's warning (or null).
+    /// </summary>
+    internal static string? RemoveWithShiftSupport(OfficeCli.Core.IDocumentHandler handler, string path, Dictionary<string, string>? props)
+    {
+        if (props != null && props.TryGetValue("shift", out var shift) && !string.IsNullOrEmpty(shift))
+        {
+            if (handler is not OfficeCli.Handlers.ExcelHandler xl)
+                throw new OfficeCli.Core.CliException("shift is supported only for Excel cell paths (e.g. /Sheet1/B5).")
+                    { Code = "invalid_value" };
+            return xl.RemoveCellWithShift(path, shift);
+        }
+        return handler.Remove(path, props);
+    }
+
+    /// <summary>Categorised result of <see cref="ApplySetWithCorrection"/>.</summary>
+    internal sealed record SetApplyOutcome(
+        List<KeyValuePair<string, string>> Applied,
+        List<string> Unsupported,
+        List<(string Original, string Corrected, string Value)> AutoCorrected);
+
+    /// <summary>
+    /// Apply a set's props, auto-correct any unsupported key that is a unique
+    /// Levenshtein-distance-1 typo of a real prop (e.g. colot→color), and
+    /// categorise the result into applied / still-unsupported / auto-corrected.
+    ///
+    /// This is the ONE shared core behind every set surface — the non-resident
+    /// CLI set, the batch executor, the MCP single-command, and the resident —
+    /// so the correction and categorisation cannot drift between them (they used
+    /// to be hand-mirrored copies, flagged with `// CONSISTENCY(...)` comments).
+    /// The boundary is deliberately narrow: the per-surface suggestion scope is
+    /// a trivial local switch, and each caller keeps its own output envelope
+    /// (CLI warnings/overlap, resident watch, batch verdict). Only the
+    /// drift-prone middle is shared.
+    /// </summary>
+    internal static SetApplyOutcome ApplySetWithCorrection(
+        OfficeCli.Core.IDocumentHandler handler, string path, Dictionary<string, string> props)
+    {
+        var raw = handler.Set(path, props);
+        string? scope = handler switch
+        {
+            OfficeCli.Handlers.ExcelHandler => "excel",
+            OfficeCli.Handlers.WordHandler => "word",
+            OfficeCli.Handlers.PowerPointHandler => "pptx",
+            _ => null,
+        };
+        var autoCorrected = new List<(string Original, string Corrected, string Value)>();
+        var unsupported = new List<string>();
+        foreach (var u in raw)
+        {
+            var rawKey = u.Contains(' ') ? u[..u.IndexOf(' ')] : u;
+            if (props.TryGetValue(rawKey, out var val))
+            {
+                var (suggestion, dist, isUnique) = SuggestPropertyWithDistance(rawKey, scope);
+                if (suggestion != null && dist == 1 && isUnique
+                    && handler.Set(path, new Dictionary<string, string> { [suggestion] = val }).Count == 0)
+                {
+                    autoCorrected.Add((rawKey, suggestion, val));
+                    continue;
+                }
+            }
+            unsupported.Add(u);
+        }
+        // unsupported entries may carry help text ("key (valid props: ...)") or a
+        // reason ("key=value (...)"); trim on the first space then split on '='
+        // so the membership test matches the raw prop key.
+        var unsupportedKeys = unsupported.Select(u =>
+        {
+            var head = u.Contains(' ') ? u[..u.IndexOf(' ')] : u;
+            var eq = head.IndexOf('=');
+            return eq >= 0 ? head[..eq] : head;
+        }).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var autoCorrectedKeys = autoCorrected.Select(ac => ac.Original).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var applied = props.Where(kv => !unsupportedKeys.Contains(kv.Key) && !autoCorrectedKeys.Contains(kv.Key)).ToList();
+        foreach (var ac in autoCorrected)
+            applied.Add(new KeyValuePair<string, string>(ac.Corrected, ac.Value));
+        return new SetApplyOutcome(applied, unsupported, autoCorrected);
+    }
+
     internal static string ExecuteBatchItem(OfficeCli.Core.IDocumentHandler handler, BatchItem item, bool json)
     {
         var format = json ? OfficeCli.Core.OutputFormat.Json : OfficeCli.Core.OutputFormat.Text;
@@ -518,7 +619,9 @@ static partial class CommandBuilder
                         ? OfficeCli.Handlers.ExcelHandler.ResolveCellAttributeAlias : null;
                 var (results, warnings) = OfficeCli.Core.AttributeFilter.FilterSelector(selector, handler.Query, keyResolver);
                 if (item.Text is { } textFilter && !string.IsNullOrEmpty(textFilter))
-                    results = results.Where(n => n.Text != null && n.Text.Contains(textFilter, StringComparison.OrdinalIgnoreCase)).ToList();
+                    // MatchesTextFilter (not plain Contains) so a batch query
+                    // text filter honours r"regex" like the CLI and resident do.
+                    results = results.Where(n => n.Text != null && OfficeCli.Core.AttributeFilter.MatchesTextFilter(n.Text, textFilter)).ToList();
                 foreach (var w in warnings) Console.Error.WriteLine(w);
                 return OfficeCli.Core.OutputFormatter.FormatNodes(results, format);
             }
@@ -534,21 +637,13 @@ static partial class CommandBuilder
                     throw new ArgumentException("'set' command requires 'props' field with at least one key=value. Got empty/missing props.");
                 var path = item.Path;
                 OfficeCli.Core.MutationSelectorGuard.EnsureScoped(path, "set");
-                var unsupported = handler.Set(path, props);
-                // Mirror standalone `set` (CommandBuilder.Set.cs): handler.Set
-                // may return entries with help text like "key (valid props ...)"
-                // or "key=value (reason)". Trim trailing text before the
-                // membership test so a rejected prop is not also counted as
-                // applied — without this, batch reported success=true with a
-                // warning, diverging from standalone set's exit-2 verdict.
-                var unsupportedKeys = unsupported.Select(u =>
-                {
-                    var head = u.Contains(' ') ? u[..u.IndexOf(' ')] : u;
-                    var eq = head.IndexOf('=');
-                    return eq >= 0 ? head[..eq] : head;
-                }).ToHashSet(StringComparer.OrdinalIgnoreCase);
-                var applied = props.Where(kv => !unsupportedKeys.Contains(kv.Key)).ToList();
+                // Shared core: apply + prop-autocorrect + categorise. Identical
+                // across CLI / batch / MCP / resident; only the output below is
+                // batch-specific.
+                var (applied, unsupported, autoCorrected) = ApplySetWithCorrection(handler, path, props);
                 var parts = new List<string>();
+                if (autoCorrected.Count > 0)
+                    parts.Add("Auto-corrected: " + string.Join(", ", autoCorrected.Select(ac => $"{ac.Original}→{ac.Corrected}")));
                 if (applied.Count > 0)
                 {
                     var msg = $"Updated {path}: {string.Join(", ", applied.Select(kv => $"{kv.Key}={kv.Value}"))}";
@@ -622,22 +717,32 @@ static partial class CommandBuilder
                 else
                 {
                     var type = item.Type ?? "";
-                    var resultPath = handler.Add(parentPath, type, pos, props);
+                    // Wrap props in a tracking dict (matches CLI/resident add): a
+                    // key the handler reads is consumed, so UnusedKeys after Add
+                    // is the generic unsupported-prop set across ALL handlers.
+                    // Previously batch/MCP add saw only Word's curated
+                    // LastAddUnsupportedProps, silently dropping an unknown prop
+                    // on a pptx/xlsx add that the CLI/resident would report.
+                    var tracking = new OfficeCli.Core.TrackingPropertyDictionary(props);
+                    var resultPath = handler.Add(parentPath, type, pos, tracking);
                     var addMsg = $"Added {type} at {resultPath}";
-
-                    // Surface silent-drop props that the curated Add helper
-                    // could not consume. AddStyle / AddParagraph / AddRun
-                    // populate LastAddUnsupportedProps. Use the curated
-                    // hint formatter (no raw-set recommendation) so users
-                    // learn the right curated alternative instead of being
-                    // pushed to the escape hatch. Scope label = result path
-                    // truncated to the meaningful prefix (/styles,
-                    // /body/p[N], /body/p[N]/r[N]).
-                    if (handler is OfficeCli.Handlers.WordHandler addWh
-                        && addWh.LastAddUnsupportedProps.Count > 0)
+                    var addUnsupported = tracking.UnusedKeys.ToList();
+                    if (handler is OfficeCli.Handlers.WordHandler addWh)
+                        addUnsupported.AddRange(addWh.LastAddUnsupportedProps);
+                    if (addUnsupported.Count > 0)
                     {
-                        var scope = ScopeLabelForWordPath(resultPath);
-                        var hint = OfficeCli.Core.StyleUnsupportedHints.Format(addWh.LastAddUnsupportedProps, scope);
+                        // Word → curated hints (keyed off the result path so a
+                        // /styles add gets style vocabulary); other handlers →
+                        // the generic scoped formatter.
+                        string? hint;
+                        if (handler is OfficeCli.Handlers.WordHandler)
+                            hint = OfficeCli.Core.StyleUnsupportedHints.Format(addUnsupported, ScopeLabelForWordPath(resultPath));
+                        else
+                        {
+                            string? addScope = handler is OfficeCli.Handlers.ExcelHandler ? "excel"
+                                : handler is OfficeCli.Handlers.PowerPointHandler ? "pptx" : null;
+                            hint = FormatUnsupported(addUnsupported, addScope);
+                        }
                         if (hint != null) addMsg += "\nWARNING: " + hint;
                     }
                     return addMsg;
@@ -649,7 +754,7 @@ static partial class CommandBuilder
                     throw new ArgumentException("'remove' command requires 'path' field. Example: {\"command\": \"remove\", \"path\": \"/slide[1]/shape[2]\"}");
                 var path = item.Path;
                 OfficeCli.Core.MutationSelectorGuard.EnsureScoped(path, "remove");
-                var warning = handler.Remove(path, item.Props);
+                var warning = RemoveWithShiftSupport(handler, path, item.Props);
                 var msg = $"Removed {path}";
                 if (warning != null) msg += $"\n{warning}";
                 return msg;
@@ -661,18 +766,26 @@ static partial class CommandBuilder
                 if (item.Index.HasValue) movePos = InsertPosition.AtIndex(item.Index.Value);
                 else if (!string.IsNullOrEmpty(item.After)) movePos = InsertPosition.AfterElement(item.After);
                 else if (!string.IsNullOrEmpty(item.Before)) movePos = InsertPosition.BeforeElement(item.Before);
-                var resultPath = handler.Move(path, item.To, movePos);
+                // Pass props to the 4-arg Move like the CLI and resident do; the
+                // batch/MCP path previously dropped move-time properties.
+                var resultPath = handler.Move(path, item.To, movePos, props.Count > 0 ? props : null);
                 return $"Moved to {resultPath}";
             }
             case "swap":
             {
-                if (string.IsNullOrEmpty(item.Path) || string.IsNullOrEmpty(item.To))
-                    throw new ArgumentException("'swap' command requires 'path' and 'to' fields. Example: {\"command\": \"swap\", \"path\": \"/slide[1]\", \"to\": \"/slide[2]\"}");
+                // Second element: accept `path2` (canonical — the single-command
+                // MCP tool and the CLI `swap path1 path2` both use it) or the
+                // legacy `to`. Before path2 was carried, an agent that learned
+                // swap from the single command produced a batch item that
+                // silently failed the path-presence check below.
+                var swapTo = !string.IsNullOrEmpty(item.Path2) ? item.Path2 : item.To;
+                if (string.IsNullOrEmpty(item.Path) || string.IsNullOrEmpty(swapTo))
+                    throw new ArgumentException("'swap' command requires 'path' and 'path2' (or 'to') fields. Example: {\"command\": \"swap\", \"path\": \"/slide[1]\", \"path2\": \"/slide[2]\"}");
                 var (p1, p2) = handler switch
                 {
-                    OfficeCli.Handlers.PowerPointHandler ppt => ppt.Swap(item.Path, item.To),
-                    OfficeCli.Handlers.WordHandler word => word.Swap(item.Path, item.To),
-                    OfficeCli.Handlers.ExcelHandler excel => excel.Swap(item.Path, item.To),
+                    OfficeCli.Handlers.PowerPointHandler ppt => ppt.Swap(item.Path, swapTo),
+                    OfficeCli.Handlers.WordHandler word => word.Swap(item.Path, swapTo),
+                    OfficeCli.Handlers.ExcelHandler excel => excel.Swap(item.Path, swapTo),
                     _ => throw new InvalidOperationException("swap not supported for this document type")
                 };
                 return $"Swapped {p1} <-> {p2}";
@@ -745,7 +858,17 @@ static partial class CommandBuilder
                         "Batch item missing required 'command' field. " +
                         "Valid commands: get, query, set, add, remove, move, view, raw, validate. " +
                         "Example: {\"command\": \"set\", \"path\": \"/Sheet1/A1\", \"props\": {\"value\": \"hello\"}}");
-                throw new InvalidOperationException($"Unknown command: '{item.Command}'. Valid commands: get, query, set, add, remove, move, swap, view, raw, validate.");
+                // A "command" containing whitespace is almost always a whole CLI
+                // line stuffed into the verb field (e.g. "add /slide[1] --type
+                // shape --prop ...") — the single most common batch-item mistake.
+                // Diagnose it specifically and point at the item schema; a plain
+                // unknown verb just gets the schema pointer.
+                var batchHint = item.Command.Any(char.IsWhiteSpace)
+                    ? " — that looks like a whole CLI line placed in \"command\". Use the bare verb only and put the"
+                      + " rest in sibling fields, e.g. {\"command\":\"add\",\"parent\":\"/slide[1]\",\"type\":\"shape\","
+                      + "\"props\":{...}}. Run `help batch` for the item schema."
+                    : " Run `help batch` for the JSON item schema.";
+                throw new InvalidOperationException($"Unknown command: '{item.Command}'. Valid commands: get, query, set, add, remove, move, swap, view, raw, validate.{batchHint}");
         }
     }
 

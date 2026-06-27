@@ -68,6 +68,41 @@ internal static class SsrfGuard
     }
 
     /// <summary>
+    /// Shared cap on a single remote fetch, to bound memory use on a hostile or
+    /// accidentally-huge response. Without it the default HttpClient buffering
+    /// ceiling (~2 GB) governs, far above any legitimate media/model/image size.
+    /// Both <see cref="ImageSource"/> and <see cref="FileSource"/> read through
+    /// <see cref="ReadBounded"/> so the limit can never drift apart between them
+    /// (same rationale as the SSRF policy living here).
+    /// </summary>
+    public const long MaxRemoteBytes = 100L * 1024 * 1024; // 100 MB
+
+    /// <summary>
+    /// Copy <paramref name="src"/> into memory, refusing once <paramref name="max"/>
+    /// bytes have been read. Use after <see cref="CreateGuardedHandler"/> so a
+    /// chunked / Content-Length-lying response cannot exhaust memory. Callers
+    /// should still pre-check <c>response.Content.Headers.ContentLength</c> to
+    /// fail fast when the server is honest about an oversized body.
+    /// </summary>
+    /// <param name="what">Noun used in the refusal message, e.g. "image" or "file".</param>
+    public static byte[] ReadBounded(Stream src, long max, string url, string what = "file")
+    {
+        using var ms = new MemoryStream();
+        var buf = new byte[81920];
+        long total = 0;
+        int n;
+        while ((n = src.Read(buf, 0, buf.Length)) > 0)
+        {
+            total += n;
+            if (total > max)
+                throw new ArgumentException(
+                    $"Remote {what} at {url} exceeds {max / (1024 * 1024)} MB limit.");
+            ms.Write(buf, 0, n);
+        }
+        return ms.ToArray();
+    }
+
+    /// <summary>
     /// True only for globally-routable addresses. Blocks loopback, private
     /// (RFC1918), link-local (incl. 169.254.0.0/16 cloud-metadata), unique-local
     /// IPv6 (fc00::/7), multicast and unspecified — the SSRF target ranges.

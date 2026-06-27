@@ -9,6 +9,92 @@ namespace OfficeCli;
 
 static partial class CommandBuilder
 {
+    // Shown as the `batch` command's help/description. The flags alone don't
+    // tell a caller (or an agent) what each JSON array ITEM looks like — the
+    // single most common batch mistake is stuffing a whole CLI line into
+    // "command" (e.g. {"command":"add /slide[1] --type shape --prop ..."}),
+    // which fails with "Unknown command". Document the per-item shape and a
+    // concrete example here so `help batch` actually teaches it.
+    private const string BatchHelpDescription =
+        "Execute multiple commands from a JSON array (one open/save cycle).\n\n"
+        + "Each array item is an OBJECT whose \"command\" is the bare verb "
+        + "(add/set/remove/move/swap/get/query/...); the verb's arguments are SIBLING fields, "
+        + "not a CLI string inside \"command\". Common fields: \"parent\" (add target), "
+        + "\"path\" (set/remove/get target), \"type\" (element type for add), "
+        + "\"props\" (a key->value map of --prop values), \"to\"/\"after\"/\"before\" (move), "
+        + "\"path2\" (swap's second path).\n\n"
+        + "Pass the array via --commands, or as the same JSON on stdin / --input <file>. Example:\n"
+        + "[\n"
+        + "  {\"command\":\"add\",\"parent\":\"/slide[1]\",\"type\":\"shape\",\"props\":{\"text\":\"Hi\",\"x\":\"1cm\",\"y\":\"2cm\"}},\n"
+        + "  {\"command\":\"set\",\"path\":\"/slide[1]/shape[1]\",\"props\":{\"bold\":\"true\"}},\n"
+        + "  {\"command\":\"remove\",\"path\":\"/slide[2]/shape[3]\"}\n"
+        + "]";
+
+    /// <summary>
+    /// Apply a batch of commands against an already-open handler. This is the
+    /// single shared replay loop behind all three batch surfaces — the
+    /// non-resident CLI path, the MCP server, and the resident server — so the
+    /// try/catch/stop-on-error semantics can never drift between them again.
+    ///
+    /// Save deferral and protection gating are intentionally NOT done here:
+    /// they differ by handler lifetime. The dispose-based callers (CLI
+    /// non-resident, MCP) leave <c>DeferSave=true</c> and rely on the
+    /// Dispose-time <c>FinalizeDeferredIds</c> flush — see
+    /// <see cref="RunNonResidentBatch"/>; the long-lived resident saves and
+    /// restores <c>DeferSave</c> and runs <c>ReconcileGlobalIds</c> itself.
+    ///
+    /// <paramref name="skipResidentOnlyCommands"/> is set by the resident, which
+    /// already holds the file open: an <c>open</c>/<c>close</c> inside the batch
+    /// would conflict, so they are reported as skipped instead of executed.
+    /// </summary>
+    internal static List<BatchResult> ApplyBatchItems(
+        OfficeCli.Core.IDocumentHandler handler, List<BatchItem> items,
+        bool stopOnError, bool json, bool skipResidentOnlyCommands = false)
+    {
+        var results = new List<BatchResult>();
+        for (int bi = 0; bi < items.Count; bi++)
+        {
+            var item = items[bi];
+            if (skipResidentOnlyCommands)
+            {
+                var cmd = (item.Command ?? "").ToLowerInvariant();
+                if (cmd is "open" or "close")
+                {
+                    results.Add(new BatchResult { Index = bi, Success = true, Output = $"Skipped '{cmd}' (resident mode)" });
+                    continue;
+                }
+            }
+            try
+            {
+                var output = ExecuteBatchItem(handler, item, json);
+                results.Add(new BatchResult { Index = bi, Success = true, Output = output });
+            }
+            catch (Exception ex)
+            {
+                results.Add(new BatchResult { Index = bi, Success = false, Item = item, Error = ex.Message });
+                if (stopOnError) break;
+            }
+        }
+        return results;
+    }
+
+    /// <summary>
+    /// Run a batch against a freshly-opened, dispose-on-return handler (the
+    /// non-resident CLI path and the MCP server). Sets <c>DeferSave</c> so the
+    /// N commands serialize the part once at Dispose instead of N times — the
+    /// O(N²) re-serialize that dominates large replays. The handler is NOT
+    /// disposed here; the caller's <c>using</c> performs the single
+    /// <c>FinalizeDeferredIds + Save</c> flush. Output formatting and the
+    /// protection gate stay with the caller (their surfaces differ).
+    /// </summary>
+    internal static List<BatchResult> RunNonResidentBatch(
+        OfficeCli.Core.IDocumentHandler handler, List<BatchItem> items,
+        bool stopOnError, bool json)
+    {
+        if (handler is OfficeCli.Handlers.WordHandler wh) wh.DeferSave = true;
+        return ApplyBatchItems(handler, items, stopOnError, json);
+    }
+
     private static Command BuildBatchCommand(Option<bool> jsonOption)
     {
         var batchFileArg = new Argument<FileInfo>("file") { Description = "Office document path" };
@@ -24,7 +110,7 @@ static partial class CommandBuilder
         // strict abort-on-first-failure flow for callers who depend on it.
         var batchForceOpt = new Option<bool>("--force") { Description = "Deprecated alias for the default continue-on-error mode (kept for compatibility)" };
         var batchStopOpt = new Option<bool>("--stop-on-error") { Description = "Abort the batch as soon as any command fails (default: continue and report per-item errors)" };
-        var batchCommand = new Command("batch", "Execute multiple commands from a JSON array (one open/save cycle)");
+        var batchCommand = new Command("batch", BatchHelpDescription);
         batchCommand.Add(batchFileArg);
         batchCommand.Add(batchInputOpt);
         batchCommand.Add(batchCommandsOpt);
@@ -264,7 +350,6 @@ static partial class CommandBuilder
             // documented intent of this path; per-op Save was redundant given
             // the Dispose-time flush.
             using var handler = DocumentHandlerFactory.Open(file.FullName, editable: true);
-            if (handler is OfficeCli.Handlers.WordHandler batchWh) batchWh.DeferSave = true;
             // Protection gate against the just-opened in-memory DOM (one check
             // for the whole batch; no second file open).
             if (!force && file.Extension.Equals(".docx", StringComparison.OrdinalIgnoreCase))
@@ -279,21 +364,10 @@ static partial class CommandBuilder
                     return 1;
                 }
             }
-            var batchResults = new List<BatchResult>();
-            for (int bi = 0; bi < items.Count; bi++)
-            {
-                var item = items[bi];
-                try
-                {
-                    var output = ExecuteBatchItem(handler, item, json);
-                    batchResults.Add(new BatchResult { Index = bi, Success = true, Output = output });
-                }
-                catch (Exception ex)
-                {
-                    batchResults.Add(new BatchResult { Index = bi, Success = false, Item = item, Error = ex.Message });
-                    if (stopOnError) break;
-                }
-            }
+            // DeferSave + replay loop, shared with the MCP batch surface. The
+            // handler's using-Dispose performs the single FinalizeDeferredIds +
+            // Save flush.
+            var batchResults = RunNonResidentBatch(handler, items, stopOnError, json);
             // BUG-R6-02: in --json mode the non-resident path emitted the raw
             // {"results":...,"summary":...} body while the resident path
             // wrapped it in {"success":..., "data":{...}} (resident server

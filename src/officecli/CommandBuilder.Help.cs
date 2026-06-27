@@ -63,16 +63,18 @@ static partial class CommandBuilder
                 "  officecli skills <agent>                Install base SKILL.md to a specific agent",
                 "  officecli skills list                   List all available skills",
                 "",
-                "Skills: pptx, word, excel, morph-ppt, pitch-deck, academic-paper, data-dashboard, financial-model",
+                "Skills: pptx, word, excel, word-form, morph-ppt, morph-ppt-3d, pitch-deck, academic-paper, data-dashboard, financial-model",
                 "Agents: claude, copilot, codex, cursor, windsurf, minimax, opencode, openclaw, nanobot, zeroclaw, hermes, all",
             },
             ["load_skill"] = new[]
             {
                 "Usage:",
-                "  officecli load_skill <name>   Print the named skill's SKILL.md to stdout (no install)",
+                "  officecli load_skill                         List all skills with the triggers that say when to use each",
+                "  officecli load_skill <name>                 Print the skill's SKILL.md + a manifest of its bundled reference files",
+                "  officecli load_skill <name> --path <relpath> Print one bundled reference file (e.g. --path reference/decision-rules.md)",
                 "",
-                "Skills: pptx, word, excel, morph-ppt, morph-ppt-3d, pitch-deck, academic-paper, data-dashboard, financial-model",
-                "To install a skill on disk, run: officecli skills install <name>",
+                "Skills: pptx, word, excel, word-form, morph-ppt, morph-ppt-3d, pitch-deck, academic-paper, data-dashboard, financial-model",
+                "To install a skill (with binary assets) on disk, run: officecli skills install <name>",
             },
             ["install"] = new[]
             {

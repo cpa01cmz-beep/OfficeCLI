@@ -25,7 +25,7 @@ static partial class CommandBuilder
     private static Command BuildSaveCommand(Option<bool> jsonOption)
     {
         var saveFileArg = new Argument<FileInfo>("file") { Description = "Office document path" };
-        var saveCommand = new Command("save", "Flush the resident's in-memory document to disk without ending the session (requires an active resident; start one with `open`)");
+        var saveCommand = new Command("save", "Flush the document to disk (a no-op success if no resident session is active — single commands already save as they run)");
         saveCommand.Add(saveFileArg);
         saveCommand.Add(jsonOption);
 
@@ -39,12 +39,16 @@ static partial class CommandBuilder
             // TryResident auto-start path that other verbs use.
             if (!ResidentClient.TryConnect(filePath, out _))
             {
-                var msg = $"No resident running for {file.Name}. Start one with 'officecli open {file.Name}' before calling save.";
+                // No resident session to flush. In the non-resident model the
+                // document on disk is already current (each mutation eager-saved),
+                // so save is a no-op SUCCESS rather than an error — keeping
+                // "edit, then save/close" a safe habit regardless of backend.
+                var msg = $"{file.Name} is already saved to disk.";
                 if (json)
-                    Console.WriteLine(OutputFormatter.WrapEnvelopeError(msg));
+                    Console.WriteLine(OutputFormatter.WrapEnvelopeText(msg));
                 else
-                    Console.Error.WriteLine($"Error: {msg}");
-                return 1;
+                    Console.WriteLine(msg);
+                return 0;
             }
 
             var request = new ResidentRequest { Command = "save", Json = json };

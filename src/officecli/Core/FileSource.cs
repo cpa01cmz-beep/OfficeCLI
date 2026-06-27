@@ -85,7 +85,15 @@ internal static class FileSource
         var response = client.GetAsync(url).GetAwaiter().GetResult();
         response.EnsureSuccessStatusCode();
 
-        var bytes = response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult();
+        // Bound memory use: fail fast on an honest oversized Content-Length, then
+        // read through the shared SsrfGuard.ReadBounded so a chunked / lying
+        // response can't exhaust memory either. Same cap as the image path.
+        var declared = response.Content.Headers.ContentLength;
+        if (declared is > SsrfGuard.MaxRemoteBytes)
+            throw new ArgumentException(
+                $"Remote file exceeds {SsrfGuard.MaxRemoteBytes / (1024 * 1024)} MB limit.");
+        var bytes = SsrfGuard.ReadBounded(
+            response.Content.ReadAsStream(), SsrfGuard.MaxRemoteBytes, url, "file");
 
         // Try extension from URL path
         var uri = new Uri(url);
