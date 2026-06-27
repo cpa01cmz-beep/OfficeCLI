@@ -715,6 +715,34 @@ public partial class PowerPointHandler
             // suggestion. A dedicated a11y audit mode is the right home for
             // this kind of structural lint if it returns later.
 
+            const long offTol = 180000; // 0.5cm in EMU — off-slide grazing tolerance
+            // Pre-pass: collect off-slide TEXT boxes so a co-located graphic
+            // container (a card background carrying no text of its own) can be
+            // flagged too. Without this, a fix that only moves the flagged text
+            // leaves the card behind — `view issues` passes but the card is
+            // detached and still clipped (observed: a fix that satisfied the
+            // checker yet broke the layout). Each entry: bounds + text snippet.
+            var offSlideTextBoxes = new List<(long x, long y, long w, long h, string text)>();
+            // allBoxes[i] aligns with shapes[i] (paint order = document order). Used
+            // by the occlusion check: a text box covered by a LATER opaque box reads
+            // as hidden. w==0 marks a shape with no usable geometry (never overlaps).
+            var allBoxes = new List<(long x, long y, long w, long h, bool opaque)>();
+            foreach (var s in shapes)
+            {
+                var sx = s.ShapeProperties?.Transform2D;
+                bool hasGeom = sx?.Offset?.X != null && sx.Offset.Y != null && sx.Extents?.Cx != null && sx.Extents.Cy != null;
+                long x = 0, y = 0, w = 0, h = 0;
+                if (hasGeom) { x = sx!.Offset!.X!.Value; y = sx.Offset.Y!.Value; w = sx.Extents!.Cx!.Value; h = sx.Extents.Cy!.Value; }
+                allBoxes.Add((x, y, w, h, hasGeom && IsOpaqueOccluder(s)));
+
+                var st = GetShapeText(s);
+                if (hasGeom && !string.IsNullOrWhiteSpace(st))
+                {
+                    long worst = Math.Max(Math.Max(-x, (x + w) - slideW), Math.Max(-y, (y + h) - slideH));
+                    if (worst > offTol) offSlideTextBoxes.Add((x, y, w, h, st));
+                }
+            }
+
             int shapeIdx = 0;
             foreach (var shape in shapes)
             {
@@ -735,35 +763,109 @@ public partial class PowerPointHandler
                     });
                 }
 
-                // Off-slide: a text-bearing shape whose declared box extends
-                // substantially past a slide edge. Box geometry only (x/y/w/h) —
-                // a shape positioned off the canvas is a layout defect regardless
-                // of how its text wraps. Text-scoped so full-bleed pictures /
-                // decorative fills (legit bleed) don't trip it. 0.5cm tolerance
-                // ignores boxes that only graze the edge.
+                // Off-slide: a shape whose declared box extends substantially
+                // past a slide edge. Box geometry only (x/y/w/h) — a shape placed
+                // off the canvas is a layout defect regardless of how text wraps.
+                // Two emit cases:
+                //   1. the shape carries text → its own content is clipped;
+                //   2. the shape carries NO text but hosts an off-slide text box
+                //      (a card background) → flag it so a fix moves the whole card.
+                // Full-bleed pictures aren't in this Shape loop, and a spanning
+                // decorative fill (extent ≈ slide) is skipped as legit bleed.
                 var offText = GetShapeText(shape);
                 var offXfrm = shape.ShapeProperties?.Transform2D;
-                if (!string.IsNullOrWhiteSpace(offText)
-                    && offXfrm?.Offset?.X != null && offXfrm.Offset.Y != null
+                if (offXfrm?.Offset?.X != null && offXfrm.Offset.Y != null
                     && offXfrm.Extents?.Cx != null && offXfrm.Extents.Cy != null)
                 {
                     long ox = offXfrm.Offset.X!.Value, oy = offXfrm.Offset.Y!.Value;
                     long ow = offXfrm.Extents.Cx!.Value, oh = offXfrm.Extents.Cy!.Value;
-                    const long offTol = 180000; // 0.5cm in EMU
                     long offL = -ox, offT = -oy, offR = (ox + ow) - slideW, offB = (oy + oh) - slideH;
                     long offWorst = Math.Max(Math.Max(offL, offR), Math.Max(offT, offB));
                     if (offWorst > offTol)
                     {
                         string offEdge = offWorst == offR ? "right" : offWorst == offB ? "bottom"
                                        : offWorst == offL ? "left" : "top";
-                        issues.Add(new DocumentIssue
+                        if (!string.IsNullOrWhiteSpace(offText))
                         {
-                            Id = $"O{++issueNum}",
-                            Type = IssueType.Format,
-                            Severity = IssueSeverity.Warning,
-                            Path = shapePath,
-                            Message = $"Text shape extends {offWorst / 360000.0:F1}cm past slide {offEdge} edge"
-                        });
+                            // Name the clipped text so `view issues` is self-contained —
+                            // the reader sees WHICH content runs off-canvas without a
+                            // follow-up `get`. Whitespace-collapse and cap the snippet.
+                            var offSnippet = System.Text.RegularExpressions.Regex.Replace(offText.Trim(), @"\s+", " ");
+                            if (offSnippet.Length > 40) offSnippet = offSnippet[..40] + "…";
+                            issues.Add(new DocumentIssue
+                            {
+                                Id = $"O{++issueNum}",
+                                Type = IssueType.Format,
+                                Severity = IssueSeverity.Warning,
+                                Path = shapePath,
+                                Message = $"Text shape \"{offSnippet}\" extends {offWorst / 360000.0:F1}cm past slide {offEdge} edge"
+                            });
+                        }
+                        else
+                        {
+                            // Container case: a textless shape that runs off-slide
+                            // AND hosts an off-slide text box. Skip spanning fills
+                            // (full-width/height backdrops = legit bleed); require a
+                            // hosted off-slide text box (rectangle intersection) so a
+                            // bare decorative bleed never trips it.
+                            bool spans = ow >= slideW - offTol || oh >= slideH - offTol;
+                            var hosted = spans
+                                ? default
+                                : offSlideTextBoxes.FirstOrDefault(b =>
+                                    b.x < ox + ow && b.x + b.w > ox && b.y < oy + oh && b.y + b.h > oy);
+                            if (hosted.text != null)
+                            {
+                                var hostSnip = System.Text.RegularExpressions.Regex.Replace(hosted.text.Trim(), @"\s+", " ");
+                                if (hostSnip.Length > 40) hostSnip = hostSnip[..40] + "…";
+                                issues.Add(new DocumentIssue
+                                {
+                                    Id = $"O{++issueNum}",
+                                    Type = IssueType.Format,
+                                    Severity = IssueSeverity.Warning,
+                                    Path = shapePath,
+                                    Message = $"Container shape extends {offWorst / 360000.0:F1}cm past slide {offEdge} edge (clips \"{hostSnip}\")"
+                                });
+                            }
+                        }
+                    }
+                }
+
+                // Occlusion: a text shape whose box is substantially covered by a
+                // LATER (higher z-order) opaque shape — the text is painted under an
+                // opaque fill and reads as hidden. The shape's OWN background is
+                // earlier in paint order, so it is never the culprit. Requires an
+                // explicit opaque fill on the occluder and >20% area overlap, so a
+                // text box correctly stacked over its own card, a translucent scrim,
+                // or an incidental graze never trips it.
+                if (!string.IsNullOrWhiteSpace(offText) && shapeIdx - 1 < allBoxes.Count)
+                {
+                    var ab = allBoxes[shapeIdx - 1];
+                    long aArea = ab.w * ab.h;
+                    if (aArea > 0)
+                    {
+                        for (int j = shapeIdx; j < allBoxes.Count; j++)
+                        {
+                            var bb = allBoxes[j];
+                            if (!bb.opaque) continue;
+                            long ixw = Math.Min(ab.x + ab.w, bb.x + bb.w) - Math.Max(ab.x, bb.x);
+                            long ixh = Math.Min(ab.y + ab.h, bb.y + bb.h) - Math.Max(ab.y, bb.y);
+                            if (ixw <= 0 || ixh <= 0) continue;
+                            if ((ixw * ixh) * 5 >= aArea) // ≥20% of the text box covered
+                            {
+                                var occPath = $"/slide[{slideNum}]/{BuildElementPathSegment("shape", shapes[j], j + 1)}";
+                                var occSnip = System.Text.RegularExpressions.Regex.Replace(offText.Trim(), @"\s+", " ");
+                                if (occSnip.Length > 40) occSnip = occSnip[..40] + "…";
+                                issues.Add(new DocumentIssue
+                                {
+                                    Id = $"O{++issueNum}",
+                                    Type = IssueType.Format,
+                                    Severity = IssueSeverity.Warning,
+                                    Path = shapePath,
+                                    Message = $"Text \"{occSnip}\" is hidden behind overlapping shape {occPath}"
+                                });
+                                break;
+                            }
+                        }
                     }
                 }
 
@@ -915,6 +1017,26 @@ public partial class PowerPointHandler
     // IsDynamicSlideFieldType has been collapsed into Helpers.cs's
     // IsDynamicSlideFieldTypeStatic — single source of truth.
     private static bool IsDynamicSlideFieldType(string fldType) => IsDynamicSlideFieldTypeStatic(fldType);
+
+    /// <summary>
+    /// Would this shape's fill hide whatever sits beneath it? True only for an
+    /// EXPLICIT opaque fill — opaque solid (via <see cref="TryOpaqueRgbLuminance"/>),
+    /// or a picture / pattern / gradient fill. Explicit no-fill, a translucent
+    /// solid, and an absent (inherited) fill all return false so the occlusion
+    /// check keeps its false-positive rate near zero.
+    /// </summary>
+    private static bool IsOpaqueOccluder(Shape s)
+    {
+        var sp = s.ShapeProperties;
+        if (sp == null) return false;
+        if (sp.GetFirstChild<Drawing.NoFill>() != null) return false;
+        var solid = sp.GetFirstChild<Drawing.SolidFill>();
+        if (solid != null) return TryOpaqueRgbLuminance(ReadColorFromFill(solid), out _, out _);
+        if (sp.GetFirstChild<Drawing.BlipFill>() != null) return true;
+        if (sp.GetFirstChild<Drawing.PatternFill>() != null) return true;
+        if (sp.GetFirstChild<Drawing.GradientFill>() != null) return true;
+        return false; // inherited / no explicit fill → conservatively not an occluder
+    }
 
     /// <summary>
     /// Parse a <see cref="ReadColorFromFill"/> result into a perceived luminance
