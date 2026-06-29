@@ -271,7 +271,7 @@ internal static class AttributeFilter
             {
                 if (cond.Op == FilterOp.NotEqual) continue; // an absent key satisfies !=
                 var keys = GetAllFormatKeys(candidates).OrderBy(k => k, StringComparer.OrdinalIgnoreCase).ToList();
-                var near = NearestMatch(cond.Key, keys);
+                var near = NearestMatch(cond.Key, keys, matchKeySegment: true);
                 var msg = $"Warning: unknown key '{cond.Key}'. Available: {string.Join(", ", keys)}";
                 if (near != null) msg += $" (did you mean '{near}'?)";
                 warnings.Add(msg);
@@ -320,8 +320,13 @@ internal static class AttributeFilter
     /// within a length-scaled threshold (max(2, len/3), mirroring CommandBuilder's
     /// property suggester). Returns null when nothing is close or the best is a
     /// tie, so a "did you mean" is only offered when it is unambiguous.
+    /// When <paramref name="matchKeySegment"/> is set, a dotted candidate also
+    /// scores against its last segment so a typo of the bare leaf (blod → bold)
+    /// still resolves to the canonical dotted key (font.bold) — keeping the
+    /// suggestion cross-format consistent where one handler exposes `bold` and
+    /// another exposes `font.bold`. Off for values, whose dots are literal.
     /// </summary>
-    private static string? NearestMatch(string input, IEnumerable<string> candidates)
+    private static string? NearestMatch(string input, IEnumerable<string> candidates, bool matchKeySegment = false)
     {
         if (string.IsNullOrEmpty(input)) return null;
         var lower = input.ToLowerInvariant();
@@ -330,8 +335,16 @@ internal static class AttributeFilter
         int bestDist = int.MaxValue, tie = 0;
         foreach (var c in candidates)
         {
-            var d = LevenshteinDistance(lower, c.ToLowerInvariant());
-            if (d == 0 || d > threshold) continue;
+            var lc = c.ToLowerInvariant();
+            if (lc == lower) continue; // identical — nothing to suggest
+            var d = LevenshteinDistance(lower, lc);
+            if (matchKeySegment)
+            {
+                int dot = lc.LastIndexOf('.');
+                if (dot >= 0 && dot < lc.Length - 1)
+                    d = Math.Min(d, LevenshteinDistance(lower, lc[(dot + 1)..]));
+            }
+            if (d > threshold) continue;
             if (d < bestDist) { bestDist = d; best = c; tie = 1; }
             else if (d == bestDist) tie++;
         }
