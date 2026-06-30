@@ -1653,6 +1653,67 @@ public partial class WordHandler
             : $"No children at {parentPath}";
     }
 
+    /// <summary>
+    /// R4-bt-1: compute the canonical, RESOLVABLE path of a math element
+    /// (m:oMath inline, or m:oMathPara display) that lives in a body-level
+    /// paragraph — used after an equation mode switch MOVES the element, so the
+    /// Set response can report the new path instead of the stale pre-move one.
+    /// Mirrors the body enumeration in ResolvePath exactly: a pure
+    /// oMathPara-wrapper paragraph is addressed as /body/oMathPara[N]; any other
+    /// paragraph is /body/p[N], and the math element hangs off it as
+    /// /oMath[K] or /oMathPara[K]. Returns null if the element is not under a
+    /// direct body paragraph (caller then keeps the original path).
+    /// </summary>
+    internal string? ComputeMathElementPath(OpenXmlElement mathEl)
+    {
+        var body = _doc.MainDocumentPart?.Document?.Body;
+        if (body == null) return null;
+        var hostPara = mathEl.Ancestors<Paragraph>().FirstOrDefault();
+        if (hostPara == null || !ReferenceEquals(hostPara.Parent, body)) return null;
+
+        bool isDisplay = mathEl is M.Paragraph || mathEl.LocalName == "oMathPara";
+
+        // Pure oMathPara-wrapper paragraphs are addressed at body level as
+        // /body/oMathPara[N]; the wrapped m:oMathPara IS the target itself.
+        if (IsOMathParaWrapperParagraph(hostPara))
+        {
+            int n = 0;
+            foreach (var el in body.ChildElements)
+            {
+                if (el.LocalName == "oMathPara" || el is M.Paragraph) n++;
+                else if (el is Paragraph wp && IsOMathParaWrapperParagraph(wp))
+                {
+                    n++;
+                    if (ReferenceEquals(wp, hostPara)) return $"/body/oMathPara[{n}]";
+                }
+            }
+            return null;
+        }
+
+        // Otherwise the host is a regular /body/p[N] (skipping pure-wrapper
+        // paragraphs, matching GetBodyParagraphIndex), and the math element is a
+        // positional child of it.
+        int pIdx = 0;
+        foreach (var el in body.Elements<Paragraph>())
+        {
+            if (IsOMathParaWrapperParagraph(el)) continue; // counted under oMathPara[N]
+            pIdx++;
+            if (ReferenceEquals(el, hostPara))
+            {
+                if (isDisplay)
+                {
+                    int k = hostPara.Elements<M.Paragraph>().ToList()
+                        .FindIndex(e => ReferenceEquals(e, mathEl)) + 1;
+                    return k > 0 ? $"/body/p[{pIdx}]/oMathPara[{k}]" : null;
+                }
+                int kk = hostPara.Elements<M.OfficeMath>().ToList()
+                    .FindIndex(e => ReferenceEquals(e, mathEl)) + 1;
+                return kk > 0 ? $"/body/p[{pIdx}]/oMath[{kk}]" : null;
+            }
+        }
+        return null;
+    }
+
     private DocumentNode BookmarkStartToNode(BookmarkStart bkStart, DocumentNode node)
     {
         node.Type = "bookmark";
@@ -5707,10 +5768,19 @@ public partial class WordHandler
             // /oMathPara[M] addressing.
             if (!IsOMathParaWrapperParagraph(para))
             {
+                // R4-bt-2: a display equation in a mixed-content paragraph is an
+                // m:oMathPara (M.Paragraph) child. Emit the RESOLVABLE
+                // oMathPara[N] segment — the resolver matches it by LocalName
+                // ("oMathPara"), so the old equation[N] segment listed here did
+                // not resolve via get/set/remove. Index among the paragraph's
+                // own oMathPara children (a separate counter from the inline
+                // oMath one) so the positional path matches what the resolver
+                // enumerates.
+                int mathParaIdx = 0;
                 foreach (var blockEq in para.Elements<M.Paragraph>())
                 {
-                    node.Children.Add(ElementToNode(blockEq, $"{path}/equation[{inlineEqIdx + 1}]", depth - 1));
-                    inlineEqIdx++;
+                    mathParaIdx++;
+                    node.Children.Add(ElementToNode(blockEq, $"{path}/oMathPara[{mathParaIdx}]", depth - 1));
                 }
             }
             // BUG-DUMP6-01: surface <w:fldSimple> children as typed `field`

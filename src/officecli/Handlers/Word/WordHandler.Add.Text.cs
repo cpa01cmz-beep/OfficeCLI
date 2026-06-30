@@ -1843,7 +1843,11 @@ public partial class WordHandler
             // than alongside it.
             inlineHl.AppendChild(BuildSourceOMath());
             var mathCount = inlineHl.Elements<M.OfficeMath>().Count();
-            resultPath = $"{parentPath}/equation[{mathCount}]";
+            // BUG-R4-1: emit the RESOLVABLE oMath[N] segment (the resolver
+            // matches the m:oMath element by LocalName). The non-hyperlink
+            // inline branch above was fixed in R3-bt-1; this hyperlink-parent
+            // branch still returned the unresolvable equation[N].
+            resultPath = $"{parentPath}/oMath[{mathCount}]";
             newElement = inlineHl;
         }
         else if (mode == "inline" && IsMathBlockContainer(parent))

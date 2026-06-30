@@ -1893,8 +1893,11 @@ public class ResidentServer : IDisposable
                 _ => null
             };
 
+        // R4-bt-1: report the post-move resolvable path for equation mode
+        // switches (oMathPara ⇄ oMath), consistent with the non-resident path.
+        var reportPath = (_handler as WordHandler)?.LastSetNewPath ?? path;
         var message = applied.Count > 0
-            ? $"Updated {path}: {string.Join(", ", applied.Select(kv => $"{kv.Key}={kv.Value}"))}"
+            ? $"Updated {reportPath}: {string.Join(", ", applied.Select(kv => $"{kv.Key}={kv.Value}"))}"
               + (findMatchCount.HasValue ? $" ({findMatchCount.Value} matched)" : "")
               + (selectorCount > 1 ? $" ({selectorCount} elements matched)" : "")
             : (unsupported.Count > 0 ? $"No properties applied to {path}" : $"Updated {path}");

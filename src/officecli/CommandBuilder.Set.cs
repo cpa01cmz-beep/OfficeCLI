@@ -258,8 +258,12 @@ static partial class CommandBuilder
                 _ => null
             };
 
+            // R4-bt-1: an equation mode switch MOVES the element (oMathPara ⇄
+            // oMath), changing its canonical path. Report the NEW resolvable
+            // path so the "Updated …" line points at a path that still resolves.
+            var reportPath = (handler as OfficeCli.Handlers.WordHandler)?.LastSetNewPath ?? path;
             var message = applied.Count > 0
-                ? $"Updated {path}: {string.Join(", ", applied.Select(kv => $"{kv.Key}={kv.Value}"))}"
+                ? $"Updated {reportPath}: {string.Join(", ", applied.Select(kv => $"{kv.Key}={kv.Value}"))}"
                   + (findMatchCount.HasValue ? $" ({findMatchCount.Value} matched)" : "")
                   + (selectorCount > 1 ? $" ({selectorCount} elements matched)" : "")
                 : $"Error: No properties applied to {path}";

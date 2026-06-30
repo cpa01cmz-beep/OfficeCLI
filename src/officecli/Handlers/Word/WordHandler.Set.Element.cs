@@ -935,6 +935,10 @@ public partial class WordHandler
                             var clone = (M.OfficeMath)inner.CloneNode(true);
                             hostPara.InsertBefore(clone, mPara);
                             mPara.Remove();
+                            // R4-bt-1: the equation MOVED (oMathPara → bare
+                            // oMath). Report the new resolvable path so the CLI
+                            // "Updated …" line points at a path that resolves.
+                            LastSetNewPath = ComputeMathElementPath(clone);
                         }
                     }
                     else if (modeNorm == "display")
@@ -1004,6 +1008,10 @@ public partial class WordHandler
                         oMath.InsertBeforeSelf(mPara);
                         oMath.Remove();
                         mPara.AppendChild(oMath);
+                        // R4-bt-1: the equation MOVED (bare oMath → oMathPara).
+                        // Report the new resolvable path (the wrapping
+                        // m:oMathPara is the new target).
+                        LastSetNewPath = ComputeMathElementPath(mPara);
                     }
                     else if (modeNorm == "inline")
                     {
