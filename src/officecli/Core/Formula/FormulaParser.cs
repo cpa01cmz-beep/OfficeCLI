@@ -341,6 +341,12 @@ internal static class FormulaParser
             {
                 var num = ArgToLatex(element.ChildElements.FirstOrDefault(e => e.LocalName == "num"));
                 var den = ArgToLatex(element.ChildElements.FirstOrDefault(e => e.LocalName == "den"));
+                // A bar-less fraction (m:type val="noBar") is a binomial coefficient,
+                // not a \frac (which always draws a bar). The forward parser stores
+                // \binom as m:d wrapping such a fraction; emit \binom here so the
+                // round-trip stays stable even if the m:f is reached directly.
+                if (IsNoBarFraction(element))
+                    return $"\\binom{{{num}}}{{{den}}}";
                 return $"\\frac{{{num}}}{{{den}}}";
             }
 
@@ -384,15 +390,42 @@ internal static class FormulaParser
                 var dPr = element.ChildElements.FirstOrDefault(e => e.LocalName == "dPr");
                 var begChr = dPr?.ChildElements.FirstOrDefault(e => e.LocalName == "begChr");
                 var endChr = dPr?.ChildElements.FirstOrDefault(e => e.LocalName == "endChr");
-                var begin = begChr?.GetAttribute("val", "http://schemas.openxmlformats.org/officeDocument/2006/math").Value ?? "(";
-                var end = endChr?.GetAttribute("val", "http://schemas.openxmlformats.org/officeDocument/2006/math").Value ?? ")";
-                // Check if delimiter wraps a matrix — emit \begin{pmatrix} etc.
+                // Note: begChr/endChr default to "(" / ")" only when the element
+                // is absent. An explicitly empty val (e.g. cases' endChr="") must
+                // stay empty, so distinguish "missing element" from "empty val".
+                var begin = begChr != null
+                    ? (begChr.GetAttribute("val", "http://schemas.openxmlformats.org/officeDocument/2006/math").Value ?? "")
+                    : "(";
+                var end = endChr != null
+                    ? (endChr.GetAttribute("val", "http://schemas.openxmlformats.org/officeDocument/2006/math").Value ?? "")
+                    : ")";
                 var bases = element.ChildElements.Where(e => e.LocalName == "e").ToList();
                 if (bases.Count == 1)
                 {
+                    // Binomial: parens wrapping a single bar-less fraction. The
+                    // forward parser stores \binom{a}{b} exactly this way, so
+                    // reconstruct \binom (not literal "(\frac{a}{b})" — \frac has
+                    // a bar a binomial must not have).
+                    var innerFrac = bases[0].ChildElements.FirstOrDefault(e => e.LocalName == "f");
+                    if (innerFrac != null && begin == "(" && end == ")" && IsNoBarFraction(innerFrac))
+                    {
+                        var bnum = ArgToLatex(innerFrac.ChildElements.FirstOrDefault(e => e.LocalName == "num"));
+                        var bden = ArgToLatex(innerFrac.ChildElements.FirstOrDefault(e => e.LocalName == "den"));
+                        return $"\\binom{{{bnum}}}{{{bden}}}";
+                    }
+
+                    // Check if delimiter wraps a matrix — emit \begin{pmatrix} etc.
                     var inner = bases[0].ChildElements.FirstOrDefault(e => e.LocalName == "m");
                     if (inner != null)
                     {
+                        // Cases: "{" with an empty/absent closing delimiter. The
+                        // forward parser stores \begin{cases} this way, so emit the
+                        // dedicated environment for a stable round-trip.
+                        if (begin == "{" && string.IsNullOrEmpty(end))
+                        {
+                            var casesContent = ToLatexByName(inner);
+                            return $"\\begin{{cases}}{casesContent}\\end{{cases}}";
+                        }
                         var envName = (begin, end) switch
                         {
                             ("(", ")") => "pmatrix",
@@ -404,24 +437,41 @@ internal static class FormulaParser
                         var matrixContent = ToLatexByName(inner);
                         if (envName != null)
                             return $"\\begin{{{envName}}}{matrixContent}\\end{{{envName}}}";
-                        return $"\\left{begin}\\begin{{matrix}}{matrixContent}\\end{{matrix}}\\right{end}";
+                        return $"\\left{LatexDelim(begin)}\\begin{{matrix}}{matrixContent}\\end{{matrix}}\\right{LatexDelim(end)}";
                     }
                 }
                 var content = string.Concat(bases.Select(ArgToLatex));
+                // Generic delimiter: braces must be escaped (\{ \}) and an empty
+                // side needs the "null" delimiter (\left. / \right.) to stay valid
+                // LaTeX. Only wrap with \left..\right when at least one side is a
+                // brace/empty (otherwise plain parens/brackets read fine literally).
+                if (begin == "{" || end == "}" || string.IsNullOrEmpty(begin) || string.IsNullOrEmpty(end))
+                    return $"\\left{LatexDelim(begin)}{content}\\right{LatexDelim(end)}";
                 return $"{begin}{content}{end}";
             }
 
             case "limUpp": // upper limit (overset)
             {
-                var baseText = ArgToLatex(element.ChildElements.FirstOrDefault(e => e.LocalName == "e"));
+                var baseElem = element.ChildElements.FirstOrDefault(e => e.LocalName == "e");
+                var baseText = ArgToLatex(baseElem);
                 var limText = ArgToLatex(element.ChildElements.FirstOrDefault(e => e.LocalName == "lim"));
+                // A limit-style operator name (\lim, \max, \sup, ...) round-trips as
+                // \op^{...}, not \overset{...}{\op}. The base may itself be a limLow
+                // (operator with both _ and ^), so peel that too.
+                var opCmd = LimitOperatorCommand(baseElem);
+                if (opCmd != null)
+                    return $"{opCmd}^{{{limText}}}";
                 return $"\\overset{{{limText}}}{{{baseText}}}";
             }
 
             case "limLow": // lower limit (underset)
             {
-                var baseText = ArgToLatex(element.ChildElements.FirstOrDefault(e => e.LocalName == "e"));
+                var baseElem = element.ChildElements.FirstOrDefault(e => e.LocalName == "e");
+                var baseText = ArgToLatex(baseElem);
                 var limText = ArgToLatex(element.ChildElements.FirstOrDefault(e => e.LocalName == "lim"));
+                var opCmd = LimitOperatorCommand(baseElem);
+                if (opCmd != null)
+                    return $"{opCmd}_{{{limText}}}";
                 return $"\\underset{{{limText}}}{{{baseText}}}";
             }
 
@@ -1380,7 +1430,8 @@ internal static class FormulaParser
             }
             case "lim" or "sin" or "cos" or "tan" or "log" or "ln" or "exp" or "min" or "max"
                 or "sup" or "inf" or "det" or "gcd" or "dim" or "ker" or "hom" or "deg"
-                or "arg" or "sec" or "csc" or "cot" or "sinh" or "cosh" or "tanh":
+                or "arg" or "sec" or "csc" or "cot" or "sinh" or "cosh" or "tanh"
+                or "limsup" or "liminf" or "Pr" or "argmax" or "argmin":
             {
                 // Function names: render upright (non-italic) using M.NormalText
                 var funcRun = new M.Run(
@@ -1388,19 +1439,36 @@ internal static class FormulaParser
                     new M.Text(cmd) { Space = SpaceProcessingModeValues.Preserve }
                 );
 
-                // For \lim, check for sub/sup to create nary-like limLow structure
-                if (cmd == "lim" && pos < tokens.Count && tokens[pos].Type == TokenType.Sub)
+                // Limit-style operators (\lim, \max, \sup, ...) place their _/^
+                // scripts UNDER/OVER the operator name (m:limLow/m:limUpp), not as
+                // a trailing sub/superscript. \limits forces this even for ops that
+                // would not default to it; \nolimits forces plain sub/sup. Other
+                // function names (\sin, \log, ...) keep the default sub/sup that the
+                // caller's TryAttachScript applies.
+                if (_limitStyleOperators.Contains(cmd))
+                    return ParseOperatorWithLimits(funcRun, tokens, ref pos, forceLimits: true);
+
+                // A \limits / \nolimits keyword may follow any operator name and
+                // override the placement. \nolimits leaves scripts to the caller.
+                if (pos < tokens.Count && tokens[pos].Type == TokenType.Command
+                    && tokens[pos].Value == "limits")
                 {
                     pos++;
-                    var subArg = ParseSingleArg(tokens, ref pos);
-                    return new M.LimitLower(
-                        new M.LimitLowerProperties(),
-                        new M.Base(funcRun),
-                        new M.Limit(ExtractChildren(subArg))
-                    );
+                    return ParseOperatorWithLimits(funcRun, tokens, ref pos, forceLimits: true);
+                }
+                if (pos < tokens.Count && tokens[pos].Type == TokenType.Command
+                    && tokens[pos].Value == "nolimits")
+                {
+                    pos++; // consume; scripts attach as sub/sup via TryAttachScript
                 }
                 return funcRun;
             }
+            case "limits":
+            case "nolimits":
+                // Stray \limits / \nolimits with no recognised preceding operator
+                // (or already consumed by the operator arm). Swallow it so it does
+                // not leak as an unknown "\limits" token.
+                return MakeMathRun("");
             case "binom":
             {
                 var top = ParseBracedArg(tokens, ref pos);
@@ -1457,7 +1525,8 @@ internal static class FormulaParser
                     new M.Text(text) { Space = SpaceProcessingModeValues.Preserve }
                 );
             }
-            case "sum" or "int" or "iint" or "iiint" or "prod" or "coprod" or "bigcup" or "bigcap":
+            case "sum" or "int" or "iint" or "iiint" or "oint" or "oiint" or "oiiint"
+                or "prod" or "coprod" or "bigcup" or "bigcap":
             {
                 var naryChar = cmd switch
                 {
@@ -1465,6 +1534,9 @@ internal static class FormulaParser
                     "int" => "∫",
                     "iint" => "∬",
                     "iiint" => "∭",
+                    "oint" => "∮",
+                    "oiint" => "∯",
+                    "oiiint" => "∰",
                     "prod" => "∏",
                     "coprod" => "∐",
                     "bigcup" => "⋃",
@@ -1699,6 +1771,43 @@ internal static class FormulaParser
         }
     }
 
+    // Generalises the \lim sub-limit handling to any limit-style operator.
+    // Consumes a following \limits/\nolimits keyword (placement override) and the
+    // _/^ scripts, wrapping them as m:limLow/m:limUpp (under/over the name) or
+    // leaving them for the caller's sub/sup handling when \nolimits wins.
+    private static OpenXmlElement ParseOperatorWithLimits(
+        OpenXmlElement opRun, List<Token> tokens, ref int pos, bool forceLimits)
+    {
+        var useLimits = forceLimits;
+        if (pos < tokens.Count && tokens[pos].Type == TokenType.Command)
+        {
+            if (tokens[pos].Value == "limits") { pos++; useLimits = true; }
+            else if (tokens[pos].Value == "nolimits") { pos++; useLimits = false; }
+        }
+
+        if (!useLimits)
+            return opRun; // scripts attach as sub/sup via the caller's TryAttachScript
+
+        OpenXmlElement? subArg = null, supArg = null;
+        for (var i = 0; i < 2 && pos < tokens.Count; i++)
+        {
+            if (tokens[pos].Type == TokenType.Sub && subArg == null)
+            { pos++; subArg = ParseSingleArg(tokens, ref pos); }
+            else if (tokens[pos].Type == TokenType.Sup && supArg == null)
+            { pos++; supArg = ParseSingleArg(tokens, ref pos); }
+            else break;
+        }
+
+        OpenXmlElement result = opRun;
+        if (subArg != null)
+            result = new M.LimitLower(new M.LimitLowerProperties(),
+                new M.Base(result), new M.Limit(ExtractChildren(subArg)));
+        if (supArg != null)
+            result = new M.LimitUpper(new M.LimitUpperProperties(),
+                new M.Base(result), new M.Limit(ExtractChildren(supArg)));
+        return result;
+    }
+
     private static OpenXmlElement ParseBracedArg(List<Token> tokens, ref int pos)
     {
         if (pos < tokens.Count && tokens[pos].Type == TokenType.LBrace)
@@ -1865,6 +1974,33 @@ internal static class FormulaParser
     // ==================== Helpers ====================
 
     /// <summary>
+    /// True when an m:f fraction carries m:fPr/m:type val="noBar" — i.e. it is a
+    /// bar-less fraction that LaTeX represents as \binom rather than \frac.
+    /// </summary>
+    private static bool IsNoBarFraction(OpenXmlElement fraction)
+    {
+        var fPr = fraction.ChildElements.FirstOrDefault(e => e.LocalName == "fPr");
+        var type = fPr?.ChildElements.FirstOrDefault(e => e.LocalName == "type");
+        var val = type?.GetAttribute("val", "http://schemas.openxmlformats.org/officeDocument/2006/math").Value;
+        return val == "noBar";
+    }
+
+    /// <summary>
+    /// Map a delimiter character to a LaTeX-safe \left/\right operand. Braces
+    /// must be escaped (\{ \}); an empty side becomes the null delimiter (.).
+    /// </summary>
+    private static string LatexDelim(string chr)
+    {
+        if (string.IsNullOrEmpty(chr)) return ".";
+        return chr switch
+        {
+            "{" => "\\{",
+            "}" => "\\}",
+            _ => chr
+        };
+    }
+
+    /// <summary>
     /// BUG-R8A(BUG4): render an m:sty (math weight/posture) value as the
     /// matching LaTeX style command wrapping <paramref name="text"/>.
     /// m:sty: "b" → \mathbf, "i" → \mathit, "bi" → \boldsymbol, "p" → \mathrm.
@@ -2026,6 +2162,39 @@ internal static class FormulaParser
         return element.InnerText;
     }
 
+    // If `baseElem` is (or wraps) a limit-style operator name run, return the
+    // LaTeX command (e.g. "\max") so limLow/limUpp round-trips as \op_{..}/\op^{..}
+    // instead of \underset/\overset. Handles the nested both-limits case where the
+    // base of a limUpp is itself a limLow carrying the operator + its subscript
+    // (\op_a^b → limUpp(limLow(op, a), b)).
+    private static string? LimitOperatorCommand(OpenXmlElement? baseElem)
+    {
+        if (baseElem == null) return null;
+        // limUpp's base wraps its limLow in an <m:e>; unwrap a single-child e.
+        if (baseElem.LocalName == "e" && baseElem.ChildElements.Count == 1
+            && baseElem.ChildElements[0].LocalName == "limLow")
+            baseElem = baseElem.ChildElements[0];
+        if (baseElem.LocalName == "limLow")
+        {
+            var inner = baseElem.ChildElements.FirstOrDefault(e => e.LocalName == "e");
+            var innerCmd = LimitOperatorCommand(inner);
+            if (innerCmd == null) return null;
+            var limText = ArgToLatex(baseElem.ChildElements.FirstOrDefault(e => e.LocalName == "lim"));
+            return $"{innerCmd}_{{{limText}}}";
+        }
+        // Bare upright run: <m:r><m:rPr><m:nor/></m:rPr><m:t>max</m:t></m:r>
+        var run = baseElem.LocalName == "r"
+            ? baseElem
+            : (baseElem.ChildElements.Count == 1 && baseElem.ChildElements[0].LocalName == "r"
+                ? baseElem.ChildElements[0] : null);
+        if (run == null) return null;
+        var rPr = run.ChildElements.FirstOrDefault(e => e.LocalName == "rPr");
+        var isUpright = rPr?.ChildElements.Any(e => e.LocalName == "nor") == true;
+        if (!isUpright) return null;
+        var text = (run.ChildElements.FirstOrDefault(e => e.LocalName == "t")?.InnerText ?? "").Trim();
+        return _limitStyleOperators.Contains(text) ? "\\" + text : null;
+    }
+
     private static string ArgToLatex(OpenXmlElement? arg)
     {
         if (arg == null) return "";
@@ -2067,6 +2236,9 @@ internal static class FormulaParser
         "∫" => "\\int",
         "∬" => "\\iint",
         "∭" => "\\iiint",
+        "∮" => "\\oint",
+        "∯" => "\\oiint",
+        "∰" => "\\oiiint",
         "∏" => "\\prod",
         "∐" => "\\coprod",
         "⋃" => "\\bigcup",
@@ -2209,7 +2381,17 @@ internal static class FormulaParser
     {
         "lim", "sin", "cos", "tan", "log", "ln", "exp", "min", "max",
         "sup", "inf", "det", "gcd", "dim", "ker", "hom", "deg",
-        "arg", "sec", "csc", "cot", "sinh", "cosh", "tanh"
+        "arg", "sec", "csc", "cot", "sinh", "cosh", "tanh",
+        "limsup", "liminf", "Pr", "argmax", "argmin"
+    };
+
+    // Limit-style operators: a following _/^ renders UNDER/OVER the name
+    // (m:limLow/m:limUpp), like \lim, instead of as a trailing sub/superscript.
+    // ToLatex reconstructs these as \op_{...}/\op^{...} (not \underset{...}{\op}).
+    private static readonly HashSet<string> _limitStyleOperators = new(StringComparer.Ordinal)
+    {
+        "lim", "max", "min", "sup", "inf", "limsup", "liminf",
+        "det", "gcd", "Pr", "argmax", "argmin"
     };
 
     private static readonly (string Symbol, string Command)[] SymbolToCommandMap = new[]
