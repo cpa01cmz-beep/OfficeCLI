@@ -1105,9 +1105,16 @@ public class ResidentServer : IDisposable
         var prevDefer = deferHandler?.DeferSave ?? false;
         if (deferHandler != null) deferHandler.DeferSave = true;
         List<BatchResult> results;
+        // BUG-BT2: collect per-item unrecognized-LaTeX tokens across the whole
+        // batch so the resident surfaces the same unrecognized_latex_command
+        // warning + exit 2 the one-shot path does (the handler resets
+        // LastUnrecognizedLatex per item, so a post-loop read would only see
+        // the last item's tokens).
+        var batchUnrecognizedLatex = new List<string>();
         try
         {
-            results = CommandBuilder.ApplyBatchItems(_handler, items, stopOnError, json, skipResidentOnlyCommands: true);
+            results = CommandBuilder.ApplyBatchItems(_handler, items, stopOnError, json,
+                skipResidentOnlyCommands: true, unrecognizedLatex: batchUnrecognizedLatex);
         }
         finally
         {
@@ -1131,6 +1138,11 @@ public class ResidentServer : IDisposable
         // path.
         _lastBatchHadFailure = results.Any(r => !r.Success);
         CommandBuilder.PrintBatchResults(results, json, items.Count);
+        // BUG-BT2: emit the collected unrecognized-LaTeX markers so the
+        // dispatcher maps them to exit 2 and the envelope warning code, exactly
+        // as the single-shot resident add/set path (EmitUnrecognizedLatex) does.
+        foreach (var tok in batchUnrecognizedLatex)
+            Console.Error.WriteLine($"  WARNING: {UnrecognizedLatexMarker} {tok}");
     }
 
     // ==================== Watch notification helpers ====================
