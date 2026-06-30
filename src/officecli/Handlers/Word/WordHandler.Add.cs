@@ -770,6 +770,16 @@ public partial class WordHandler
                             "trackedchanges" => DocumentProtectionValues.TrackedChanges,
                             _ => DocumentProtectionValues.Forms
                         };
+                        // BUG-DUMP-PROTECTION-ENFORCE: honor an accompanying
+                        // protectionEnforced flag so a protection mode that is
+                        // DEFINED-but-NOT-ENFORCED in the source (w:enforcement="0")
+                        // round-trips as unenforced. Forcing enforcement on flips
+                        // Word into form-fill mode and shifts every line ~12px.
+                        // Default to enforced when the flag is absent so the
+                        // single-command `set / --prop protection=forms` still means
+                        // "enforce".
+                        bool enforce = !properties.TryGetValue("protectionEnforced", out var enfVal)
+                            || enfVal == null || IsTruthy(enfVal);
                         if (existing != null)
                         {
                             // Update Edit + Enforcement in place; preserve any
@@ -777,14 +787,14 @@ public partial class WordHandler
                             // that were injected via raw-set. A replace-new
                             // path would silently destroy the password payload.
                             existing.Edit = new EnumValue<DocumentProtectionValues>(editValue);
-                            existing.Enforcement = new OnOffValue(true);
+                            existing.Enforcement = new OnOffValue(enforce);
                         }
                         else
                         {
                             var prot = new DocumentProtection
                             {
                                 Edit = new EnumValue<DocumentProtectionValues>(editValue),
-                                Enforcement = new OnOffValue(true)
+                                Enforcement = new OnOffValue(enforce)
                             };
                             // CONSISTENCY(settings-schema-order): w:documentProtection
                             // must precede w:compat / w:charSpacingControl in w:settings
@@ -796,6 +806,26 @@ public partial class WordHandler
                     }
 
                     protSettingsPart.Settings.Save();
+                    break;
+                }
+
+                case "protectionenforced":
+                {
+                    // BUG-DUMP-PROTECTION-ENFORCE: enforcement state for
+                    // documentProtection. Apply to the existing protection element
+                    // if one is present; a no-op when there is none (the
+                    // `protection` case — which may run before or after this one in
+                    // the same multi-prop op, dict order being unspecified — is
+                    // authoritative and reads this flag directly). Having a real
+                    // case also stops the generic-setting fallthrough from emitting
+                    // a spurious warning on a round-tripped protectionEnforced prop.
+                    var enfPart = _doc.MainDocumentPart?.DocumentSettingsPart;
+                    var existingProt = enfPart?.Settings?.GetFirstChild<DocumentProtection>();
+                    if (existingProt != null)
+                    {
+                        existingProt.Enforcement = new OnOffValue(IsTruthy(value));
+                        enfPart!.Settings!.Save();
+                    }
                     break;
                 }
 

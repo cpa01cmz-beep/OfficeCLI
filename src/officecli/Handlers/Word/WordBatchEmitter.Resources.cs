@@ -3116,18 +3116,21 @@ public static partial class WordBatchEmitter
     private static void EmitSection(WordHandler word, List<BatchItem> items)
     {
         var root = word.Get("/");
-        // protectionEnforced has no Set case in WordHandler — `set / protectionEnforced=...`
-        // emits a WARNING on every replay regardless of protection state.
-        // Enforcement is implicit in any non-"none" protection value (the
-        // `protection` Set handler stamps w:enforcement=1 itself), so the
-        // separate flag is dump-only metadata with no replay path. Drop it
-        // unconditionally; for protection="none" also drop the noisy
-        // protection key so round-trips stay clean.
-        root.Format.Remove("protectionEnforced");
+        // BUG-DUMP-PROTECTION-ENFORCE: a document can DEFINE a protection mode
+        // (w:edit="forms") without ENFORCING it (w:enforcement="0") — Word then
+        // renders the doc normally. The `protection` Set handler used to always
+        // stamp w:enforcement=1, and this emitter dropped protectionEnforced as
+        // "dump-only metadata", so an unenforced-forms source round-tripped to
+        // ENFORCED forms → Word switched to form-fill mode and pushed every line
+        // down a constant ~12px (a pervasive visual drift with no content change).
+        // Keep protectionEnforced so the `protection`/`protectionEnforced` Set
+        // cases can restore the source enforcement state. For protection="none"
+        // there is nothing to enforce: drop both keys so round-trips stay clean.
         if (root.Format.TryGetValue("protection", out var protVal)
             && string.Equals(protVal?.ToString(), "none", StringComparison.OrdinalIgnoreCase))
         {
             root.Format.Remove("protection");
+            root.Format.Remove("protectionEnforced");
         }
         var blankBaseline = _blankRootBaseline.Value;
         var props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -3167,6 +3170,21 @@ public static partial class WordBatchEmitter
                 continue;
             }
             props[k] = s;
+        }
+        // BUG-DUMP-PROTECTION-ENFORCE: protectionEnforced must be emitted even when
+        // it matches the blank baseline (false). The `protection` Set writer defaults
+        // enforcement to TRUE, and the typed `set / protection=...` op replays AFTER
+        // the verbatim settings raw-set — so an unenforced-forms source (enforcement
+        // ="0") needs an explicit protectionEnforced=false to stop the writer from
+        // re-enforcing it (which flips Word into form-fill mode, shifting every line).
+        // The baseline-skip above drops a false value (blank default is also false),
+        // so force it into props here whenever a protection mode is present.
+        if (root.Format.TryGetValue("protection", out var protForce)
+            && !string.Equals(protForce?.ToString(), "none", StringComparison.OrdinalIgnoreCase)
+            && root.Format.TryGetValue("protectionEnforced", out var enfForce) && enfForce != null)
+        {
+            props["protectionEnforced"] = enfForce is bool eb ? (eb ? "true" : "false")
+                : enfForce.ToString() ?? "true";
         }
         // NOTE: docDefaults (fonts, size, lang, spacing, …) is no longer
         // emitted property-by-property here — EmitDocDefaultsRaw round-trips
