@@ -1730,7 +1730,14 @@ public partial class WordHandler
     // longer exist after comments.xml is renumbered; the owning comment is
     // re-anchored separately via AddComment. Leaving an empty run wrapper behind is
     // schema-legal (it renders nothing).
-    private static string StripVerbatimCommentMarkers(string omml)
+    // Strip self-closing comment-range markers (commentRangeStart/End/Reference)
+    // from a verbatim XML slice. Used by both the equation (oMath) carrier and the
+    // SDT carrier: a comment marker that rides along verbatim keeps its SOURCE id,
+    // but comments are renumbered dense + re-anchored separately via EmitComments/
+    // AddComment, so the verbatim marker becomes a dangling stale-id reference
+    // (schema-invalid; the rebuilt doc fails to open in Word). The regex is
+    // namespace-agnostic (\w+:) so it covers w:/any prefix.
+    internal static string StripVerbatimCommentMarkers(string omml)
     {
         if (omml.IndexOf("comment", StringComparison.OrdinalIgnoreCase) < 0) return omml;
         return System.Text.RegularExpressions.Regex.Replace(

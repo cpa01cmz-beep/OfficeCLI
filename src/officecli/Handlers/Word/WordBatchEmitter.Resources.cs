@@ -2585,6 +2585,13 @@ public static partial class WordBatchEmitter
     private static void EmitSdt(WordHandler word, string sourcePath, List<BatchItem> items, BodyEmitContext ctx)
     {
         var rawXml = word.RawElementXml(sourcePath);
+        // BUG-DUMP-COMMENT-IN-SDT: strip in-sdtContent comment-range markers from the
+        // verbatim slice — they keep their SOURCE id while the comment is renumbered
+        // dense + re-anchored via EmitComments/AddComment, leaving a dangling stale-id
+        // marker pair that makes the rebuilt doc fail to open in Word (validate
+        // dangling-reference). Mirrors the COMMENT-IN-MATH strip; the comment survives
+        // through its typed re-anchor.
+        if (rawXml != null) rawXml = WordHandler.StripVerbatimCommentMarkers(rawXml);
         if (!string.IsNullOrEmpty(rawXml) && IsRichBlockSdt(rawXml!))
         {
             // External relationship references (hyperlink r:id, image r:embed/
@@ -2600,7 +2607,9 @@ public static partial class WordBatchEmitter
                 if (sdtData != null)
                 {
                     var carrierProps = PackInlinedPartsProps(sdtData);
-                    carrierProps["sdtXml"] = carrierProps["runXml"];
+                    // BUG-DUMP-COMMENT-IN-SDT: same strip as the verbatim raw-set path
+                    // — the inlined-parts carrier ships sdtContent verbatim too.
+                    carrierProps["sdtXml"] = WordHandler.StripVerbatimCommentMarkers(carrierProps["runXml"]);
                     carrierProps.Remove("runXml");
                     items.Add(new BatchItem
                     {
@@ -2771,6 +2780,13 @@ public static partial class WordBatchEmitter
                                     List<BatchItem> items, BodyEmitContext ctx)
     {
         var rawXml = word.RawElementXml(sourcePath);
+        // BUG-DUMP-COMMENT-IN-SDT: strip in-sdtContent comment-range markers from the
+        // verbatim slice — they keep their SOURCE id while the comment is renumbered
+        // dense + re-anchored via EmitComments/AddComment, leaving a dangling stale-id
+        // marker pair that makes the rebuilt doc fail to open in Word (validate
+        // dangling-reference). Mirrors the COMMENT-IN-MATH strip; the comment survives
+        // through its typed re-anchor.
+        if (rawXml != null) rawXml = WordHandler.StripVerbatimCommentMarkers(rawXml);
         if (!string.IsNullOrEmpty(rawXml) && IsRichBlockSdt(rawXml!))
         {
             if (HasExternalRelRef(rawXml!))
@@ -2789,7 +2805,9 @@ public static partial class WordBatchEmitter
                 if (sdtData != null)
                 {
                     var carrierProps = PackInlinedPartsProps(sdtData);
-                    carrierProps["sdtXml"] = carrierProps["runXml"];
+                    // BUG-DUMP-COMMENT-IN-SDT: same strip as the verbatim raw-set path
+                    // — the inlined-parts carrier ships sdtContent verbatim too.
+                    carrierProps["sdtXml"] = WordHandler.StripVerbatimCommentMarkers(carrierProps["runXml"]);
                     carrierProps.Remove("runXml");
                     items.Add(new BatchItem
                     {
