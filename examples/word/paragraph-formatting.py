@@ -162,11 +162,14 @@ with officecli.create(FILE, "--force") as doc:
                 "framePr.hSpace": "180", "framePr.vSpace": "180"}),
 
         # --- paragraph borders (pBdr) ---
-        # Whole-box forms only (`border=...`); per-side `border.top=` works but the
-        # handler reports it as an unsupported prop, so the trio sticks to the box form.
+        # Whole-box shorthand (`border=...`) sets all four sides at once. Per-side
+        # keys (border.top/border.bottom/border.left/border.right) are also
+        # supported and take the same `style;size;color` value — mix for a partial box.
         heading("Paragraph borders (pBdr)"),
         para("Box border, all sides (single)", border="single"),
         para("Red 1pt box (style;size;color)", border="single;8;FF0000"),
+        para("Per-side: top + bottom only (rule above and below)",
+             **{"border.top": "single;8;0070C0", "border.bottom": "single;8;0070C0"}),
 
         # --- vertical text alignment within the line ---
         heading("Vertical text alignment"),
