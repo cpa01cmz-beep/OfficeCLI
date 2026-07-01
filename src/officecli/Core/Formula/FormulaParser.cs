@@ -53,8 +53,26 @@ internal static class FormulaParser
     // hint; the tree walkers throw CliException).
     [ThreadStatic] private static int _groupDepth;
 
-    public static OpenXmlElement Parse(string latex)
+    // Optional per-call sink for LaTeX tokens the parser did not recognise
+    // (unknown \command and unknown \begin{env}). Thread-static so the recursive
+    // descent needn't thread a collector parameter through every builder; set by
+    // the collector-aware Parse overload and restored afterwards (re-entrant).
+    // Null means "don't collect" — the common 1-arg path pays nothing.
+    [ThreadStatic] private static List<string>? _unrecognized;
+
+    public static OpenXmlElement Parse(string latex) => Parse(latex, null);
+
+    /// <summary>
+    /// Parse LaTeX to OMML, additionally recording any unrecognised tokens into
+    /// <paramref name="warnings"/>. Each entry is the source form the parser fell
+    /// back on: an unknown command as <c>\cmd</c>, an unknown environment as
+    /// <c>\begin{env}</c>. Recognised syntax adds nothing. Pass <c>null</c> (or use
+    /// the single-argument overload) to skip collection.
+    /// </summary>
+    public static OpenXmlElement Parse(string latex, List<string>? warnings)
     {
+        var previous = _unrecognized;
+        _unrecognized = warnings;
         try
         {
             // Preprocess: fix double-escaped backslashes (common AI/JSON over-escaping)
@@ -80,6 +98,10 @@ internal static class FormulaParser
         {
             throw new FormulaParseException(
                 $"Failed to parse formula: {ex.Message} {KatexDocsHint}", ex);
+        }
+        finally
+        {
+            _unrecognized = previous;
         }
     }
 
@@ -1161,6 +1183,7 @@ internal static class FormulaParser
                 }
 
                 // Unknown environment, render as text
+                _unrecognized?.Add($"\\begin{{{envName}}}");
                 return MakeMathRun($"\\begin{{{envName}}}");
             }
             case "end":
@@ -1695,6 +1718,7 @@ internal static class FormulaParser
 
             default:
                 // Unknown command: render as text with backslash
+                _unrecognized?.Add($"\\{cmd}");
                 return MakeMathRun($"\\{cmd}");
         }
     }
