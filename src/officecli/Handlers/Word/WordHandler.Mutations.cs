@@ -1353,14 +1353,25 @@ public partial class WordHandler
         // AddEquation's ordinal counting (bare m:oMathPara + wrapper w:p's).
         if (element is Paragraph movedWrap && IsOMathParaWrapperParagraph(movedWrap))
         {
-            var ord = 0;
-            foreach (var el in targetParent.ChildElements)
+            // Body/SdtBlock flatten oMathPara-wrapper w:p's to /parent/oMathPara[N]
+            // (matching AddEquation + the resolver). Every OTHER container
+            // (footnote/endnote/header/footer/textbox/comment/sdtContent) keeps the
+            // wrapper addressable as /parent/p[@paraId=X]/oMathPara[1]; emitting the
+            // flattened form there produced an unresolvable path.
+            if (targetParent is Body or SdtBlock)
             {
-                if (el is DocumentFormat.OpenXml.Math.Paragraph) ord++;
-                else if (el is Paragraph wpp && IsOMathParaWrapperParagraph(wpp)) ord++;
-                if (ReferenceEquals(el, element)) break;
+                var ord = 0;
+                foreach (var el in targetParent.ChildElements)
+                {
+                    if (el is DocumentFormat.OpenXml.Math.Paragraph) ord++;
+                    else if (el is Paragraph wpp && IsOMathParaWrapperParagraph(wpp)) ord++;
+                    if (ReferenceEquals(el, element)) break;
+                }
+                return $"{effectiveParentPath}/oMathPara[{ord}]";
             }
-            return $"{effectiveParentPath}/oMathPara[{ord}]";
+            var pPos = targetParent.Elements<Paragraph>().ToList()
+                .FindIndex(p => ReferenceEquals(p, movedWrap)) + 1;
+            return $"{effectiveParentPath}/{BuildParaPathSegment(movedWrap, pPos)}/oMathPara[1]";
         }
 
         var siblings = targetParent.ChildElements.Where(e => e.LocalName == element.LocalName).ToList();
