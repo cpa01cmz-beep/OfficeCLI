@@ -353,6 +353,18 @@ internal static class OutputFormatter
             return;
         }
 
+        // CopyFrom (`add --from`) rejections: the source element can't be cloned
+        // as a direct child of the target (a bookmark half-pair, a part-scoped
+        // footnote/endnote/comment, equation content, or a diagram group — each
+        // "lives inside a paragraph / another part"). WordHandler.CopyFrom throws
+        // "Cannot clone '<path>': … <do X> instead." — a bad-argument value the
+        // caller can act on, not a handler crash.
+        if (msg.StartsWith("Cannot clone '", StringComparison.Ordinal))
+        {
+            result.Code = "invalid_value";
+            return;
+        }
+
         // Diagram input-validation failures: no mermaid source supplied, or the
         // source parsed to an empty graph (bare header / all statements
         // malformed). These are bad-input values the caller can fix, not handler

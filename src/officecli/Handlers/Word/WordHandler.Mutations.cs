@@ -1640,6 +1640,18 @@ public partial class WordHandler
             throw new ArgumentException(
                 $"Cannot clone '{sourcePath}': equation content lives inside a paragraph; clone /body/p[N] instead.");
         }
+        // A wpg group (a `diagram`) lives inside <w:drawing>/<wp:anchor> in a
+        // run, not as a direct <w:body> child. Cloning the bare <wpg:wgp> drops
+        // a schema-invalid group straight under the body (Word repairs/rejects
+        // the file). Direct the user to clone the containing paragraph, which
+        // duplicates the whole drawing with fresh docPr/paraId ids correctly.
+        // Mirrors the oMathPara / oMath rejection above.
+        if (element.LocalName == "wgp"
+            && element.NamespaceUri == "http://schemas.microsoft.com/office/word/2010/wordprocessingGroup")
+        {
+            throw new ArgumentException(
+                $"Cannot clone '{sourcePath}': a diagram group lives inside a paragraph; clone the containing paragraph (e.g. /body/p[N]) instead.");
+        }
 
         OpenXmlElement targetParent;
         if (targetParentPath is "/" or "" or "/body")
