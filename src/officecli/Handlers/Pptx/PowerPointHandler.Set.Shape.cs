@@ -562,6 +562,15 @@ public partial class PowerPointHandler
         // ApplyShapeHyperlink at shape level.
         var grpLinkValue = properties.GetValueOrDefault("link");
         var grpTooltipValue = properties.GetValueOrDefault("tooltip");
+        // Snapshot the group's size BEFORE this command so child font sizes can
+        // be scaled by the NET resize exactly once (mirrors PowerPoint's
+        // interactive group resize, which re-bakes font size; opening a file
+        // whose group ext was edited directly does NOT re-bake it, so the CLI
+        // must). Per-command, not per width/height iteration — otherwise a
+        // combined `width+height` set would square the ratio.
+        var preXfrm = grp.GroupShapeProperties?.TransformGroup;
+        long preCx = preXfrm?.Extents?.Cx ?? 0;
+        long preCy = preXfrm?.Extents?.Cy ?? 0;
         var unsupported = new List<string>();
         foreach (var (key, value) in properties)
         {
@@ -648,8 +657,39 @@ public partial class PowerPointHandler
                     break;
             }
         }
+        // Re-bake child font sizes to match the net group resize (see snapshot
+        // above). fontRatio = min(width-ratio, height-ratio): an unchanged
+        // dimension contributes ratio 1.0, so a width-only shrink still scales
+        // font down (avoiding horizontal overflow) and a one-dimension grow
+        // leaves font untouched. This keeps font in step with the ext/chExt
+        // geometry scale — for uniform resizes the two stay exactly proportional.
+        var postExt = grp.GroupShapeProperties?.TransformGroup?.Extents;
+        if (postExt != null && preCx > 0 && preCy > 0)
+        {
+            double fontRatio = Math.Min((postExt.Cx ?? preCx) / (double)preCx,
+                                        (postExt.Cy ?? preCy) / (double)preCy);
+            if (Math.Abs(fontRatio - 1.0) > 1e-6)
+                ScaleGroupFontSizes(grp, fontRatio);
+        }
         GetSlide(slidePart).Save();
         return unsupported;
+    }
+
+    // Multiply every descendant run's font size by <paramref name="ratio"/>
+    // (floor 1pt). Covers explicit run props, the end-of-paragraph mark, and
+    // list-style defaults so no text escapes the group's resize.
+    private static void ScaleGroupFontSizes(GroupShape grp, double ratio)
+    {
+        void Scale(Int32Value? fs, Action<int> set)
+        {
+            if (fs != null) set(Math.Max(100, (int)Math.Round(fs.Value * ratio)));
+        }
+        foreach (var rp in grp.Descendants<Drawing.RunProperties>())
+            Scale(rp.FontSize, v => rp.FontSize = v);
+        foreach (var ep in grp.Descendants<Drawing.EndParagraphRunProperties>())
+            Scale(ep.FontSize, v => ep.FontSize = v);
+        foreach (var dp in grp.Descendants<Drawing.DefaultRunProperties>())
+            Scale(dp.FontSize, v => dp.FontSize = v);
     }
 
     private List<string> SetConnectorByPath(Match cxnMatch, Dictionary<string, string> properties)

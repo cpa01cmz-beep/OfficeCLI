@@ -117,11 +117,33 @@ public partial class PowerPointHandler
         // The shape's normAutofit shrinks further if a rounding edge still overflows.
         int fontPt = Math.Max(1, (int)Math.Round(18 * lo.FontScale * sc));
 
+        // Wrap the whole diagram in ONE group so it stays adjustable as a unit
+        // AFTER Add: a human drags a single object; an agent addresses one stable
+        // path `/slide[N]/group[K]` and `set width/height` scales every child via
+        // the chOff/chExt baseline (see Set.Shape.cs group-scale-baseline). Child
+        // coordinates ARE slide EMU here (chOff==off, chExt==ext → identity map),
+        // so each child keeps the absolute placement it already computed — the
+        // group is a transparent wrapper until someone resizes it.
+        long gx = Emu(TX(0)), gy = Emu(TY(0));
+        long gcx = Emu(natW * sc), gcy = Emu(natH * sc);
+        uint groupId = nextId++;
+        var group = new GroupShape(
+            new NonVisualGroupShapeProperties(
+                new NonVisualDrawingProperties { Id = groupId, Name = $"Diagram {groupId}" },
+                new NonVisualGroupShapeDrawingProperties(),
+                new ApplicationNonVisualDrawingProperties()),
+            new GroupShapeProperties(
+                new Drawing.TransformGroup(
+                    new Drawing.Offset { X = gx, Y = gy },
+                    new Drawing.Extents { Cx = gcx, Cy = gcy },
+                    new Drawing.ChildOffset { X = gx, Y = gy },
+                    new Drawing.ChildExtents { Cx = gcx, Cy = gcy })));
+
         // nodes (appended first → behind connectors/labels in z-order)
         foreach (var n in lo.Nodes)
         {
             var (geom, fill, line) = DiagramStyles.ByShape[n.Shape];
-            shapeTree.AppendChild(BuildDiagramShape(nextId++, geom, fill, line, n.Label, fontPt,
+            group.AppendChild(BuildDiagramShape(nextId++, geom, fill, line, n.Label, fontPt,
                 Emu(TX(n.X)), Emu(TY(n.Y)), Emu(n.W * sc), Emu(n.H * sc)));
         }
 
@@ -133,7 +155,7 @@ public partial class PowerPointHandler
                 var p1 = e.Points[i];
                 var p2 = e.Points[i + 1];
                 bool arrow = e.ArrowAtEnd && i == e.Points.Count - 2;
-                shapeTree.AppendChild(BuildDiagramConnector(nextId++,
+                group.AppendChild(BuildDiagramConnector(nextId++,
                     TX(p1.X), TY(p1.Y), TX(p2.X), TY(p2.Y), DiagramStyles.EdgeColor, arrow, e.Dashed));
             }
         }
@@ -145,12 +167,13 @@ public partial class PowerPointHandler
             // Opaque (flowchart) labels mask the edge line they sit on; sequence
             // labels sit in empty space above the arrow → no fill, so they don't
             // punch a white hole in whatever lifeline they overlap.
-            shapeTree.AppendChild(BuildDiagramShape(nextId++, "rect", lbl.Opaque ? "FFFFFF" : null, null, lbl.Text,
+            group.AppendChild(BuildDiagramShape(nextId++, "rect", lbl.Opaque ? "FFFFFF" : null, null, lbl.Text,
                 Math.Max(1, (int)Math.Round(10 * sc)),
                 Emu(TX(lbl.Cx - w / 2)), Emu(TY(lbl.Cy - 0.26)), Emu(w * sc), Emu(0.52 * sc)));
         }
 
-        return $"/slide[{slideIdx}]/{BuildElementPathSegment("shape", shapeTree.Elements<Shape>().First(), 1)}";
+        shapeTree.AppendChild(group);
+        return $"/slide[{slideIdx}]/group[{shapeTree.Elements<GroupShape>().Count()}]";
     }
 
     // High-fidelity path: render the mermaid with the real mermaid.js (headless
@@ -162,6 +185,10 @@ public partial class PowerPointHandler
     {
         string imgPath;
         try { imgPath = MermaidImageRenderer.RenderToPngFile(mermaidText); }
+        // A syntax error is bad input — surface it (with mermaid's line-numbered
+        // message) so the caller can fix the source. Never fall back to native: the
+        // synthesizer would reject the same broken text or, worse, draw garbage.
+        catch (MermaidSyntaxException) { throw; }
         catch when (allowNativeFallback) { return AddDiagramNative(parentPath, index, properties, mermaidText); }
         try
         {
@@ -172,9 +199,12 @@ public partial class PowerPointHandler
             if (!(pic.TryGetValue("alt", out var a) && !string.IsNullOrEmpty(a)))
                 pic["alt"] = MermaidImageRenderer.SourceTag + mermaidText;
 
-            // Default sizing parity with the native path: fit the aspect-correct
-            // image into the slide content area, centred, unless the caller set a box.
-            if (!pic.ContainsKey("width") && !pic.ContainsKey("height"))
+            // Sizing parity with the native path: the diagram is ALWAYS scaled to FIT
+            // its box with aspect preserved (a mermaid diagram is never stretched).
+            // width/height define the box (else the slide content area); passing them
+            // straight to AddPicture would stretch — e.g. a tall flowchart forced into
+            // a wide 30x14cm box comes out squashed. Fit-into-box, then centre in the
+            // box (explicit x/y = box origin) or in the slide when position is implicit.
             {
                 using var s = System.IO.File.OpenRead(imgPath);
                 var dims = OfficeCli.Core.ImageSource.TryGetDimensions(s);
@@ -182,12 +212,20 @@ public partial class PowerPointHandler
                 {
                     var (sw, sh) = GetSlideSize();
                     double margin = 0.6 * CmToEmu;
-                    double fit = Math.Min((sw - 2 * margin) / (double)d.Width, (sh - 2 * margin) / (double)d.Height);
+                    bool hasX = pic.TryGetValue("x", out var xs);
+                    bool hasY = pic.TryGetValue("y", out var ys);
+                    double boxX = hasX ? ParseEmu(xs) : margin;
+                    double boxY = hasY ? ParseEmu(ys) : margin;
+                    double boxW = pic.TryGetValue("width", out var ws) ? ParseEmu(ws) : sw - 2 * margin;
+                    double boxH = pic.TryGetValue("height", out var hs) ? ParseEmu(hs) : sh - 2 * margin;
+                    double fit = Math.Min(boxW / d.Width, boxH / d.Height);
                     long cx = (long)(d.Width * fit), cy = (long)(d.Height * fit);
                     pic["width"] = cx.ToString();
                     pic["height"] = cy.ToString();
-                    if (!pic.ContainsKey("x")) pic["x"] = ((sw - cx) / 2).ToString();
-                    if (!pic.ContainsKey("y")) pic["y"] = ((sh - cy) / 2).ToString();
+                    // Centre the fitted image inside its box (letterbox slack split
+                    // evenly); with no explicit position that box is the whole slide.
+                    pic["x"] = ((long)(boxX + (boxW - cx) / 2)).ToString();
+                    pic["y"] = ((long)(boxY + (boxH - cy) / 2)).ToString();
                 }
             }
             return AddPicture(parentPath, index, pic);
@@ -218,7 +256,14 @@ public partial class PowerPointHandler
             sp.AppendChild(new Drawing.Outline(BuildSolidFill(line)) { Width = 9525 }); // ~0.75pt
 
         shape.TextBody = new TextBody(
-            new Drawing.BodyProperties(new Drawing.NormalAutoFit()) { Anchor = Drawing.TextAnchoringTypeValues.Center, Wrap = Drawing.TextWrappingValues.Square },
+            // Zero insets: default text insets (~0.25cm L/R) are fixed and would
+            // eat a fit-shrunk box's width, wrapping/clipping the label. Padding is
+            // already in the box geometry. normAutofit shrinks any residual overflow.
+            new Drawing.BodyProperties(new Drawing.NormalAutoFit())
+            {
+                Anchor = Drawing.TextAnchoringTypeValues.Center, Wrap = Drawing.TextWrappingValues.Square,
+                LeftInset = 0, TopInset = 0, RightInset = 0, BottomInset = 0,
+            },
             new Drawing.ListStyle(),
             new Drawing.Paragraph(
                 new Drawing.ParagraphProperties { Alignment = Drawing.TextAlignmentTypeValues.Center },
