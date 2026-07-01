@@ -244,6 +244,22 @@ public static partial class PptxBatchEmitter
             }
         }
 
+        // Chart-internal picture fills can't round-trip. AddChart rebuilds the
+        // chart semantically into a FRESH ChartPart and never carries the source
+        // chart's media parts (ppt/media/*.jpg + the chart-rels image
+        // relationship). Any verbatim <c:spPr> we captured (chartArea.spPr /
+        // plotArea.spPr / series spPr) that embeds an image via
+        // <a:blipFill><a:blip r:embed="rIdN"/> would replay a rIdN that doesn't
+        // exist in the new part's rels — a DANGLING reference that PowerPoint
+        // renders as a "cannot display image" error box (strictly worse than
+        // dropping the fill). Strip the image-bearing blipFill to <a:noFill/>
+        // so the area degrades cleanly to transparent, and drop any
+        // chartFill/plotFill=blip summary (BuildFillElement would otherwise
+        // degrade "blip" to a solid-black box). Consistent with the file-wide
+        // rule that the chart round-trips visually via semantic rebuild while
+        // its backing parts (embedded workbook, style/colors, media) do not.
+        SanitizeChartImageFills(props);
+
         items.Add(new BatchItem
         {
             Command = "add",
@@ -357,6 +373,55 @@ public static partial class PptxBatchEmitter
                 Path = replayAxisPath,
                 Props = setProps,
             });
+        }
+    }
+
+    // Matches a single <a:blipFill …>…</a:blipFill> subtree (blipFill does not
+    // nest, so a non-greedy match to the first close is exact).
+    private static readonly System.Text.RegularExpressions.Regex BlipFillRegex =
+        new(@"<a:blipFill\b.*?</a:blipFill>",
+            System.Text.RegularExpressions.RegexOptions.Singleline
+            | System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    // Namespace-self-contained replacement so it stays valid wherever the
+    // stripped blipFill sat (the source verbatim spPr fragments re-declare
+    // xmlns:a on each child element).
+    private const string NoFillReplacement =
+        "<a:noFill xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" />";
+
+    // Strip image-bearing chart fills from the emitted chart props (see caller
+    // for the why). Only blipFills that actually reference an image part
+    // (r:embed / r:link) are neutralized; a bare/inline blipFill without a
+    // relationship is left untouched.
+    internal static void SanitizeChartImageFills(Dictionary<string, string> props)
+    {
+        foreach (var key in props.Keys.ToList())
+        {
+            var v = props[key];
+            if (string.IsNullOrEmpty(v)) continue;
+            if (v.IndexOf("<a:blipFill", StringComparison.Ordinal) < 0) continue;
+            var sanitized = BlipFillRegex.Replace(v, m =>
+            {
+                var bf = m.Value;
+                bool refsImage =
+                    bf.IndexOf("r:embed", StringComparison.Ordinal) >= 0
+                    || bf.IndexOf("r:link", StringComparison.Ordinal) >= 0;
+                return refsImage ? NoFillReplacement : bf;
+            });
+            if (!ReferenceEquals(sanitized, v) && sanitized != v)
+                props[key] = sanitized;
+        }
+
+        // "blip" summary fill hints (chartFill=blip / plotFill=blip) can never
+        // be satisfied without the media part — BuildFillElement degrades them
+        // to a solid-black box. Drop them so the (now noFill) verbatim spPr
+        // owns the area's appearance.
+        foreach (var fk in new[] { "chartFill", "plotFill" })
+        {
+            if (props.TryGetValue(fk, out var fv) && fv != null
+                && (fv.Equals("blip", StringComparison.OrdinalIgnoreCase)
+                    || fv.StartsWith("blip:", StringComparison.OrdinalIgnoreCase)))
+                props.Remove(fk);
         }
     }
 }
