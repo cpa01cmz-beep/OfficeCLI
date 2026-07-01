@@ -516,6 +516,33 @@ public static partial class PptxBatchEmitter
             try { canon = NormalizeSlideRawSlice(slice); }
             catch { canon = slice; }
 
+            // Carry image parts referenced (r:embed / r:link) inside the block.
+            // The block is re-inserted verbatim, so any <a:blip r:embed> in a
+            // Fallback <p:pic> (e.g. a math-equation AlternateContent: Choice
+            // a14 <m:oMath> + Fallback picture) must resolve — otherwise the
+            // rId dangles and PowerPoint refuses the deck (0x80070570,
+            // sample07). Pin the SOURCE rId so the verbatim r:embed resolves.
+            var altRids = new HashSet<string>(StringComparer.Ordinal);
+            foreach (System.Text.RegularExpressions.Match rm in
+                     System.Text.RegularExpressions.Regex.Matches(slice, @"r:(?:embed|link)=""(rId\d+)"""))
+                altRids.Add(rm.Groups[1].Value);
+            if (altRids.Count > 0)
+            {
+                foreach (var img in ppt.GetSlideImagePartsByRelId(slideNum, altRids))
+                    items.Add(new BatchItem
+                    {
+                        Command = "add-part",
+                        Parent = slidePath,
+                        Type = "image",
+                        Props = new Dictionary<string, string>
+                        {
+                            ["rid"] = img.RelId,
+                            ["content-type"] = img.ContentType,
+                            ["data"] = img.Base64Data,
+                        },
+                    });
+            }
+
             if (followingShapeCount > 0)
             {
                 // Replay spTree (built by the semantic walk) lists
