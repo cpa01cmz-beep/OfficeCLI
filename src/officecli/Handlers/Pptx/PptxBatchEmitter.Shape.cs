@@ -133,6 +133,48 @@ public static partial class PptxBatchEmitter
         });
     }
 
+    // Build the spTree-rooted xpath for a shape/placeholder replay path,
+    // walking each <p:grpSp> ancestor, with `suffix` appended after the final
+    // p:sp[N] (e.g. "/p:spPr/a:blipFill/a:stretch"). Returns null when the
+    // path isn't a slide/group shape path.
+    private static string? BuildShapeSpXpath(string replayPath, int spOrdinal, string suffix)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(replayPath,
+            @"^/slide\[\d+\]((?:/group\[\d+\])*)/(?:shape|textbox|title|equation|placeholder)\[\d+\]$");
+        if (!m.Success) return null;
+        var xp = new System.Text.StringBuilder("/p:sld/p:cSld/p:spTree");
+        foreach (System.Text.RegularExpressions.Match gm in
+                 System.Text.RegularExpressions.Regex.Matches(m.Groups[1].Value, @"/group\[(\d+)\]"))
+            xp.Append($"/p:grpSp[{gm.Groups[1].Value}]");
+        xp.Append($"/p:sp[{spOrdinal}]{suffix}");
+        return xp.ToString();
+    }
+
+    // Re-inject a tiled image fill: ApplyShapeImageFill always writes
+    // <a:stretch>, so replace it with the source <a:tile> when the shape's
+    // image fill tiled. No-op when the fill isn't tiled or the path can't be
+    // mapped. Shared by EmitShape and EmitPlaceholder.
+    private static void EmitBlipTileReplace(PowerPointHandler ppt, string? nodePath,
+                                            string replayPath, List<BatchItem> items)
+    {
+        if (string.IsNullOrEmpty(nodePath)) return;
+        var tile = ppt.GetShapeBlipTileXmlWithOrdinal(nodePath);
+        if (!tile.HasValue) return;
+        var xpath = BuildShapeSpXpath(replayPath, tile.Value.SpOrdinal,
+            "/p:spPr/a:blipFill/a:stretch");
+        if (xpath == null) return;
+        var slideRoot = System.Text.RegularExpressions.Regex.Match(
+            replayPath, @"^/slide\[\d+\]").Value;
+        items.Add(new BatchItem
+        {
+            Command = "raw-set",
+            Part = slideRoot,
+            Xpath = xpath,
+            Action = "replace",
+            Xml = tile.Value.Xml,
+        });
+    }
+
     private static void EmitShape(PowerPointHandler ppt, DocumentNode shapeNode, string parentSlidePath,
                                   string replayPath, List<BatchItem> items, SlideEmitContext ctx)
     {
@@ -265,24 +307,40 @@ public static partial class PptxBatchEmitter
         // shapes only (mirrors the picture clrChange xpath scope); group-
         // nested shapes fall through unchanged — the xpath form would need
         // to walk <p:grpSp> ancestors, deferred to a follow-up.
+        // Handles both slide-root shapes and group-nested shapes: the xpath
+        // walks each <p:grpSp> ancestor before the final <p:sp>, and the
+        // raw-set Part is the owning slide (the group path in parentSlidePath
+        // is not itself a document part).
         if (System.Text.RegularExpressions.Regex.Match(replayPath,
-                @"^/slide\[\d+\]/(?:shape|textbox|title|equation|placeholder)\[(\d+)\]$")
+                @"^/slide\[\d+\]((?:/group\[\d+\])*)/(?:shape|textbox|title|equation|placeholder)\[(\d+)\]$")
             is { Success: true } shStyleM)
         {
             var styleProbe = ppt.GetShapeStyleXmlWithOrdinal(shapeNode.Path ?? "");
             if (styleProbe.HasValue)
             {
                 var (styleXml, spOrd) = styleProbe.Value;
+                var slideRoot = System.Text.RegularExpressions.Regex.Match(
+                    replayPath, @"^/slide\[\d+\]").Value;
+                var styleXpath = new System.Text.StringBuilder("/p:sld/p:cSld/p:spTree");
+                foreach (System.Text.RegularExpressions.Match gm in
+                         System.Text.RegularExpressions.Regex.Matches(
+                             shStyleM.Groups[1].Value, @"/group\[(\d+)\]"))
+                    styleXpath.Append($"/p:grpSp[{gm.Groups[1].Value}]");
+                styleXpath.Append($"/p:sp[{spOrd}]");
                 items.Add(new BatchItem
                 {
                     Command = "raw-set",
-                    Part = parentSlidePath,
-                    Xpath = $"/p:sld/p:cSld/p:spTree/p:sp[{spOrd}]",
+                    Part = slideRoot,
+                    Xpath = styleXpath.ToString(),
                     Action = "append",
                     Xml = styleXml,
                 });
             }
         }
+
+        // Restore a tiled image fill (must run after the add op above created
+        // the stretched blipFill on replay).
+        EmitBlipTileReplace(ppt, shapeNode.Path, replayPath, items);
 
         // Equation shapes' text body is AlternateContent (a14:m + readable
         // fallback run); the math content is fully captured by `formula`.
@@ -308,6 +366,32 @@ public static partial class PptxBatchEmitter
         var full = ppt.Get(phNode.Path, depth: 3);
         var props = FilterEmittableProps(full.Format);
         DeferSlideJumpLink(props, replayPath, ctx);
+
+        // Placeholder image fill (blipFill) — mirrors the EmitShape image-fill
+        // hook. NodeBuilder emits the marker `image=true` for a placeholder
+        // carrying a <a:blipFill>; FilterEmittableProps drops the marker, so
+        // resolve the embedded bytes here and re-emit `image=data:...base64`.
+        // AddPlaceholder forwards `image` through Set → ApplyShapeImageFill,
+        // rebuilding the blipFill on replay. Without this, a body placeholder
+        // filled with a (tiled) picture round-trips to no fill at all.
+        if (full.Format.TryGetValue("image", out var phImgMarker)
+            && string.Equals(phImgMarker?.ToString(), "true", StringComparison.OrdinalIgnoreCase)
+            && !props.ContainsKey("image"))
+        {
+            var phBinary = ppt.GetShapeImageFillBinary(phNode.Path ?? "");
+            if (phBinary.HasValue)
+            {
+                var (bytes, contentType) = phBinary.Value;
+                props["image"] = $"data:{contentType};base64,{Convert.ToBase64String(bytes)}";
+            }
+            else
+            {
+                ctx.Unsupported.Add(new UnsupportedWarning(
+                    Element: "placeholder",
+                    SlidePath: parentSlidePath,
+                    Reason: "placeholder blipFill has no resolvable embedded image part"));
+            }
+        }
 
         // CONSISTENCY(shape-id-high-range): preserve the source cNvPr.Id
         // verbatim. AcquireShapeId's auto-assign base is 100000+ (well above
@@ -335,12 +419,42 @@ public static partial class PptxBatchEmitter
             Props = props.Count > 0 ? props : null,
         });
 
+        // Restore a tiled image fill (must run after the add op above created
+        // the stretched blipFill on replay).
+        EmitBlipTileReplace(ppt, phNode.Path, replayPath, items);
+
         // AddPlaceholder seeds the first paragraph with <a:endParaRPr> only —
         // no <a:r>. Emitting the first run via `set run[1]` (the shape/textbox
         // path) targets a non-existent run and fails the batch. Tell
         // EmitTextBody the seeded paragraph has zero runs so it issues `add
         // run` for the first run instead.
         EmitTextBody(ppt, full, replayPath, items, seededFirstParaHasRun: false, ctx: ctx);
+
+        // Re-inject <a:fld> field runs (slide-number / date / footer) that
+        // EmitTextBody's run walk skips. Insert each before its paragraph's
+        // <a:endParaRPr> (AddPlaceholder seeds one) so schema order holds and
+        // the field renders its value. Without this a sldNum placeholder
+        // round-trips empty (no page number).
+        var phFields = ppt.GetShapeParagraphFieldXmls(phNode.Path ?? "");
+        if (phFields.HasValue)
+        {
+            var slideRoot = System.Text.RegularExpressions.Regex.Match(
+                replayPath, @"^/slide\[\d+\]").Value;
+            foreach (var (paraOrd, fldXml) in phFields.Value.Fields)
+            {
+                var fXpath = BuildShapeSpXpath(replayPath, phFields.Value.SpOrdinal,
+                    $"/p:txBody/a:p[{paraOrd}]/a:endParaRPr");
+                if (fXpath == null) continue;
+                items.Add(new BatchItem
+                {
+                    Command = "raw-set",
+                    Part = slideRoot,
+                    Xpath = fXpath,
+                    Action = "insertbefore",
+                    Xml = fldXml,
+                });
+            }
+        }
     }
 
     private static void EmitConnector(PowerPointHandler ppt, DocumentNode cxnNode, string parentSlidePath,

@@ -2604,7 +2604,14 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
         // r:id dangles and PowerPoint refuses the deck (0x80070570). Empty when
         // the SmartArt carries no hyperlinks.
         IReadOnlyList<(string RelId, string Target)> DataHyperlinks,
-        IReadOnlyList<(string RelId, string Target)> DrawingHyperlinks);
+        IReadOnlyList<(string RelId, string Target)> DrawingHyperlinks,
+        // spTree-rooted xpath of the graphicFrame's PARENT container. Top-level
+        // SmartArt -> "/p:sld/p:cSld/p:spTree"; a group-nested SmartArt ->
+        // ".../p:grpSp[K]..." so the emitter re-appends it INSIDE the group,
+        // preserving the group's transform/scaling. Without this a group-nested
+        // SmartArt was relocated to the slide top level and rendered at the
+        // wrong (unscaled) size — overflowing the slide.
+        string ParentXpath);
 
     // External (TargetMode="External") hyperlink relationships on a part's own
     // .rels, surfaced as (rId, target-uri). Mirrors GetLayoutExternalHyperlinks
@@ -2746,13 +2753,33 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
             catch { drawingXml = null; drawingRelId = null; }
             if (drawingXml == null || drawingRelId == null) { drawingXml = null; drawingRelId = null; }
 
+            // Parent-container xpath: walk group ancestors so a group-nested
+            // SmartArt round-trips inside its group (keeps the group scaling)
+            // rather than being relocated to the slide top level.
+            var grpChain = new List<string>();
+            for (var cur = gf.Parent; cur != null && cur != spTree; cur = cur.Parent)
+            {
+                if (cur is DocumentFormat.OpenXml.Presentation.GroupShape gs)
+                {
+                    int gIdx = 1;
+                    foreach (var sib in gs.Parent!.Elements<DocumentFormat.OpenXml.Presentation.GroupShape>())
+                    {
+                        if (ReferenceEquals(sib, gs)) break;
+                        gIdx++;
+                    }
+                    grpChain.Insert(0, $"/p:grpSp[{gIdx}]");
+                }
+            }
+            var parentXpath = "/p:sld/p:cSld/p:spTree" + string.Concat(grpChain);
+
             result.Add(new SmartArtInfo(
                 GraphicFrameXml: gf.OuterXml,
                 DataRelId: dRid, LayoutRelId: lRid, ColorsRelId: cRid, QuickStyleRelId: qRid,
                 DataXml: dXml, LayoutXml: lXml, ColorsXml: cXml, QuickStyleXml: qXml,
                 DrawingXml: drawingXml, DrawingRelId: drawingRelId,
                 DataImages: dataImages, DrawingImages: drawingImages,
-                DataHyperlinks: dataHlinks, DrawingHyperlinks: drawingHlinks));
+                DataHyperlinks: dataHlinks, DrawingHyperlinks: drawingHlinks,
+                ParentXpath: parentXpath));
         }
         return result;
     }
@@ -3125,8 +3152,13 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
             var oleRid = oleRidAttr.Value;
 
             // Thumbnail icon: <p:pic>/<p:blipFill>/<a:blip r:embed="…"/>
-            // inside the <p:oleObj>. PowerPoint always emits one (even when
-            // showAsIcon="0", the fallback render still needs an icon).
+            // inside the <p:oleObj>. Modern DrawingML OLE embeds carry one.
+            // A legacy OLE (<p:oleObj spid="_x0000_s…"><p:embed/></p:oleObj>
+            // whose cached visual is a VML shape referenced by spid) has NO
+            // inner pic blip. Skip it: round-tripping just the graphicFrame +
+            // payload (without the VML drawing part that backs the spid) yields
+            // a deck real PowerPoint refuses to open — worse than dropping the
+            // object. Full legacy-VML-OLE round-trip is a deferred feature.
             var thumbRid = oleObj.Descendants(aNs + "blip")
                 .Select(b => b.Attribute(rNs + "embed")?.Value)
                 .FirstOrDefault(v => !string.IsNullOrEmpty(v));
@@ -3268,6 +3300,50 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
         var blip = pic.BlipFill?.GetFirstChild<DocumentFormat.OpenXml.Drawing.Blip>();
         var clrChange = blip?.GetFirstChild<DocumentFormat.OpenXml.Drawing.ColorChange>();
         return clrChange?.OuterXml;
+    }
+
+    // Picture-in-placeholder round-trip. A picture that fills a layout
+    // placeholder carries `<p:nvPr><p:ph type="pic" idx="N"/></p:nvPr>` and an
+    // empty (xfrm-less) `<p:spPr/>`, inheriting its position+size from the
+    // layout placeholder. EmitPicture rebuilds it as a free-floating picture:
+    // the `<p:ph>` is dropped and AddPicture stamps a default xfrm, so it
+    // renders at the wrong size/offset. Capture the `<p:ph>` element and — only
+    // when the source has no explicit `<a:xfrm>` — the source `<p:spPr>`, so
+    // EmitPicture can re-inject them via raw-set and let the layout drive the
+    // geometry again. Mirrors the path-resolution preamble in
+    // GetPictureBlipClrChangeXml verbatim.
+    public (string? PhXml, string? InheritSpPrXml) GetPicturePlaceholderRoundtripXml(string picturePath)
+    {
+        var m = Regex.Match(picturePath,
+            @"^/slide\[(\d+)\]/(?:.+/)?picture\[(?:@id=)?(\d+)\]$");
+        if (!m.Success) return (null, null);
+        var slideIdx = int.Parse(m.Groups[1].Value);
+        var idOrIdx = int.Parse(m.Groups[2].Value);
+        var byId = picturePath.Contains("@id=", StringComparison.Ordinal);
+        var parts = GetSlideParts().ToList();
+        if (slideIdx < 1 || slideIdx > parts.Count) return (null, null);
+        var slidePart = parts[slideIdx - 1];
+        var shapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree;
+        if (shapeTree == null) return (null, null);
+        var pictures = shapeTree.Descendants<Picture>().ToList();
+        Picture? pic = byId
+            ? pictures.FirstOrDefault(p =>
+                p.NonVisualPictureProperties?.NonVisualDrawingProperties?.Id?.Value
+                    == (uint)idOrIdx)
+            : (idOrIdx >= 1 && idOrIdx <= pictures.Count ? pictures[idOrIdx - 1] : null);
+        if (pic == null) return (null, null);
+
+        var ph = pic.NonVisualPictureProperties?.ApplicationNonVisualDrawingProperties?
+            .GetFirstChild<PlaceholderShape>();
+        if (ph == null) return (null, null);
+
+        var spPr = pic.ShapeProperties;
+        var hasXfrm = spPr?.GetFirstChild<DocumentFormat.OpenXml.Drawing.Transform2D>() != null;
+        // Restore the source spPr (dropping AddPicture's default xfrm) only when
+        // the source inherited its geometry. If the source pinned an explicit
+        // xfrm, the x/y/width/height props already round-trip it.
+        string? inheritSpPr = hasXfrm ? null : (spPr?.OuterXml);
+        return (ph.OuterXml, inheritSpPr);
     }
 
     // R56 bt-6: return outer XML for every <a:blip> child the typed Add/Set
@@ -3478,7 +3554,7 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
     internal (string Xml, int SpOrdinal)? GetShapeStyleXmlWithOrdinal(string shapePath)
     {
         var m = Regex.Match(shapePath,
-            @"^/slide\[(\d+)\]((?:/group\[\d+\])*)/(?:shape|textbox|title|equation|placeholder)\[(@id=)?(\d+)\]$");
+            @"^/slide\[(\d+)\]((?:/group\[(?:@id=)?\d+\])*)/(?:shape|textbox|title|equation|placeholder)\[(@id=)?(\d+)\]$");
         if (!m.Success) return null;
         var slideIdx = int.Parse(m.Groups[1].Value);
         var grpChain = m.Groups[2].Value;
@@ -3489,12 +3565,24 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
         var slidePart = parts[slideIdx - 1];
         OpenXmlCompositeElement? scope = GetSlide(slidePart).CommonSlideData?.ShapeTree;
         if (scope == null) return null;
-        foreach (Match gm in Regex.Matches(grpChain, @"/group\[(\d+)\]"))
+        // Group ancestors arrive as either /group[K] (positional, the form the
+        // batch emitter builds) or /group[@id=N] (the form Query/Get returns);
+        // resolve both so group-nested shapes round-trip their <p:style>.
+        foreach (Match gm in Regex.Matches(grpChain, @"/group\[(@id=)?(\d+)\]"))
         {
-            var gIdx = int.Parse(gm.Groups[1].Value);
             var groupsHere = scope.Elements<GroupShape>().ToList();
-            if (gIdx < 1 || gIdx > groupsHere.Count) return null;
-            scope = groupsHere[gIdx - 1];
+            GroupShape? grp;
+            if (gm.Groups[1].Value.Length > 0)
+                grp = groupsHere.FirstOrDefault(g =>
+                    g.NonVisualGroupShapeProperties?.NonVisualDrawingProperties?.Id?.Value
+                        == (uint)int.Parse(gm.Groups[2].Value));
+            else
+            {
+                var gIdx = int.Parse(gm.Groups[2].Value);
+                grp = (gIdx >= 1 && gIdx <= groupsHere.Count) ? groupsHere[gIdx - 1] : null;
+            }
+            if (grp == null) return null;
+            scope = grp;
         }
         var shapes = scope.Elements<Shape>().ToList();
         Shape? shape;
@@ -3515,6 +3603,133 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
         var styleEl = shape.GetFirstChild<ShapeStyle>();
         if (styleEl == null) return null;
         return (styleEl.OuterXml, ordinal);
+    }
+
+    // Shape/placeholder image-fill TILE round-trip. ApplyShapeImageFill always
+    // writes a stretched blipFill (<a:stretch>); a source shape whose image
+    // fill tiles (<a:tile>, e.g. a body placeholder filled with a repeating
+    // pattern) loses the tiling on replay and renders as one stretched image.
+    // Return the source <a:tile> outer XML (plus the sp ordinal within its
+    // parent scope) so EmitShape/EmitPlaceholder can raw-set replace the
+    // replayed <a:stretch> with it. Null when the fill isn't a tiled blipFill.
+    // Mirrors GetShapeStyleXmlWithOrdinal's path-resolution preamble verbatim.
+    internal (string Xml, int SpOrdinal)? GetShapeBlipTileXmlWithOrdinal(string shapePath)
+    {
+        var m = Regex.Match(shapePath,
+            @"^/slide\[(\d+)\]((?:/group\[(?:@id=)?\d+\])*)/(?:shape|textbox|title|equation|placeholder)\[(@id=)?(\d+)\]$");
+        if (!m.Success) return null;
+        var slideIdx = int.Parse(m.Groups[1].Value);
+        var grpChain = m.Groups[2].Value;
+        var byId = m.Groups[3].Value.Length > 0;
+        var shapeIdx = int.Parse(m.Groups[4].Value);
+        var parts = GetSlideParts().ToList();
+        if (slideIdx < 1 || slideIdx > parts.Count) return null;
+        var slidePart = parts[slideIdx - 1];
+        OpenXmlCompositeElement? scope = GetSlide(slidePart).CommonSlideData?.ShapeTree;
+        if (scope == null) return null;
+        foreach (Match gm in Regex.Matches(grpChain, @"/group\[(@id=)?(\d+)\]"))
+        {
+            var groupsHere = scope.Elements<GroupShape>().ToList();
+            GroupShape? grp;
+            if (gm.Groups[1].Value.Length > 0)
+                grp = groupsHere.FirstOrDefault(g =>
+                    g.NonVisualGroupShapeProperties?.NonVisualDrawingProperties?.Id?.Value
+                        == (uint)int.Parse(gm.Groups[2].Value));
+            else
+            {
+                var gIdx = int.Parse(gm.Groups[2].Value);
+                grp = (gIdx >= 1 && gIdx <= groupsHere.Count) ? groupsHere[gIdx - 1] : null;
+            }
+            if (grp == null) return null;
+            scope = grp;
+        }
+        var shapes = scope.Elements<Shape>().ToList();
+        Shape? shape;
+        int ordinal;
+        if (byId)
+        {
+            shape = shapes.FirstOrDefault(
+                s => s.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value == (uint)shapeIdx);
+            if (shape == null) return null;
+            ordinal = shapes.IndexOf(shape) + 1;
+        }
+        else
+        {
+            if (shapeIdx < 1 || shapeIdx > shapes.Count) return null;
+            shape = shapes[shapeIdx - 1];
+            ordinal = shapeIdx;
+        }
+        var tile = shape.ShapeProperties?.GetFirstChild<DocumentFormat.OpenXml.Drawing.BlipFill>()
+            ?.GetFirstChild<DocumentFormat.OpenXml.Drawing.Tile>();
+        if (tile == null) return null;
+        return (tile.OuterXml, ordinal);
+    }
+
+    // Text-field (<a:fld>) round-trip for a shape/placeholder. A slide-number /
+    // date / footer placeholder renders its value from an <a:fld type="slidenum"
+    // | "datetime…" | …> field run inside its text body. EmitParagraph only
+    // re-emits <a:r>/<a:br> children, so the <a:fld> was dropped on replay —
+    // the placeholder round-tripped but showed nothing (no page number). Return
+    // the sp ordinal plus, per 1-based paragraph, the verbatim <a:fld> outer XML
+    // so the emitter can raw-set insertbefore the paragraph's endParaRPr. Null
+    // when the shape carries no fields. Mirrors GetShapeStyleXmlWithOrdinal.
+    internal (int SpOrdinal, List<(int ParaOrdinal, string FldXml)> Fields)? GetShapeParagraphFieldXmls(string shapePath)
+    {
+        var m = Regex.Match(shapePath,
+            @"^/slide\[(\d+)\]((?:/group\[(?:@id=)?\d+\])*)/(?:shape|textbox|title|equation|placeholder)\[(@id=)?(\d+)\]$");
+        if (!m.Success) return null;
+        var slideIdx = int.Parse(m.Groups[1].Value);
+        var grpChain = m.Groups[2].Value;
+        var byId = m.Groups[3].Value.Length > 0;
+        var shapeIdx = int.Parse(m.Groups[4].Value);
+        var parts = GetSlideParts().ToList();
+        if (slideIdx < 1 || slideIdx > parts.Count) return null;
+        var slidePart = parts[slideIdx - 1];
+        OpenXmlCompositeElement? scope = GetSlide(slidePart).CommonSlideData?.ShapeTree;
+        if (scope == null) return null;
+        foreach (Match gm in Regex.Matches(grpChain, @"/group\[(@id=)?(\d+)\]"))
+        {
+            var groupsHere = scope.Elements<GroupShape>().ToList();
+            GroupShape? grp;
+            if (gm.Groups[1].Value.Length > 0)
+                grp = groupsHere.FirstOrDefault(g =>
+                    g.NonVisualGroupShapeProperties?.NonVisualDrawingProperties?.Id?.Value
+                        == (uint)int.Parse(gm.Groups[2].Value));
+            else
+            {
+                var gIdx = int.Parse(gm.Groups[2].Value);
+                grp = (gIdx >= 1 && gIdx <= groupsHere.Count) ? groupsHere[gIdx - 1] : null;
+            }
+            if (grp == null) return null;
+            scope = grp;
+        }
+        var shapes = scope.Elements<Shape>().ToList();
+        Shape? shape;
+        int ordinal;
+        if (byId)
+        {
+            shape = shapes.FirstOrDefault(
+                s => s.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value == (uint)shapeIdx);
+            if (shape == null) return null;
+            ordinal = shapes.IndexOf(shape) + 1;
+        }
+        else
+        {
+            if (shapeIdx < 1 || shapeIdx > shapes.Count) return null;
+            shape = shapes[shapeIdx - 1];
+            ordinal = shapeIdx;
+        }
+        if (shape.TextBody == null) return null;
+        var fields = new List<(int, string)>();
+        int paraOrd = 0;
+        foreach (var para in shape.TextBody.Elements<DocumentFormat.OpenXml.Drawing.Paragraph>())
+        {
+            paraOrd++;
+            foreach (var fld in para.Elements<DocumentFormat.OpenXml.Drawing.Field>())
+                fields.Add((paraOrd, fld.OuterXml));
+        }
+        if (fields.Count == 0) return null;
+        return (ordinal, fields);
     }
 
     // Resolve a shape path's blipFill image bytes (image fill on a non-Picture

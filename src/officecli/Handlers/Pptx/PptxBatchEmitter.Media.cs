@@ -42,6 +42,15 @@ public static partial class PptxBatchEmitter
         // and emitted as add-part extpart rows below, after the picture add.
         var blipCompanions = ppt.GetPictureBlipCompanionParts(picNode.Path);
 
+        // Picture-in-placeholder: a picture that fills a layout placeholder
+        // carries <p:ph type="pic" idx="N"/> in its nvPr and an empty <p:spPr/>,
+        // inheriting its geometry from the layout. The plain `add picture` below
+        // drops the <p:ph> and AddPicture stamps a default xfrm, so the picture
+        // lands at the wrong size/offset on replay. Capture the placeholder
+        // marker (and the source spPr when it had no explicit xfrm) so we can
+        // re-inject them via raw-set and let the layout drive geometry again.
+        var (phXml, inheritSpPrXml) = ppt.GetPicturePlaceholderRoundtripXml(picNode.Path);
+
         var binary = ppt.GetImageBinary(picNode.Path);
         if (binary.HasValue)
         {
@@ -180,6 +189,38 @@ public static partial class PptxBatchEmitter
                     Xpath = blipXpath,
                     Action = "append",
                     Xml = childXml,
+                });
+            }
+        }
+
+        // Re-inject the placeholder marker + inherited spPr captured above.
+        // Appending <p:ph> into the rebuilt picture's empty <p:nvPr> restores
+        // the placeholder binding; replacing the rebuilt <p:spPr> with the
+        // source's xfrm-less spPr drops AddPicture's default xfrm so the layout
+        // placeholder geometry is inherited again.
+        if (phXml != null
+            && System.Text.RegularExpressions.Regex.Match(replayPath,
+                @"^/slide\[(\d+)\]/picture\[(\d+)\]$") is { Success: true } phPicM)
+        {
+            var phPicOrd = int.Parse(phPicM.Groups[2].Value);
+            var picXpath = $"/p:sld/p:cSld/p:spTree/p:pic[{phPicOrd}]";
+            items.Add(new BatchItem
+            {
+                Command = "raw-set",
+                Part = parentSlidePath,
+                Xpath = $"{picXpath}/p:nvPicPr/p:nvPr",
+                Action = "append",
+                Xml = phXml,
+            });
+            if (inheritSpPrXml != null)
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "raw-set",
+                    Part = parentSlidePath,
+                    Xpath = $"{picXpath}/p:spPr",
+                    Action = "replace",
+                    Xml = inheritSpPrXml,
                 });
             }
         }

@@ -269,10 +269,28 @@ public static partial class PptxBatchEmitter
         bool emittedPreset = false;
         if (!string.IsNullOrEmpty(slideSizeType)
             && !string.Equals(slideSizeType, "custom", StringComparison.OrdinalIgnoreCase)
-            && OfficeCli.Core.SlideSizeDefaults.Presets.ContainsKey(slideSizeType))
+            && OfficeCli.Core.SlideSizeDefaults.Presets.TryGetValue(slideSizeType!, out var presetDims))
         {
-            props["slidesize"] = slideSizeType!;
-            emittedPreset = true;
+            // Only emit the preset keyword when the deck's ACTUAL cx/cy match
+            // the preset's canonical dimensions. Get labels slideSize by aspect
+            // ratio, so a 4:3 deck with non-standard absolute dimensions (e.g.
+            // 10080625×7559675, the legacy "On-screen Show") is reported as
+            // "standard" though its cx/cy differ from the standard
+            // 9144000×6858000. `set slidesize=standard` sets cx/cy/type
+            // atomically — emitting the keyword would RESET cx/cy to the preset
+            // and silently resize the deck. Verify the dimensions first; on any
+            // mismatch fall through to the exact slideWidth/slideHeight emit.
+            bool dimsMatch =
+                OfficeCli.Core.EmuConverter.TryParseEmu(
+                    root.Format.TryGetValue("slideWidth", out var swObj) ? swObj as string ?? "" : "", out var actualCx)
+                && OfficeCli.Core.EmuConverter.TryParseEmu(
+                    root.Format.TryGetValue("slideHeight", out var shObj) ? shObj as string ?? "" : "", out var actualCy)
+                && actualCx == presetDims.Cx && actualCy == presetDims.Cy;
+            if (dimsMatch)
+            {
+                props["slidesize"] = slideSizeType!;
+                emittedPreset = true;
+            }
         }
         if (!emittedPreset)
         {
@@ -1711,7 +1729,10 @@ public static partial class PptxBatchEmitter
             {
                 Command = "raw-set",
                 Part = slidePath,
-                Xpath = "/p:sld/p:cSld/p:spTree",
+                // Append into the SmartArt's source parent (top-level spTree or,
+                // for a group-nested SmartArt, the enclosing <p:grpSp>) so the
+                // group's transform/scaling is preserved on replay.
+                Xpath = sa.ParentXpath,
                 Action = "append",
                 Xml = gfCanon,
             });

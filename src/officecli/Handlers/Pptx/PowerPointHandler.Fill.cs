@@ -390,6 +390,30 @@ public partial class PowerPointHandler
 
         var parts = value.Split(':');
         var presetName = parts[0].Trim();
+
+        // Inherited pattern fill: a bare `<a:pattFill/>` (no preset, no colors)
+        // means "pattern fill, inherit preset + colors from the style/theme
+        // fillRef". NodeBuilder serializes this as "pattern=:" on dump; replay
+        // round-trips it here instead of erroring on an empty preset. Any
+        // explicitly-supplied fg/bg is still honored ("::FFFFFF" etc.).
+        if (string.IsNullOrEmpty(presetName))
+        {
+            var bare = new Drawing.PatternFill();
+            if (parts.Length > 1 && !string.IsNullOrWhiteSpace(parts[1]))
+            {
+                var fgClrInherit = new Drawing.ForegroundColor();
+                fgClrInherit.Append(BuildColorElement(parts[1].Trim()));
+                bare.Append(fgClrInherit);
+            }
+            if (parts.Length > 2 && !string.IsNullOrWhiteSpace(parts[2]))
+            {
+                var bgClrInherit = new Drawing.BackgroundColor();
+                bgClrInherit.Append(BuildColorElement(parts[2].Trim()));
+                bare.Append(bgClrInherit);
+            }
+            return bare;
+        }
+
         var fg = parts.Length > 1 && !string.IsNullOrWhiteSpace(parts[1]) ? parts[1].Trim() : "000000";
         var bg = parts.Length > 2 && !string.IsNullOrWhiteSpace(parts[2]) ? parts[2].Trim() : "FFFFFF";
 
