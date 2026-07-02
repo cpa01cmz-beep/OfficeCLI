@@ -351,6 +351,106 @@ public partial class ExcelHandler
         return GetExcelCharts(dp).Select(c => c.IsExtended).ToList();
     }
 
+    /// <summary>One verbatim OLE carrier per embedded object: pinned rIds,
+    /// payload/icon bytes, the VML anchor shape, and the oleObjects child
+    /// element XML. Consumed by ExcelBatchEmitter.EmitOles → add-part ole.</summary>
+    public sealed record DumpOleSlice(
+        string RelId, string DataBase64, string ContentType, string Extension,
+        string? IconRelId, string? IconBase64, string? IconContentType,
+        string? VmlShapeXml, string ObjectXml);
+
+    public List<DumpOleSlice> GetDumpOleSlices(string sheetName)
+    {
+        var result = new List<DumpOleSlice>();
+        var worksheet = FindWorksheet(sheetName);
+        if (worksheet == null) return result;
+        var oleObjects = GetSheet(worksheet).GetFirstChild<OleObjects>();
+        if (oleObjects == null) return result;
+
+        string? vmlXml = null;
+        if (worksheet.VmlDrawingParts.FirstOrDefault() is { } vmlPart)
+        {
+            using var r = new StreamReader(vmlPart.GetStream());
+            vmlXml = r.ReadToEnd();
+        }
+
+        foreach (var child in oleObjects.ChildElements)
+        {
+            var ole = child as OleObject ?? child.Descendants<OleObject>().FirstOrDefault();
+            if (ole == null) continue;
+            var relId = ole.Id?.Value;
+            if (string.IsNullOrEmpty(relId)) continue;
+            OpenXmlPart payloadPart;
+            try { payloadPart = worksheet.GetPartById(relId!); }
+            catch { continue; }
+
+            using var ps = payloadPart.GetStream();
+            using var pms = new MemoryStream();
+            ps.CopyTo(pms);
+            var ext = Path.GetExtension(payloadPart.Uri.ToString());
+            if (string.IsNullOrEmpty(ext)) ext = ".bin";
+
+            string? iconRid = null, iconB64 = null, iconCt = null;
+            var objectPr = ole.GetFirstChild<EmbeddedObjectProperties>();
+            var iconRelRaw = objectPr?.Id?.Value;
+            if (!string.IsNullOrEmpty(iconRelRaw)
+                && worksheet.GetPartById(iconRelRaw!) is ImagePart iconPart)
+            {
+                using var isr = iconPart.GetStream();
+                using var ims = new MemoryStream();
+                isr.CopyTo(ims);
+                iconRid = iconRelRaw;
+                iconB64 = Convert.ToBase64String(ims.ToArray());
+                iconCt = iconPart.ContentType;
+            }
+
+            // VML anchor shape: matched by the conventional _x0000_s{shapeId}
+            // id AddOle and Excel both write.
+            string? shapeXml = null;
+            if (vmlXml != null && ole.ShapeId?.Value is { } spid)
+            {
+                var m = System.Text.RegularExpressions.Regex.Match(vmlXml,
+                    $@"<v:shape [^>]*id=""_x0000_s{spid}"".*?</v:shape>",
+                    System.Text.RegularExpressions.RegexOptions.Singleline);
+                if (m.Success) shapeXml = m.Value;
+            }
+
+            // Canonicalize attribute order so the slice is byte-stable
+            // regardless of how the source element was authored: the SDK
+            // preserves authoring order (AddOle's typed construction vs the
+            // outerXml-ctor parse path differ on where xmlns declarations
+            // land), which would flip on every dump→replay→dump cycle and
+            // break idempotency.
+            var objectXml = CanonicalizeXmlAttributeOrder(child.OuterXml);
+            result.Add(new DumpOleSlice(
+                relId!, Convert.ToBase64String(pms.ToArray()), payloadPart.ContentType, ext,
+                iconRid, iconB64, iconCt,
+                shapeXml, objectXml));
+        }
+        return result;
+    }
+
+    /// <summary>Deterministic attribute order (namespace declarations first,
+    /// then by namespace + local name) for XML slices whose byte-equality
+    /// drives dump idempotency checks. Semantics are unchanged.</summary>
+    internal static string CanonicalizeXmlAttributeOrder(string xml)
+    {
+        var root = System.Xml.Linq.XElement.Parse(xml);
+        void Normalize(System.Xml.Linq.XElement e)
+        {
+            var attrs = e.Attributes()
+                .OrderBy(a => a.IsNamespaceDeclaration ? 0 : 1)
+                .ThenBy(a => a.Name.NamespaceName, StringComparer.Ordinal)
+                .ThenBy(a => a.Name.LocalName, StringComparer.Ordinal)
+                .ToList();
+            e.RemoveAttributes();
+            foreach (var a in attrs) e.Add(a);
+            foreach (var c in e.Elements()) Normalize(c);
+        }
+        Normalize(root);
+        return root.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
+    }
+
     /// <summary>One verbatim chartEx (cx:) carrier per extended chart:
     /// pinned rIds + base64 part payloads + the hosting TwoCellAnchor XML
     /// slice. No semantic vocabulary exists for waterfall/funnel/sunburst —
@@ -477,11 +577,9 @@ public partial class ExcelHandler
             if (present) result.Add((element, reason));
         }
 
-        // PR2-4 round-trip tables/cf/validations/comments/charts/sparklines/
-        // pictures/shapes/pivots semantically (ExcelBatchEmitter.Elements.cs);
-        // this scan covers only what still has no emit channel.
-        AddIf(worksheet.EmbeddedObjectParts.Any() || worksheet.EmbeddedPackageParts.Any(), "ole",
-            "embedded OLE objects are not round-tripped by dump yet");
+        // PR2-6 round-trip tables/cf/validations/comments/charts/sparklines/
+        // pictures/shapes/pivots/slicers/chartEx/OLE; nothing scans here
+        // today — kept as the hook for future unsupported content.
         return result;
     }
 }

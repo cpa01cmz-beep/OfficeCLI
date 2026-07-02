@@ -28,6 +28,7 @@ public static partial class ExcelBatchEmitter
         EmitPictures(xl, sheetName, sheetPath, drawingCounts.Pictures, items, warnings);
         EmitShapes(xl, sheetPath, drawingCounts.Shapes, items, warnings);
         EmitChartExCharts(xl, sheetName, sheetPath, items, warnings);
+        EmitOles(xl, sheetName, sheetPath, items, warnings);
     }
 
     // ==================== Tables ====================
@@ -572,6 +573,45 @@ public static partial class ExcelBatchEmitter
                 Action = "append",
                 Xml = s.AnchorXml,
             });
+        }
+    }
+
+    // ==================== OLE embedded objects ====================
+
+    // Verbatim carrier, one all-in-one add-part per object (see the Excel
+    // AddPart "ole" case for the wiring it performs). Mirrors the pptx
+    // EmitOleForSlide contract.
+    private static void EmitOles(ExcelHandler xl, string sheetName, string sheetPath,
+        List<BatchItem> items, List<UnsupportedWarning> warnings)
+    {
+        List<ExcelHandler.DumpOleSlice> slices;
+        try { slices = xl.GetDumpOleSlices(sheetName); }
+        catch (Exception ex)
+        {
+            warnings.Add(new UnsupportedWarning("ole", sheetPath, $"OLE scan failed: {ex.Message}"));
+            return;
+        }
+        foreach (var s in slices)
+        {
+            var props = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["rid"] = s.RelId,
+                ["data"] = s.DataBase64,
+                ["content-type"] = s.ContentType,
+                ["extension"] = s.Extension,
+                ["object-xml"] = s.ObjectXml,
+            };
+            if (s.IconRelId != null && s.IconBase64 != null)
+            {
+                props["icon-rid"] = s.IconRelId;
+                props["icon-data"] = s.IconBase64;
+                if (s.IconContentType != null) props["icon-content-type"] = s.IconContentType;
+            }
+            if (s.VmlShapeXml != null) props["vml-shape"] = s.VmlShapeXml;
+            else
+                warnings.Add(new UnsupportedWarning("ole", sheetPath,
+                    "OLE VML anchor shape not found; the replayed object may lose its on-sheet placement"));
+            items.Add(new BatchItem { Command = "add-part", Parent = sheetPath, Type = "ole", Props = props });
         }
     }
 

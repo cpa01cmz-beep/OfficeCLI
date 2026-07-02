@@ -1115,9 +1115,129 @@ public partial class ExcelHandler
                 return (cxRid, $"/{cxSheetName}/chartex");
             }
 
+            case "ole":
+            {
+                // Verbatim OLE carrier for dump→batch round-trip. Mirrors the
+                // pptx add-part ole contract (pinned rIds + base64 payloads)
+                // but is all-in-one: Excel's OLE anatomy spans the worksheet
+                // (<oleObjects> child + embed/icon rels), the VML drawing
+                // (anchor shape) and <legacyDrawing>, all of which must stay
+                // consistent — so the handler wires everything here instead
+                // of leaving XML splicing to a companion raw-set.
+                // Props: rid + data (+content-type/extension) = payload part;
+                // icon-rid + icon-data (+icon-content-type) = objectPr image;
+                // vml-shape = the <v:shape> anchor XML verbatim;
+                // object-xml = the <oleObjects> CHILD element verbatim
+                // (mc:AlternateContent or bare oleObject, pinned rIds inside).
+                var oleSheetName = parentPartPath.TrimStart('/');
+                var oleWs = FindWorksheet(oleSheetName)
+                    ?? throw new ArgumentException(
+                        $"Sheet not found: {oleSheetName}. ole must be added under a sheet: add-part <file> /<SheetName> --type ole");
+                properties ??= new Dictionary<string, string>();
+                var oleRid = properties.GetValueOrDefault("rid")
+                    ?? throw new ArgumentException("'rid' property is required for ole (pinned payload relationship id)");
+                var oleDataB64 = properties.GetValueOrDefault("data")
+                    ?? throw new ArgumentException("'data' property is required for ole (base64 payload bytes)");
+                var oleObjectXml = properties.GetValueOrDefault("object-xml")
+                    ?? throw new ArgumentException("'object-xml' property is required for ole (verbatim oleObjects child element)");
+                byte[] oleBytes;
+                try { oleBytes = Convert.FromBase64String(oleDataB64); }
+                catch (FormatException) { throw new ArgumentException("add-part ole: 'data' is not valid base64"); }
+
+                var oleCt = properties.GetValueOrDefault("content-type")
+                    ?? "application/vnd.openxmlformats-officedocument.oleObject";
+                var oleExt = properties.GetValueOrDefault("extension") ?? ".bin";
+                if (!oleExt.StartsWith('.')) oleExt = "." + oleExt;
+
+                // Package vs generic-object auto-select — same rule as pptx.
+                OpenXmlPart olePart;
+                var oleIsPackage = oleCt.StartsWith(
+                        "application/vnd.openxmlformats-officedocument.", StringComparison.OrdinalIgnoreCase)
+                    && !oleCt.Equals(
+                        "application/vnd.openxmlformats-officedocument.oleObject", StringComparison.OrdinalIgnoreCase);
+                var packagePti = oleIsPackage
+                    ? OfficeCli.Core.OleHelper.GetPackagePartTypeInfo("x" + oleExt)
+                    : null;
+                olePart = packagePti != null
+                    ? oleWs.AddEmbeddedPackagePart(packagePti.Value, oleRid)
+                    : oleWs.AddEmbeddedObjectPart(oleCt, oleRid);
+                using (var s = new MemoryStream(oleBytes)) olePart.FeedData(s);
+
+                // Icon image (objectPr r:id target).
+                var iconRid = properties.GetValueOrDefault("icon-rid");
+                var iconB64 = properties.GetValueOrDefault("icon-data");
+                if (!string.IsNullOrEmpty(iconRid) && !string.IsNullOrEmpty(iconB64))
+                {
+                    var iconCt = properties.GetValueOrDefault("icon-content-type") ?? "image/x-emf";
+                    var iconType = iconCt switch
+                    {
+                        "image/png" => ImagePartType.Png,
+                        "image/jpeg" => ImagePartType.Jpeg,
+                        "image/gif" => ImagePartType.Gif,
+                        "image/bmp" => ImagePartType.Bmp,
+                        "image/x-wmf" => ImagePartType.Wmf,
+                        _ => ImagePartType.Emf,
+                    };
+                    var iconPart = oleWs.AddImagePart(iconType, iconRid!);
+                    var iconBytes = Convert.FromBase64String(iconB64!);
+                    using var s = new MemoryStream(iconBytes);
+                    iconPart.FeedData(s);
+                }
+
+                // VML anchor shape + <legacyDrawing> reference.
+                var vmlShapeXml = properties.GetValueOrDefault("vml-shape");
+                if (!string.IsNullOrEmpty(vmlShapeXml))
+                {
+                    if (!oleWs.VmlDrawingParts.Any())
+                    {
+                        var vmlPart = oleWs.AddNewPart<VmlDrawingPart>();
+                        using var writer = new System.IO.StreamWriter(vmlPart.GetStream());
+                        writer.Write("<xml xmlns:v=\"urn:schemas-microsoft-com:vml\" xmlns:o=\"urn:schemas-microsoft-com:office:office\" xmlns:x=\"urn:schemas-microsoft-com:office:excel\"></xml>");
+                    }
+                    InsertVmlShapeXml(oleWs.VmlDrawingParts.First(), vmlShapeXml!);
+                    var wsEl = GetSheet(oleWs);
+                    if (wsEl.GetFirstChild<LegacyDrawing>() == null)
+                    {
+                        wsEl.AppendChild(new LegacyDrawing { Id = oleWs.GetIdOfPart(oleWs.VmlDrawingParts.First()) });
+                    }
+                }
+
+                // <oleObjects> child, verbatim, inserted in schema order.
+                var oleWsElement = GetSheet(oleWs);
+                var oleObjects = oleWsElement.GetFirstChild<OleObjects>();
+                if (oleObjects == null)
+                {
+                    oleObjects = new OleObjects();
+                    oleWsElement.AppendChild(oleObjects);
+                }
+                OpenXmlElement oleChild = oleObjectXml.Contains("AlternateContent", StringComparison.Ordinal)
+                    ? new DocumentFormat.OpenXml.AlternateContent(oleObjectXml)
+                    : new OleObject(oleObjectXml);
+                oleObjects.AppendChild(oleChild);
+                ReorderWorksheetChildren(oleWsElement);
+                SaveWorksheet(oleWs);
+
+                return (oleRid, $"/{oleSheetName}/ole");
+            }
+
             default:
                 throw new ArgumentException(
-                    $"Unknown part type: {partType}. Supported: chart, chartex");
+                    $"Unknown part type: {partType}. Supported: chart, chartex, ole");
         }
+    }
+
+    /// <summary>Append a verbatim &lt;v:shape&gt; slice before the VML part's
+    /// closing &lt;/xml&gt;. Shared by the OLE carrier (comment shapes go
+    /// through AppendCommentVmlShape which builds the shape itself).</summary>
+    private static void InsertVmlShapeXml(VmlDrawingPart vmlPart, string shapeXml)
+    {
+        string xml;
+        using (var reader = new System.IO.StreamReader(vmlPart.GetStream(System.IO.FileMode.Open, System.IO.FileAccess.Read)))
+            xml = reader.ReadToEnd();
+        var closeIdx = xml.LastIndexOf("</xml>", StringComparison.OrdinalIgnoreCase);
+        if (closeIdx < 0) return;
+        xml = xml[..closeIdx] + shapeXml + xml[closeIdx..];
+        using var writer = new System.IO.StreamWriter(vmlPart.GetStream(System.IO.FileMode.Create, System.IO.FileAccess.Write));
+        writer.Write(xml);
     }
 }
