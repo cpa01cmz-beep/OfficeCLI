@@ -779,17 +779,23 @@ public partial class PowerPointHandler
                     else
                         outline.AppendChild(BuildSolidFill(lineColor));
                 }
+                // styledLine: the dump signals a <p:style> raw-set follows and
+                // no explicit line colour was captured — the stroke colour comes
+                // from lnRef, so the default-black fill injection must be
+                // skipped (stress013's theme-tinted borders replayed black).
+                bool shStyledLine = IsTruthy(properties.GetValueOrDefault("styledLine"))
+                                    || IsTruthy(properties.GetValueOrDefault("styledline"));
                 if (properties.TryGetValue("linewidth", out var lwStr) || properties.TryGetValue("lineWidth", out lwStr) || properties.TryGetValue("line.width", out lwStr) || properties.TryGetValue("border.width", out lwStr))
                 {
                     var outline = EnsureOutline(newShape.ShapeProperties!);
                     outline.Width = Core.EmuConverter.ParseLineWidth(lwStr);
-                    EnsureOutlineHasFill(outline);
+                    if (!shStyledLine) EnsureOutlineHasFill(outline);
                 }
                 else if (compoundLineWidth != null)
                 {
                     var outline = EnsureOutline(newShape.ShapeProperties!);
                     outline.Width = Core.EmuConverter.ParseLineWidth(compoundLineWidth);
-                    EnsureOutlineHasFill(outline);
+                    if (!shStyledLine) EnsureOutlineHasFill(outline);
                 }
                 // Stash the compound dash so the lineDash branch in
                 // SetRunOrShapeProperties below picks it up via the

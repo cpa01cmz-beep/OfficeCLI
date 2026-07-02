@@ -796,57 +796,6 @@ public static partial class PptxBatchEmitter
         foreach (var (cxnChild, cxnOrdinal) in deferredConnectors)
             EmitConnector(ppt, cxnChild, slidePath, items, ctx, cxnOrdinal);
 
-        // Raw-XML passthrough for exotic transition / timing content. Emitted
-        // AFTER all shape/animation rows so they replace anything the semantic
-        // emit produced (defensive — slideProps already stripped, animIndex
-        // already nulled, but raw-set is the authoritative payload).
-        // Append into /p:sld preserves OOXML schema order because we removed
-        // the corresponding props upstream: the slide carries neither
-        // <p:transition> nor <p:timing> at this point in replay.
-        // R42-B1: append slide-level children that the semantic emit path
-        // doesn't write. Order follows OOXML schema (cSld → clrMapOvr →
-        // transition → timing → extLst). Since the freshly-added slide
-        // carries none of these (semantic emit covered only cSld and the
-        // optional <p:transition> via prop), an "append on /p:sld" sequence
-        // in schema order produces a schema-valid result.
-        if (exotic.BgXml != null)
-            EmitRawSlideBgSlice(ppt, slideNum, slidePath, exotic.BgXml, items, ctx);
-        if (exotic.ClrMapOvrXml != null)
-            EmitRawSlideSlice(slidePath, "p:clrMapOvr", exotic.ClrMapOvrXml, items, ctx);
-        if (exotic.HasExoticTransition && exotic.TransitionXml != null)
-            EmitRawSlideSlice(slidePath, "p:transition", exotic.TransitionXml, items, ctx);
-        if (exotic.HasExoticTiming && exotic.TimingXml != null)
-        {
-            // Strip animation subtrees that target a shape the rebuilt slide
-            // no longer carries. By-design drops (OLE objects whose payload or
-            // thumbnail won't resolve) remove the <p:graphicFrame> from the
-            // emitted spTree, but the verbatim <p:timing> passthrough still
-            // references the dropped shape's cNvPr id via <p:spTgt spid="N"/>.
-            // PowerPoint rejects a deck whose animation tree targets an absent
-            // shape ("could not open") even though validate / the SDK tolerate
-            // it. Prune the smallest self-contained timing subtree holding each
-            // dangling target so the surviving animation tree stays
-            // schema-valid; the dropped object simply isn't animated.
-            var emittedShapeIds = ComputeEmittedShapeIds(items, sliceStart);
-            var prunedTiming = PruneDanglingTimingTargets(exotic.TimingXml, emittedShapeIds);
-            if (prunedTiming != null)
-                EmitRawSlideSlice(slidePath, "p:timing", prunedTiming, items, ctx);
-        }
-        if (exotic.ExtLstXml != null)
-            EmitRawSlideSlice(slidePath, "p:extLst", exotic.ExtLstXml, items, ctx);
-        if (exotic.TrailingTransitionXml != null)
-            EmitRawSlideSlice(slidePath, "p:transition", exotic.TrailingTransitionXml, items, ctx);
-        if (exotic.MultiHfXmls != null)
-        {
-            // R55 bt-3: append each captured <p:hf .../> sibling verbatim. We
-            // intentionally do NOT canonicalise (NormalizeSlideRawSlice's SDK
-            // round-trip resolves namespace prefixes from the original part
-            // root, but a bare <p:hf .../> has no nested content and only
-            // attribute tokens — the source slice is already canonical).
-            foreach (var hfXml in exotic.MultiHfXmls)
-                EmitRawSlideSlice(slidePath, "p:hf", hfXml, items, ctx);
-        }
-
         // SmartArt graphicFrames live in /p:sld/p:cSld/p:spTree but are
         // skipped by NodeBuilder (table/chart-only routing). Phase 3b emits
         // them as add-part smartart (creates the four diagram sub-parts with
@@ -956,6 +905,66 @@ public static partial class PptxBatchEmitter
         // such block is silently dropped on dump→replay — meaningful for
         // any emerging-feature wrapping the semantic walk doesn't model.
         EmitGenericAlternateContentForSlide(ppt, slideNum, slidePath, items, ctx);
+
+        // NOTE: the exotic-slice block below (bg / clrMapOvr / transition /
+        // timing / extLst / hf) runs AFTER every shape-carrying pass
+        // (SmartArt / media / OLE / chartEx / generic AlternateContent) so
+        // ComputeEmittedShapeIds sees the FULL rebuilt slide before the
+        // timing prune. It used to run before the AlternateContent catch-all,
+        // so animations targeting AC-carried shapes (stress013's duplicate
+        // TextBox pair) were pruned as "dangling", leaving schema-invalid
+        // empty <p:childTnLst> wrappers that PowerPoint refused.
+        // Raw-XML passthrough for exotic transition / timing content. Emitted
+        // AFTER all shape/animation rows so they replace anything the semantic
+        // emit produced (defensive — slideProps already stripped, animIndex
+        // already nulled, but raw-set is the authoritative payload).
+        // Append into /p:sld preserves OOXML schema order because we removed
+        // the corresponding props upstream: the slide carries neither
+        // <p:transition> nor <p:timing> at this point in replay.
+        // R42-B1: append slide-level children that the semantic emit path
+        // doesn't write. Order follows OOXML schema (cSld → clrMapOvr →
+        // transition → timing → extLst). Since the freshly-added slide
+        // carries none of these (semantic emit covered only cSld and the
+        // optional <p:transition> via prop), an "append on /p:sld" sequence
+        // in schema order produces a schema-valid result.
+        if (exotic.BgXml != null)
+            EmitRawSlideBgSlice(ppt, slideNum, slidePath, exotic.BgXml, items, ctx);
+        if (exotic.ClrMapOvrXml != null)
+            EmitRawSlideSlice(slidePath, "p:clrMapOvr", exotic.ClrMapOvrXml, items, ctx);
+        if (exotic.HasExoticTransition && exotic.TransitionXml != null)
+            EmitRawSlideSlice(slidePath, "p:transition", exotic.TransitionXml, items, ctx);
+        if (exotic.HasExoticTiming && exotic.TimingXml != null)
+        {
+            // Strip animation subtrees that target a shape the rebuilt slide
+            // no longer carries. By-design drops (OLE objects whose payload or
+            // thumbnail won't resolve) remove the <p:graphicFrame> from the
+            // emitted spTree, but the verbatim <p:timing> passthrough still
+            // references the dropped shape's cNvPr id via <p:spTgt spid="N"/>.
+            // PowerPoint rejects a deck whose animation tree targets an absent
+            // shape ("could not open") even though validate / the SDK tolerate
+            // it. Prune the smallest self-contained timing subtree holding each
+            // dangling target so the surviving animation tree stays
+            // schema-valid; the dropped object simply isn't animated.
+            var emittedShapeIds = ComputeEmittedShapeIds(items, sliceStart);
+            var prunedTiming = PruneDanglingTimingTargets(exotic.TimingXml, emittedShapeIds);
+            if (prunedTiming != null)
+                EmitRawSlideSlice(slidePath, "p:timing", prunedTiming, items, ctx);
+        }
+        if (exotic.ExtLstXml != null)
+            EmitRawSlideSlice(slidePath, "p:extLst", exotic.ExtLstXml, items, ctx);
+        if (exotic.TrailingTransitionXml != null)
+            EmitRawSlideSlice(slidePath, "p:transition", exotic.TrailingTransitionXml, items, ctx);
+        if (exotic.MultiHfXmls != null)
+        {
+            // R55 bt-3: append each captured <p:hf .../> sibling verbatim. We
+            // intentionally do NOT canonicalise (NormalizeSlideRawSlice's SDK
+            // round-trip resolves namespace prefixes from the original part
+            // root, but a bare <p:hf .../> has no nested content and only
+            // attribute tokens — the source slice is already canonical).
+            foreach (var hfXml in exotic.MultiHfXmls)
+                EmitRawSlideSlice(slidePath, "p:hf", hfXml, items, ctx);
+        }
+
 
         // Notes body content — stub for PR1. Notes part presence does not
         // surface in the slide subtree's children today (notes live under

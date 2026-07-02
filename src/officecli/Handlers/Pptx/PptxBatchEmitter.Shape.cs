@@ -297,6 +297,25 @@ public static partial class PptxBatchEmitter
             _ => "textbox",
         };
 
+        // Probe the <p:style> block BEFORE the add op so we can signal
+        // styledLine: when the style will be carried and the dump surfaced no
+        // explicit line colour, the lineWidth setter must not inject its
+        // default black fill (it would override lnRef's theme tint —
+        // stress013's grey/orange borders replayed black).
+        var shStyleMatch = System.Text.RegularExpressions.Regex.Match(replayPath,
+            @"^/slide\[\d+\]((?:/group\[\d+\])*)/(?:shape|textbox|title|equation|placeholder)\[(\d+)\]$");
+        uint? shStyleExpectId = fullShape.Format.TryGetValue("id", out var shIdObj)
+            && uint.TryParse(shIdObj?.ToString(), out var shIdVal) ? shIdVal : null;
+        var shapeStyleProbe = shStyleMatch.Success
+            ? ppt.GetShapeStyleXmlWithOrdinal(shapeNode.Path ?? "", shStyleExpectId)
+            : null;
+        if (shapeStyleProbe.HasValue
+            && !shapeProps.ContainsKey("line") && !shapeProps.ContainsKey("lineColor")
+            && !shapeProps.ContainsKey("line.color") && !shapeProps.ContainsKey("line.gradient"))
+        {
+            shapeProps["styledLine"] = "true";
+        }
+
         items.Add(new BatchItem
         {
             Command = "add",
@@ -319,13 +338,9 @@ public static partial class PptxBatchEmitter
         // walks each <p:grpSp> ancestor before the final <p:sp>, and the
         // raw-set Part is the owning slide (the group path in parentSlidePath
         // is not itself a document part).
-        if (System.Text.RegularExpressions.Regex.Match(replayPath,
-                @"^/slide\[\d+\]((?:/group\[\d+\])*)/(?:shape|textbox|title|equation|placeholder)\[(\d+)\]$")
-            is { Success: true } shStyleM)
+        if (shStyleMatch is { Success: true } shStyleM)
         {
-            uint? shStyleExpectId = fullShape.Format.TryGetValue("id", out var shIdObj)
-                && uint.TryParse(shIdObj?.ToString(), out var shIdVal) ? shIdVal : null;
-            var styleProbe = ppt.GetShapeStyleXmlWithOrdinal(shapeNode.Path ?? "", shStyleExpectId);
+            var styleProbe = shapeStyleProbe;
             if (styleProbe.HasValue)
             {
                 var (styleXml, spOrd) = styleProbe.Value;

@@ -1091,9 +1091,21 @@ public partial class PowerPointHandler
                     if (spPr == null) { unsupported.Add(key); break; }
                     var outline = EnsureOutline(spPr);
                     outline.Width = Core.EmuConverter.ParseLineWidth(value);
-                    EnsureOutlineHasFill(outline);
+                    // styledLine: the emitter signals that a <p:style> raw-set
+                    // will follow and no explicit line colour was dumped — the
+                    // stroke colour comes from lnRef, so injecting the default
+                    // black here would override the theme tint (stress013's
+                    // grey/orange borders replayed black). Mirrors the
+                    // connector styledLine contract.
+                    if (!properties.ContainsKey("styledLine") && !properties.ContainsKey("styledline"))
+                        EnsureOutlineHasFill(outline);
                     break;
                 }
+
+                case "styledline":
+                    // Signal-only key (see linewidth above) — consumed so the
+                    // handler-as-truth tracker doesn't report it unsupported.
+                    break;
 
                 case "line.gradient" or "linegradient":
                 {
