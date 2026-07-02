@@ -77,8 +77,23 @@ public partial class ExcelHandler
             if (row.Collapsed?.Value == true)
                 rowNode.Format["collapsed"] = true;
 
+            // Column cursor for cells whose r= attribute is absent — a legal
+            // OOXML variant (position is implied: one right of the previous
+            // cell). Without synthesis such cells got a "?" path and the
+            // emitter silently dropped their values from the dump.
+            int impliedCol = 0;
             foreach (var cell in row.Elements<Cell>())
             {
+                if (cell.CellReference?.Value is { } cr && cr.Length > 0)
+                {
+                    try { impliedCol = ColumnNameToIndex(ParseCellReference(cr).Item1); }
+                    catch { impliedCol++; }
+                }
+                else
+                {
+                    impliedCol++;
+                    cell.CellReference = $"{IndexToColumnName(impliedCol)}{ridx}";
+                }
                 var hasContent = CellHasContent(cell);
                 var hasStyle = cell.StyleIndex != null && cell.StyleIndex.Value != 0;
                 if (!hasContent && !hasStyle) continue;
