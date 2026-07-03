@@ -281,11 +281,12 @@ officecli merge q4-template.pptx q4-acme.pptx data.json
 
 #### Round-trip dump — learn from existing docs
 
-`dump` serializes any `.docx` or `.pptx` — whole document **or any subtree** (a single paragraph, table, slide, the styles part, numbering, theme, or settings) — into a replayable batch JSON; `batch` replays it. Given a sample the user wants to imitate, an agent reads the structured spec instead of raw OOXML XML, mutates, and replays. Bridges "I have an existing template" and "generate me 100 variations."
+`dump` serializes any `.docx`, `.pptx`, or `.xlsx` — whole document **or any subtree** (a single paragraph, table, slide, worksheet, the styles part, numbering, theme, or settings) — into a replayable batch JSON; `batch` replays it. Given a sample the user wants to imitate, an agent reads the structured spec instead of raw OOXML XML, mutates, and replays. Bridges "I have an existing template" and "generate me 100 variations."
 
 ```bash
 officecli dump existing.docx -o blueprint.json                  # whole document
 officecli dump existing.docx /body/tbl[1] -o table.json         # any subtree
+officecli dump existing.xlsx /Sheet1 -o sheet.json              # a single worksheet
 officecli batch new.docx --input blueprint.json
 ```
 
@@ -401,7 +402,7 @@ curl -fsSL https://officecli.ai/SKILL.md -o ~/.claude/skills/officecli.md
 - **Built-in agent-friendly rendering engine** — `view html` / `view screenshot` / `watch` emit HTML and PNG natively. No Office required. Agents can *see* their output and fix layout issues, even inside CI / Docker / headless environments.
 - **Built-in formula & pivot engine** — 350+ Excel functions auto-evaluated on write (incl. spilling dynamic arrays, financial / bond and statistical families); native OOXML pivot tables from a source range with one command. Agents read computed values and shipped aggregations immediately, without round-tripping through Office.
 - **Template merge** — agent designs the layout once, downstream code fills `{{key}}` placeholders N times. Avoids burning tokens regenerating every report from scratch.
-- **Round-trip dump** — `dump` turns any `.docx` or `.pptx` into replayable batch JSON. Agents learn from human-authored samples by reading a structured spec, not raw OOXML XML.
+- **Round-trip dump** — `dump` turns any `.docx`, `.pptx`, or `.xlsx` into replayable batch JSON. Agents learn from human-authored samples by reading a structured spec, not raw OOXML XML.
 - **Built-in help** — when unsure about property names or value formats, the agent runs `officecli <format> set <element>` instead of guessing.
 - **Auto-install** — OfficeCLI detects your AI tooling (Claude Code, Cursor, VS Code, …) and configures itself. No manual skill-file setup.
 
@@ -508,7 +509,7 @@ See `officecli --help` for full details on exit codes and error formats.
 | [`validate`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-validate) | Validate against OpenXML schema |
 | `view <file> issues` | Enumerate document issues (text overflow, missing alt text, formula errors, ...) |
 | [`batch`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-batch) | Multiple operations applied in a single pass (stdin, `--input`, or `--commands`; continues on error by default, `--stop-on-error` to abort) |
-| [`dump`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-dump) | Serialize a `.docx` or `.pptx` into a replayable batch JSON (round-trip via `batch`); accepts a subtree path |
+| [`dump`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-dump) | Serialize a `.docx`, `.pptx`, or `.xlsx` into a replayable batch JSON (round-trip via `batch`); accepts a subtree path |
 | [`refresh`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-refresh) | Recalculate TOC page numbers / `PAGE` / cross-references (`.docx`; Word backend on Windows, headless-HTML fallback) |
 | [`plugins`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-plugins) | List / inspect / lint installed plugins (extend to `.doc`, `.hwpx`, `.pdf` export via dump-reader / exporter / format-handler kinds) |
 | [`merge`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-merge) | Template merge — replace `{{key}}` placeholders with JSON data |
