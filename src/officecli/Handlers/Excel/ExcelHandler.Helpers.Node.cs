@@ -408,6 +408,11 @@ public partial class ExcelHandler
             {
                 node.Format["link"] = "#" + loc;
             }
+            // Tooltip readback — Set/Add persist tooltip= into the hyperlink's
+            // @tooltip attribute, but without this emit the value was invisible
+            // to Get and dropped by dump round-trips.
+            if (hyperlink?.Tooltip?.Value is { Length: > 0 } hlTooltip)
+                node.Format["tooltip"] = hlTooltip;
 
             // Border readback from stylesheet
             var styleIndex = cell.StyleIndex?.Value ?? 0;

@@ -1228,6 +1228,21 @@ public partial class ExcelHandler
                         // as printarea/freeze.
                         foreach (var afCell in trimmed.Replace("$", "").Split(':'))
                             ParseCellReference(afCell.Trim());
+                        // CONSISTENCY(autofilter-table-dup): a Table already owns
+                        // its own <autoFilter>; layering a sheet-level filter over
+                        // the same range validates green but real Excel refuses to
+                        // open the file (0x800A03EC). Mirror AddAutoFilter's
+                        // overlap rejection so Set can't create that state.
+                        var afUpper = trimmed.ToUpperInvariant();
+                        foreach (var setAfTdp in worksheet.TableDefinitionParts)
+                        {
+                            if (setAfTdp.Table?.Reference?.Value is string setAfTblRef
+                                && RangesOverlap(afUpper, setAfTblRef.ToUpperInvariant()))
+                                throw new ArgumentException(
+                                    $"AutoFilter range '{afUpper}' overlaps existing table " +
+                                    $"'{setAfTdp.Table.Name?.Value ?? setAfTdp.Table.DisplayName?.Value}' " +
+                                    $"({setAfTblRef}); tables already include their own autoFilter.");
+                        }
                         if (existingAf != null)
                         {
                             existingAf.Reference = trimmed.ToUpperInvariant();
