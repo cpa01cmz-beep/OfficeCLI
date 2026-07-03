@@ -407,6 +407,10 @@ public static partial class ExcelBatchEmitter
             CopyString(spk, "lastMarkerColor", props, "lastMarkerColor");
             CopyString(spk, "markersColor", props, "markersColor");
             CopyValue(spk, "lineWeight", props, "lineWeight");
+            CopyString(spk, "displayEmptyCellsAs", props, "displayEmptyCellsAs");
+            CopyBool(spk, "displayXAxis", props, "displayXAxis");
+            CopyBool(spk, "rightToLeft", props, "rightToLeft");
+            CopyBool(spk, "dateAxis", props, "dateAxis");
             if (!props.ContainsKey("location") || !props.ContainsKey("dataRange"))
             {
                 warnings.Add(new UnsupportedWarning("sparkline", spk.Path ?? sheetPath,

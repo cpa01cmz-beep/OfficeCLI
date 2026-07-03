@@ -80,6 +80,21 @@ public partial class ExcelHandler
         if (spkGroup.LineWeight?.HasValue == true)
             node.Format["lineWeight"] = spkGroup.LineWeight.Value;
 
+        // Group-level axis / empty-cell / RTL attributes. Add/Set persist these
+        // into the x14 group; without the readback they were invisible to Get
+        // and silently dropped by dump round-trips.
+        if (spkGroup.DisplayEmptyCellsAs?.HasValue == true)
+        {
+            var de = spkGroup.DisplayEmptyCellsAs.Value;
+            node.Format["displayEmptyCellsAs"] =
+                de == X14.DisplayBlanksAsValues.Gap ? "gap"
+                : de == X14.DisplayBlanksAsValues.Span ? "span"
+                : "zero";
+        }
+        if (spkGroup.DisplayXAxis?.Value == true) node.Format["displayXAxis"] = true;
+        if (spkGroup.RightToLeft?.Value == true) node.Format["rightToLeft"] = true;
+        if (spkGroup.DateAxis?.Value == true) node.Format["dateAxis"] = true;
+
         // Cell / range from first sparkline element
         var firstSparkline = spkGroup.GetFirstChild<X14.Sparklines>()?.GetFirstChild<X14.Sparkline>();
         if (firstSparkline != null)
