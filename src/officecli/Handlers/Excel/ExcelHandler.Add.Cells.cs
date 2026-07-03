@@ -491,10 +491,16 @@ public partial class ExcelHandler
                 cell.CellFormula = new CellFormula(Core.PivotTableHelper.SanitizeXmlText(Core.ModernFunctionQualifier.Qualify(Core.ModernFunctionQualifier.AutoQuoteSheetRefs(value.TrimStart('=')))));
                 cell.CellValue = null;
                 // CONSISTENCY(cell-formula-calc): Set and import both stamp
-                // fullCalcOnLoad when writing a formula; Add skipping it made
-                // the first dump→replay cycle non-idempotent (the flag
-                // appeared only after replay).
+                // fullCalcOnLoad AND evaluate/cache the result when writing a
+                // formula; Add doing neither left a bare <f> whose Get type
+                // diverged from the replayed file (String vs Error).
                 EnsureFullCalcOnLoad();
+                {
+                    var addEvalSd = GetSheet(cellWorksheet).GetFirstChild<SheetData>();
+                    if (addEvalSd != null)
+                        WriteFormulaResultToCell(cell,
+                            new Core.FormulaEvaluator(addEvalSd, _doc.WorkbookPart).TryEvaluateFull(value.TrimStart('=')));
+                }
             }
             else
             {
@@ -580,6 +586,12 @@ public partial class ExcelHandler
             cell.CellFormula = addCellFormula;
             cell.CellValue = null;
             EnsureFullCalcOnLoad(); // CONSISTENCY(cell-formula-calc): see value-branch note.
+            {
+                var addEvalSd2 = GetSheet(cellWorksheet).GetFirstChild<SheetData>();
+                if (addEvalSd2 != null)
+                    WriteFormulaResultToCell(cell,
+                        new Core.FormulaEvaluator(addEvalSd2, _doc.WorkbookPart).TryEvaluateFull(fTrim));
+            }
         }
         // CE1: allow `runs=<json>` without an explicit `type=richtext`.
         if (!properties.ContainsKey("type") && properties.ContainsKey("runs"))
