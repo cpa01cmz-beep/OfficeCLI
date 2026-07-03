@@ -604,6 +604,12 @@ public partial class ExcelHandler
                 if (rule.Type?.Value != null)
                     cfNode.Format["type"] = rule.Type.InnerText;
 
+                // stopIfTrue applies to every CF rule type; surface it so the
+                // dump→batch round-trip can re-emit the attribute. Only emit
+                // when explicitly true (OOXML default is false).
+                if (rule.StopIfTrue?.Value == true)
+                    cfNode.Format["stopIfTrue"] = true;
+
                 // DataBar
                 var dataBar = rule.GetFirstChild<DataBar>();
                 if (dataBar != null)

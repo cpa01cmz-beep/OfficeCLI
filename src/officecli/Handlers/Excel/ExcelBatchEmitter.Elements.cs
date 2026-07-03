@@ -110,6 +110,9 @@ public static partial class ExcelBatchEmitter
                 warnings.Add(new UnsupportedWarning("conditionalformatting", cf.Path ?? sheetPath, "cf rule has no ref; skipped"));
                 continue;
             }
+            // stopIfTrue applies to every CF rule type; the Add path honors it
+            // uniformly via ApplyStopIfTrue, so carry it for all branches.
+            CopyBool(cf, "stopIfTrue", props, "stopIfTrue");
 
             string addType;
             switch (type)
