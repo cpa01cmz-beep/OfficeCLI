@@ -585,6 +585,30 @@ public static partial class WordBatchEmitter
     // docDefaults byte-identical to the source — including its absences — so
     // Word applies the same defaults to both. Mirrors the theme/settings/
     // numbering raw-emit rationale (structured XML edited as a block).
+    // Raw-set replace can leave extra namespace declarations (xmlns:w14,
+    // xmlns:mc) attached to the replaced element itself even when nothing in
+    // the subtree uses them, so a dump taken after one replay emits a
+    // byte-different fragment than the original dump. Strip declarations whose
+    // namespace is unused by any element or attribute in the subtree before
+    // serializing, so repeated dump→replay→dump cycles stay byte-identical.
+    private static System.Xml.Linq.XElement StripUnusedNsDeclarations(System.Xml.Linq.XElement el)
+    {
+        var used = new HashSet<System.Xml.Linq.XNamespace>();
+        foreach (var d in el.DescendantsAndSelf())
+        {
+            used.Add(d.Name.Namespace);
+            foreach (var a in d.Attributes())
+                if (!a.IsNamespaceDeclaration && a.Name.Namespace != System.Xml.Linq.XNamespace.None)
+                    used.Add(a.Name.Namespace);
+        }
+        foreach (var d in el.DescendantsAndSelf())
+            d.Attributes()
+                .Where(a => a.IsNamespaceDeclaration && !used.Contains((System.Xml.Linq.XNamespace)a.Value))
+                .ToList()
+                .ForEach(a => a.Remove());
+        return el;
+    }
+
     private static void EmitDocDefaultsRaw(WordHandler word, List<BatchItem> items)
     {
         string stylesXml;
@@ -597,7 +621,7 @@ public static partial class WordBatchEmitter
             var doc = System.Xml.Linq.XDocument.Parse(stylesXml);
             var wNs = (System.Xml.Linq.XNamespace)"http://schemas.openxmlformats.org/wordprocessingml/2006/main";
             var el = doc.Root?.Element(wNs + "docDefaults");
-            dd = el?.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
+            dd = el == null ? null : StripUnusedNsDeclarations(el).ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
         }
         catch { return; }
 
@@ -650,7 +674,8 @@ public static partial class WordBatchEmitter
         {
             var doc = System.Xml.Linq.XDocument.Parse(stylesXml);
             var wNs = (System.Xml.Linq.XNamespace)"http://schemas.openxmlformats.org/wordprocessingml/2006/main";
-            ls = doc.Root?.Element(wNs + "latentStyles")?.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
+            var lsEl = doc.Root?.Element(wNs + "latentStyles");
+            ls = lsEl == null ? null : StripUnusedNsDeclarations(lsEl).ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
             hasDocDefaults = doc.Root?.Element(wNs + "docDefaults") != null;
         }
         catch { return; }
@@ -3805,7 +3830,7 @@ public static partial class WordBatchEmitter
                 // Dedupe: keep the first occurrence, matching EmitStyles' own
                 // first-wins styleId dedup (Word tolerates duplicate ids).
                 if (map.ContainsKey(styleId)) continue;
-                map[styleId] = styleEl.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
+                map[styleId] = StripUnusedNsDeclarations(styleEl).ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
             }
         }
         catch { return new Dictionary<string, string>(StringComparer.Ordinal); }
@@ -3846,7 +3871,7 @@ public static partial class WordBatchEmitter
                 var styleId = styleEl.Attribute(wNs + "styleId")?.Value;
                 if (string.IsNullOrEmpty(styleId)) continue;
                 counts[styleId] = counts.GetValueOrDefault(styleId) + 1;
-                lastXml[styleId] = styleEl.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
+                lastXml[styleId] = StripUnusedNsDeclarations(styleEl).ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
             }
             var dups = new Dictionary<string, string>(StringComparer.Ordinal);
             foreach (var kv in counts)
