@@ -809,6 +809,100 @@ public partial class ExcelHandler
         return $"/{afSheetName}/autofilter";
     }
 
+    /// <summary>
+    /// Reverse of AddAutoFilter's criteria loop: surface each &lt;filterColumn&gt;
+    /// as criteriaN.OP=VAL Format keys so dump can re-emit them via
+    /// `add --type autofilter`. Covers the operator families the Add path
+    /// builds (customFilters, top10, blanks/nonBlanks, discrete values,
+    /// dynamicFilter); N is the colId (0-based column offset).
+    /// </summary>
+    internal static void PopulateAutoFilterCriteria(AutoFilter af, DocumentNode node)
+    {
+        foreach (var fc in af.Elements<FilterColumn>())
+        {
+            var colId = fc.ColumnId?.Value ?? 0;
+            var prefix = $"criteria{colId}.";
+
+            if (fc.Top10 is { } t10)
+            {
+                var top = t10.Top?.Value ?? true;
+                var percent = t10.Percent?.Value ?? false;
+                var op = (top, percent) switch
+                {
+                    (true, false) => "top",
+                    (true, true) => "topPercent",
+                    (false, false) => "bottom",
+                    (false, true) => "bottomPercent",
+                };
+                node.Format[prefix + op] = (t10.Val?.Value ?? 0).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                continue;
+            }
+
+            if (fc.DynamicFilter is { } dyn && dyn.Type is not null)
+            {
+                node.Format[prefix + "dynamic"] = dyn.Type.InnerText;
+                continue;
+            }
+
+            if (fc.Filters is { } filters)
+            {
+                if (filters.Blank?.Value == true)
+                    node.Format[prefix + "blanks"] = "true";
+                var vals = filters.Elements<Filter>()
+                    .Select(f => f.Val?.Value)
+                    .Where(v => !string.IsNullOrEmpty(v))
+                    .ToList();
+                if (vals.Count > 0)
+                    node.Format[prefix + "values"] = string.Join(",", vals!);
+                continue;
+            }
+
+            if (fc.CustomFilters is { } cf)
+            {
+                var entries = cf.Elements<CustomFilter>().ToList();
+                var and = cf.And?.Value == true;
+                // between/notBetween produce a 2-entry customFilters; map back
+                // to the single criteria form the Add path accepts.
+                if (entries.Count == 2)
+                {
+                    var op0 = entries[0].Operator?.Value;
+                    var op1 = entries[1].Operator?.Value;
+                    if (and && op0 == FilterOperatorValues.GreaterThanOrEqual
+                        && op1 == FilterOperatorValues.LessThanOrEqual)
+                    {
+                        node.Format[prefix + "between"] = $"{entries[0].Val?.Value},{entries[1].Val?.Value}";
+                        continue;
+                    }
+                    if (!and && op0 == FilterOperatorValues.LessThan
+                        && op1 == FilterOperatorValues.GreaterThan)
+                    {
+                        node.Format[prefix + "notBetween"] = $"{entries[0].Val?.Value},{entries[1].Val?.Value}";
+                        continue;
+                    }
+                }
+                foreach (var ce in entries)
+                {
+                    var val = ce.Val?.Value ?? "";
+                    var fop = ce.Operator?.Value ?? FilterOperatorValues.Equal;
+                    // nonBlanks is the AddAutoFilter idiom "NotEqual empty".
+                    if (fop == FilterOperatorValues.NotEqual && val.Length == 0)
+                    {
+                        node.Format[prefix + "nonBlanks"] = "true";
+                        continue;
+                    }
+                    var op = fop == FilterOperatorValues.Equal ? "equals"
+                        : fop == FilterOperatorValues.NotEqual ? "notEquals"
+                        : fop == FilterOperatorValues.GreaterThan ? "gt"
+                        : fop == FilterOperatorValues.GreaterThanOrEqual ? "gte"
+                        : fop == FilterOperatorValues.LessThan ? "lt"
+                        : fop == FilterOperatorValues.LessThanOrEqual ? "lte"
+                        : "equals";
+                    node.Format[prefix + op] = val;
+                }
+            }
+        }
+    }
+
     private string AddTable(string parentPath, string type, InsertPosition? position, Dictionary<string, string> properties)
     {
         var index = position?.Index;

@@ -29,6 +29,32 @@ public static partial class ExcelBatchEmitter
         EmitShapes(xl, sheetPath, drawingCounts.Shapes, items, warnings);
         EmitChartExCharts(xl, sheetName, sheetPath, items, warnings);
         EmitOles(xl, sheetName, sheetPath, items, warnings);
+        EmitAutoFilterCriteria(xl, sheetPath, items, warnings);
+    }
+
+    // ==================== AutoFilter criteria ====================
+
+    // The sheet-settings pass already emits `set autoFilter=<range>` (the bare
+    // ref). Per-column filter criteria live in <filterColumn> children that
+    // `set` cannot express, so when any exist we replay them through
+    // `add --type autofilter` (which accepts range + criteriaN.OP and rebuilds
+    // the filterColumns idempotently over the range the set row just created).
+    private static void EmitAutoFilterCriteria(ExcelHandler xl, string sheetPath,
+        List<BatchItem> items, List<UnsupportedWarning> warnings)
+    {
+        DocumentNode af;
+        try { af = xl.Get($"{sheetPath}/autofilter"); }
+        catch { return; }
+        if (!af.Format.TryGetValue("range", out var rv) || rv is not string range || range.Length == 0)
+            return;
+        var criteria = af.Format
+            .Where(kv => kv.Key.StartsWith("criteria", StringComparison.OrdinalIgnoreCase)
+                && kv.Value is string s && s.Length > 0)
+            .ToList();
+        if (criteria.Count == 0) return;
+        var props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["range"] = range };
+        foreach (var (k, v) in criteria) props[k] = (string)v!;
+        items.Add(new BatchItem { Command = "add", Parent = sheetPath, Type = "autofilter", Props = props });
     }
 
     // ==================== Tables ====================

@@ -772,6 +772,7 @@ public partial class ExcelHandler
             var af = GetSheet(worksheet).GetFirstChild<AutoFilter>();
             var afNode = new DocumentNode { Path = path, Type = "autofilter" };
             if (af?.Reference?.Value != null) afNode.Format["range"] = af.Reference.Value;
+            if (af != null) PopulateAutoFilterCriteria(af, afNode);
             return afNode;
         }
 
