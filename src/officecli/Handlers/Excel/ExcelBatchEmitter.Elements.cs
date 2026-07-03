@@ -133,6 +133,7 @@ public static partial class ExcelBatchEmitter
                     CopyString(cf, "minColor", props, "mincolor");
                     CopyString(cf, "maxColor", props, "maxcolor");
                     CopyString(cf, "midColor", props, "midcolor");
+                    CopyString(cf, "midpoint", props, "midpoint");
                     break;
                 case "iconSet":
                     addType = "iconset";

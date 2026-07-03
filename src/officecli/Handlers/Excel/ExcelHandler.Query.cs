@@ -665,6 +665,13 @@ public partial class ExcelHandler
                             var midRgb = colors[1].Rgb?.Value;
                             if (!string.IsNullOrEmpty(midRgb))
                                 cfNode.Format["midColor"] = ParseHelpers.FormatHexColor(midRgb);
+                            // Surface the midpoint cfvo value so a non-default
+                            // percentile (e.g. 40) round-trips instead of silently
+                            // resetting to 50. The mid cfvo is the second value object.
+                            var csCfvos = colorScale.Elements<ConditionalFormatValueObject>().ToList();
+                            if (csCfvos.Count >= 3 && csCfvos[1].Val?.Value is string midValStr
+                                && !string.IsNullOrEmpty(midValStr))
+                                cfNode.Format["midpoint"] = midValStr;
                         }
                     }
                 }
