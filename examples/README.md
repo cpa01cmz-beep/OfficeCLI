@@ -23,6 +23,7 @@ examples/
 │   ├── fields.{md,sh,py,docx}               # field codes (PAGE/DATE/REF/IF/HYPERLINK) + auto-populating table of contents
 │   ├── pictures.{md,sh,py,docx}             # inline/floating images — crop, alt, wrap, behind-text, absolute position
 │   ├── numbering.{md,sh,py,docx}            # list/numbering styles
+│   ├── diagram.{md,sh,py,docx}              # Mermaid diagrams — native editable shapes + full-fidelity PNG
 │   └── revisions.{md,sh,py,docx}            # tracked-change (revision) API
 ├── excel/                                 # 📊 Excel examples — *.{md,sh,py,xlsx}
 │   ├── cell-formatting.{md,sh,py,xlsx}      # full cell property surface (fonts/fills/borders/numFmt/data)
@@ -158,6 +159,7 @@ python pictures/pictures-basic.py            # picture src/crop/rotation/links (
 - Complex tables
 - Text boxes and styling
 - Numbering / list showcases
+- Mermaid diagrams — `render=native` (editable flowchart / sequence shapes) and `render=image` (inline full-fidelity PNG of every mermaid type)
 
 ### 📊 [Excel Examples →](excel/)
 - Cell formatting — the full `cell` property surface across 5 sheets: fonts (name/size/bold/italic/color/underline/strike), fills (hex/named/rgb) + alignment (h/v/wrap/RTL), borders (shorthand/all/per-side/color), number formats (thousands/%/currency/date/scientific/accounting), and data (value/type/formula/link/locked/merge)
