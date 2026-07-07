@@ -1035,7 +1035,7 @@ public partial class WordHandler
         var tables = body.Elements<Table>().ToList();
         if (tableIdx < 1 || tableIdx > tables.Count)
             throw new ArgumentException($"Table index {tableIdx} out of range");
-        var table = tables[tableIdx - 1];
+        var table = tables[PathIndex.ToArrayIndex(tableIdx)];
 
         // Same ordinal-vs-grid-slot hazard as the physical column ops: a
         // preceding gridSpan would mark the wrong cell with <w:cellDel>.
@@ -1051,7 +1051,7 @@ public partial class WordHandler
         {
             var cells = row.Elements<TableCell>().ToList();
             if (colIdx < 1 || colIdx > cells.Count) continue; // skip short rows
-            var cell = cells[colIdx - 1];
+            var cell = cells[PathIndex.ToArrayIndex(colIdx)];
             var tcPr = cell.GetFirstChild<TableCellProperties>()
                       ?? cell.PrependChild(new TableCellProperties());
             tcPr.AppendChild(new CellDeletion
@@ -2481,7 +2481,7 @@ public partial class WordHandler
         var tables = body.Elements<Table>().ToList();
         if (tableIdx < 1 || tableIdx > tables.Count)
             throw new ArgumentException($"Table {tableIdx} not found at /body (total: {tables.Count})");
-        var table = tables[tableIdx - 1];
+        var table = tables[PathIndex.ToArrayIndex(tableIdx)];
         var grid = table.GetFirstChild<TableGrid>()
             ?? throw new InvalidOperationException("Table has no <w:tblGrid>");
         return (table, grid);
@@ -2503,7 +2503,7 @@ public partial class WordHandler
     }
 
     // BUG-COLOP-GRIDIDX: column add/remove/move/copy address cells by their
-    // ORDINAL position in the row (cells[colIdx-1]). That equals the grid slot
+    // ORDINAL position in the row (cells[PathIndex.ToArrayIndex(colIdx)]). That equals the grid slot
     // ONLY when no preceding cell in the row horizontally spans (gridSpan). A
     // gridSpan before the target column shifts the ordinal, so the op silently
     // targets the WRONG cell — removing/marking/cloning a different column's
@@ -2562,12 +2562,12 @@ public partial class WordHandler
 
         GuardNoMergesInColumn(table, colIdx, "remove");
 
-        gridCols[colIdx - 1].Remove();
+        gridCols[PathIndex.ToArrayIndex(colIdx)].Remove();
         foreach (var row in table.Elements<TableRow>())
         {
             var cells = row.Elements<TableCell>().ToList();
             if (colIdx - 1 < cells.Count)
-                cells[colIdx - 1].Remove();
+                cells[PathIndex.ToArrayIndex(colIdx)].Remove();
         }
     }
 
@@ -2612,7 +2612,7 @@ public partial class WordHandler
         if (targetIdx == -1)
             return $"/body/tbl[{tableIdx}]/col[{colIdx}]";
 
-        var movingGridCol = gridCols[colIdx - 1];
+        var movingGridCol = gridCols[PathIndex.ToArrayIndex(colIdx)];
         movingGridCol.Remove();
         var movingCells = new List<TableCell>();
         foreach (var row in table.Elements<TableRow>())
@@ -2620,8 +2620,8 @@ public partial class WordHandler
             var cells = row.Elements<TableCell>().ToList();
             if (colIdx - 1 < cells.Count)
             {
-                movingCells.Add(cells[colIdx - 1]);
-                cells[colIdx - 1].Remove();
+                movingCells.Add(cells[PathIndex.ToArrayIndex(colIdx)]);
+                cells[PathIndex.ToArrayIndex(colIdx)].Remove();
             }
             else
             {
@@ -2674,13 +2674,13 @@ public partial class WordHandler
 
         var targetIdx = ResolveSameTableColumnAnchor(position, tableIdx, sourceColIdx: null);
 
-        var clonedGridCol = (GridColumn)gridCols[colIdx - 1].CloneNode(true);
+        var clonedGridCol = (GridColumn)gridCols[PathIndex.ToArrayIndex(colIdx)].CloneNode(true);
         var clonedCells = new List<TableCell>();
         foreach (var row in table.Elements<TableRow>())
         {
             var cells = row.Elements<TableCell>().ToList();
             clonedCells.Add(colIdx - 1 < cells.Count
-                ? (TableCell)cells[colIdx - 1].CloneNode(true)
+                ? (TableCell)cells[PathIndex.ToArrayIndex(colIdx)].CloneNode(true)
                 : new TableCell(new Paragraph()));
         }
 

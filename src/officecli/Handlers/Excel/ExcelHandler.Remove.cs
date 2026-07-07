@@ -7,6 +7,7 @@ using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 using C = DocumentFormat.OpenXml.Drawing.Charts;
 using XDR = DocumentFormat.OpenXml.Drawing.Spreadsheet;
+using OfficeCli.Core;
 
 namespace OfficeCli.Handlers;
 
@@ -794,7 +795,7 @@ public partial class ExcelHandler
             if (runIdx < 1 || runIdx > runs.Count)
                 throw new ArgumentException($"Run index {runIdx} out of range (1-{runs.Count})");
 
-            runs[runIdx - 1].Remove();
+            runs[PathIndex.ToArrayIndex(runIdx)].Remove();
 
             // Convert back to plain text if appropriate
             var remainingRuns = ssi.Elements<Run>().ToList();

@@ -269,7 +269,7 @@ public partial class ExcelHandler
             var rowIdx = int.Parse(rowMatch.Groups[1].Value);
             // Try ordinal lookup first (Nth row element), then fall back to RowIndex
             var allRows = sheetData.Elements<Row>().ToList();
-            var row = (rowIdx >= 1 && rowIdx <= allRows.Count ? allRows[rowIdx - 1] : null)
+            var row = (rowIdx >= 1 && rowIdx <= allRows.Count ? allRows[PathIndex.ToArrayIndex(rowIdx)] : null)
                 ?? sheetData.Elements<Row>().FirstOrDefault(r => r.RowIndex?.Value == (uint)rowIdx)
                 ?? throw new ArgumentException($"Row {rowIdx} not found");
 

@@ -1111,7 +1111,7 @@ public partial class ExcelHandler
             var runs = ssi.Elements<Run>().ToList();
             if (runIdx < 1 || runIdx > runs.Count)
                 throw new ArgumentException($"Run index {runIdx} out of range (1-{runs.Count})");
-            return RunToNode(runs[runIdx - 1], $"/{sheetNameFromPath}/{runCellRef}/run[{runIdx}]");
+            return RunToNode(runs[PathIndex.ToArrayIndex(runIdx)], $"/{sheetNameFromPath}/{runCellRef}/run[{runIdx}]");
         }
 
         if (cellRef.Contains(':'))

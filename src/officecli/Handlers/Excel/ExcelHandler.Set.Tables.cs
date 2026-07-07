@@ -262,7 +262,7 @@ public partial class ExcelHandler
         if (tableIdx < 1 || tableIdx > tableParts.Count)
             throw new ArgumentException($"Table index {tableIdx} out of range (1..{tableParts.Count})");
 
-        var table = tableParts[tableIdx - 1].Table
+        var table = tableParts[PathIndex.ToArrayIndex(tableIdx)].Table
             ?? throw new ArgumentException($"Table {tableIdx} has no definition");
 
         var tblUnsupported = new List<string>();
@@ -417,7 +417,7 @@ public partial class ExcelHandler
                     var tableCols = table.GetFirstChild<TableColumns>()?.Elements<TableColumn>().ToList();
                     if (tableCols == null || colIdx < 1 || colIdx > tableCols.Count)
                         throw new ArgumentException($"Column index {colIdx} out of range (1..{tableCols?.Count ?? 0})");
-                    var col = tableCols[colIdx - 1];
+                    var col = tableCols[PathIndex.ToArrayIndex(colIdx)];
                     switch (colProp)
                     {
                         case "name": col.Name = value; break;
@@ -451,7 +451,7 @@ public partial class ExcelHandler
             }
         }
 
-        tableParts[tableIdx - 1].Table!.Save();
+        tableParts[PathIndex.ToArrayIndex(tableIdx)].Table!.Save();
         return tblUnsupported;
     }
 

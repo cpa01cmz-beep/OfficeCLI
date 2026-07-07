@@ -330,7 +330,7 @@ public partial class WordHandler
         }
 
         var paraIdx = cursor.Elements<Paragraph>().TakeWhile(p => p != para).Count() + 1;
-        if (!ReferenceEquals(cursor.Elements<Paragraph>().ElementAtOrDefault(paraIdx - 1), para))
+        if (!ReferenceEquals(cursor.Elements<Paragraph>().ElementAtOrDefault(PathIndex.ToArrayIndex(paraIdx)), para))
             return null; // paragraph not a direct child of the resolved cursor
         // Top-level body paragraphs use the paraId form so EmitComments can map
         // the source paraId -> target index via paraIdToTargetIdx. Cell paragraphs

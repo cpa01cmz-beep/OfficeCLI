@@ -113,7 +113,7 @@ public partial class ExcelHandler
         if (runIdx < 1 || runIdx > runs.Count)
             throw new ArgumentException($"Run index {runIdx} out of range (1-{runs.Count})");
 
-        var run = runs[runIdx - 1];
+        var run = runs[PathIndex.ToArrayIndex(runIdx)];
         var rProps = run.RunProperties ?? run.PrependChild(new RunProperties());
 
         var unsupported = new List<string>();
