@@ -387,8 +387,14 @@ public partial class PowerPointHandler
                         rProps.RemoveAllChildren<Drawing.LatinFont>();
                         rProps.RemoveAllChildren<Drawing.EastAsianFont>();
                         rProps.RemoveAllChildren<Drawing.ComplexScriptFont>();
-                        rProps.Append(new Drawing.LatinFont { Typeface = value });
-                        rProps.Append(new Drawing.EastAsianFont { Typeface = value });
+                        // Empty value clears the override (removes the elements) so
+                        // the run inherits the theme/placeholder font, rather than
+                        // pinning a literal typeface="" (which is not "default").
+                        if (!string.IsNullOrEmpty(value))
+                        {
+                            rProps.Append(new Drawing.LatinFont { Typeface = value });
+                            rProps.Append(new Drawing.EastAsianFont { Typeface = value });
+                        }
                         ReorderDrawingRunProperties(rProps);
                     }
                     break;
@@ -398,7 +404,8 @@ public partial class PowerPointHandler
                     {
                         var rProps = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
                         rProps.RemoveAllChildren<Drawing.LatinFont>();
-                        rProps.Append(new Drawing.LatinFont { Typeface = value });
+                        if (!string.IsNullOrEmpty(value))
+                            rProps.Append(new Drawing.LatinFont { Typeface = value });
                         ReorderDrawingRunProperties(rProps);
                     }
                     break;
@@ -408,7 +415,8 @@ public partial class PowerPointHandler
                     {
                         var rProps = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
                         rProps.RemoveAllChildren<Drawing.EastAsianFont>();
-                        rProps.Append(new Drawing.EastAsianFont { Typeface = value });
+                        if (!string.IsNullOrEmpty(value))
+                            rProps.Append(new Drawing.EastAsianFont { Typeface = value });
                         ReorderDrawingRunProperties(rProps);
                     }
                     break;
@@ -418,7 +426,8 @@ public partial class PowerPointHandler
                     {
                         var rProps = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
                         rProps.RemoveAllChildren<Drawing.ComplexScriptFont>();
-                        rProps.Append(new Drawing.ComplexScriptFont { Typeface = value });
+                        if (!string.IsNullOrEmpty(value))
+                            rProps.Append(new Drawing.ComplexScriptFont { Typeface = value });
                         ReorderDrawingRunProperties(rProps);
                     }
                     break;
@@ -2787,8 +2796,12 @@ public partial class PowerPointHandler
                         var rProps = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
                         rProps.RemoveAllChildren<Drawing.LatinFont>();
                         rProps.RemoveAllChildren<Drawing.EastAsianFont>();
-                        rProps.Append(new Drawing.LatinFont { Typeface = value });
-                        rProps.Append(new Drawing.EastAsianFont { Typeface = value });
+                        // Empty clears the override (see run-level path above).
+                        if (!string.IsNullOrEmpty(value))
+                        {
+                            rProps.Append(new Drawing.LatinFont { Typeface = value });
+                            rProps.Append(new Drawing.EastAsianFont { Typeface = value });
+                        }
                         ReorderDrawingRunProperties(rProps);
                     }
                     break;
@@ -2798,7 +2811,8 @@ public partial class PowerPointHandler
                     {
                         var rProps = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
                         rProps.RemoveAllChildren<Drawing.LatinFont>();
-                        rProps.Append(new Drawing.LatinFont { Typeface = value });
+                        if (!string.IsNullOrEmpty(value))
+                            rProps.Append(new Drawing.LatinFont { Typeface = value });
                         ReorderDrawingRunProperties(rProps);
                     }
                     break;
@@ -2808,7 +2822,8 @@ public partial class PowerPointHandler
                     {
                         var rProps = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
                         rProps.RemoveAllChildren<Drawing.EastAsianFont>();
-                        rProps.Append(new Drawing.EastAsianFont { Typeface = value });
+                        if (!string.IsNullOrEmpty(value))
+                            rProps.Append(new Drawing.EastAsianFont { Typeface = value });
                         ReorderDrawingRunProperties(rProps);
                     }
                     break;
@@ -2818,7 +2833,8 @@ public partial class PowerPointHandler
                     {
                         var rProps = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
                         rProps.RemoveAllChildren<Drawing.ComplexScriptFont>();
-                        rProps.Append(new Drawing.ComplexScriptFont { Typeface = value });
+                        if (!string.IsNullOrEmpty(value))
+                            rProps.Append(new Drawing.ComplexScriptFont { Typeface = value });
                         ReorderDrawingRunProperties(rProps);
                     }
                     break;
