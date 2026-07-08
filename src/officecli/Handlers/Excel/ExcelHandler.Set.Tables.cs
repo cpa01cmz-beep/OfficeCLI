@@ -540,8 +540,12 @@ public partial class ExcelHandler
                     // rejects the file (0x800A03EC) while validation stays
                     // green. Keep the VML in lockstep.
                     if (!string.IsNullOrEmpty(oldCmtRef)
-                        && !string.Equals(oldCmtRef, cmtElement.Reference!.Value, StringComparison.OrdinalIgnoreCase))
-                        UpdateCommentVmlShapeRef(worksheet, oldCmtRef!, cmtElement.Reference!.Value!);
+                        && !string.Equals(oldCmtRef, cmtElement.Reference!.Value, StringComparison.OrdinalIgnoreCase)
+                        && !UpdateCommentVmlShapeRef(worksheet, oldCmtRef!, cmtElement.Reference!.Value!))
+                        Console.Error.WriteLine(
+                            "Warning: comment moved to " + cmtElement.Reference!.Value
+                            + " but the legacy VML shape anchor could not be located; "
+                            + "the comment popup may still point at the old cell.");
                     break;
                 }
                 case "author":

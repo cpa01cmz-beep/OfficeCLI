@@ -380,10 +380,17 @@ public partial class ExcelHandler
     /// and rewrites Row/Column plus the 8-number Anchor to the new cell,
     /// mirroring the geometry AppendCommentVmlShape writes on Add.
     /// </summary>
-    private void UpdateCommentVmlShapeRef(WorksheetPart worksheet, string oldRef, string newRef)
+    /// <returns>
+    /// true if the VML shape's Row/Column (and Anchor) were rewritten;
+    /// false if no matching shape was found (e.g. externally-authored VML
+    /// whose Row/Column no longer carries the old cell). The caller warns
+    /// on false so the desync between data and presentation part is visible
+    /// rather than a silent no-op.
+    /// </returns>
+    private bool UpdateCommentVmlShapeRef(WorksheetPart worksheet, string oldRef, string newRef)
     {
         var vmlPart = worksheet.VmlDrawingParts.FirstOrDefault();
-        if (vmlPart == null) return;
+        if (vmlPart == null) return false;
         string xml;
         using (var reader = new System.IO.StreamReader(vmlPart.GetStream(System.IO.FileMode.Open, System.IO.FileAccess.Read)))
             xml = reader.ReadToEnd();
@@ -393,28 +400,39 @@ public partial class ExcelHandler
         int oldCol0 = ColumnNameToIndex(oldColName) - 1, oldRow0 = oldRowNum - 1;
         int newCol0 = ColumnNameToIndex(newColName) - 1, newRow0 = newRowNum - 1;
 
-        var marker = $"<x:Row>{oldRow0}</x:Row><x:Column>{oldCol0}</x:Column>";
-        var idx = xml.IndexOf(marker, StringComparison.Ordinal);
-        if (idx < 0) return; // externally-authored VML with different formatting — leave untouched
+        // Prefix-agnostic match: openpyxl and other authors emit ns-prefixed
+        // (e.g. ns2:Row) VML; a fixed "<x:Row>" literal would silently miss it.
+        var rowColRe = new Regex(
+            $@"<(?<rp>\w+:)?Row>\s*{oldRow0}\s*</(?:\w+:)?Row>\s*<(?<cp>\w+:)?Column>\s*{oldCol0}\s*</(?:\w+:)?Column>");
+        var rowColM = rowColRe.Match(xml);
+        if (!rowColM.Success) return false; // no matching shape — desync stays, caller warns
 
         // Anchor precedes Row/Column inside the same ClientData block; rewrite
-        // the nearest preceding <x:Anchor>...</x:Anchor>.
-        var anchorOpen = xml.LastIndexOf("<x:Anchor>", idx, StringComparison.Ordinal);
-        var anchorClose = anchorOpen >= 0
-            ? xml.IndexOf("</x:Anchor>", anchorOpen, StringComparison.Ordinal)
-            : -1;
+        // the nearest preceding <...Anchor>...</...Anchor> (prefix-agnostic).
         var newAnchor = $"{newCol0 + 1}, 15, {newRow0}, 2, {newCol0 + 3}, 15, {newRow0 + 3}, 16";
-        if (anchorOpen >= 0 && anchorClose > anchorOpen && anchorClose < idx)
+        var anchorRe = new Regex(@"<(?:\w+:)?Anchor>(?<val>.*?)</(?:\w+:)?Anchor>", RegexOptions.Singleline);
+        Match? nearestAnchor = null;
+        foreach (Match am in anchorRe.Matches(xml))
         {
-            xml = xml[..(anchorOpen + "<x:Anchor>".Length)] + newAnchor + xml[anchorClose..];
-            idx = xml.IndexOf(marker, StringComparison.Ordinal); // positions shifted
+            if (am.Index >= rowColM.Index) break;
+            nearestAnchor = am;
         }
-        xml = xml[..idx]
-            + $"<x:Row>{newRow0}</x:Row><x:Column>{newCol0}</x:Column>"
-            + xml[(idx + marker.Length)..];
+        if (nearestAnchor != null)
+        {
+            var valGroup = nearestAnchor.Groups["val"];
+            xml = xml[..valGroup.Index] + newAnchor + xml[(valGroup.Index + valGroup.Length)..];
+            rowColM = rowColRe.Match(xml); // positions shifted after anchor rewrite
+            if (!rowColM.Success) return false;
+        }
+        var rp = rowColM.Groups["rp"].Value;
+        var cp = rowColM.Groups["cp"].Value;
+        xml = xml[..rowColM.Index]
+            + $"<{rp}Row>{newRow0}</{rp}Row><{cp}Column>{newCol0}</{cp}Column>"
+            + xml[(rowColM.Index + rowColM.Length)..];
 
         using var writer = new System.IO.StreamWriter(vmlPart.GetStream(System.IO.FileMode.Create, System.IO.FileAccess.Write));
         writer.Write(xml);
+        return true;
     }
 
     private string AddValidation(string parentPath, string type, InsertPosition? position, Dictionary<string, string> properties)

@@ -254,8 +254,56 @@ public partial class ExcelHandler
                     break;
             }
         }
+        // Keep the legacy VML shape geometry in lockstep with the OLE
+        // objectPr anchor whenever the rectangle moved. The two parts
+        // desynchronize otherwise (data part updated, presentation part
+        // stale) and older Excel renders the object at the old cell.
+        if (properties.ContainsKey("anchor") || properties.ContainsKey("width") || properties.ContainsKey("height"))
+        {
+            var objectPrVml = oleObjSet.GetFirstChild<EmbeddedObjectProperties>();
+            var objAnchorVml = objectPrVml?.GetFirstChild<ObjectAnchor>();
+            var fromMVml = objAnchorVml?.GetFirstChild<FromMarker>();
+            var toMVml = objAnchorVml?.GetFirstChild<ToMarker>();
+            if (fromMVml != null && toMVml != null && oleObjSet.ShapeId?.Value is uint oleSid)
+            {
+                int.TryParse(fromMVml.GetFirstChild<XDR.ColumnId>()?.Text ?? "0", out var vfc);
+                int.TryParse(fromMVml.GetFirstChild<XDR.RowId>()?.Text ?? "0", out var vfr);
+                int.TryParse(toMVml.GetFirstChild<XDR.ColumnId>()?.Text ?? "0", out var vtc);
+                int.TryParse(toMVml.GetFirstChild<XDR.RowId>()?.Text ?? "0", out var vtr);
+                UpdateOleVmlShapeAnchor(worksheet, oleSid, vfc, vfr, vtc, vtr);
+            }
+        }
         SaveWorksheet(worksheet);
         return oleUnsupportedSet;
+    }
+
+    /// <summary>
+    /// Re-anchor the legacy VML OLE shape (id <c>_x0000_s{shapeId}</c>) when the
+    /// companion objectPr anchor moves. Rewrites the shape's 8-coordinate
+    /// x:Anchor to match, mirroring EnsureExcelVmlShapeForOle on Add. Prefix-
+    /// agnostic (matches externally-authored VML with ns-prefixed elements).
+    /// </summary>
+    private void UpdateOleVmlShapeAnchor(WorksheetPart worksheet, uint shapeId,
+        int fromCol, int fromRow, int toCol, int toRow)
+    {
+        var vmlPart = worksheet.VmlDrawingParts.FirstOrDefault();
+        if (vmlPart == null) return;
+        System.Xml.Linq.XDocument doc;
+        try
+        {
+            using var reader = vmlPart.GetStream(System.IO.FileMode.Open, System.IO.FileAccess.Read);
+            doc = System.Xml.Linq.XDocument.Load(reader);
+        }
+        catch { return; }
+        var vNs = (System.Xml.Linq.XNamespace)"urn:schemas-microsoft-com:vml";
+        var xNs = (System.Xml.Linq.XNamespace)"urn:schemas-microsoft-com:office:excel";
+        var shape = doc.Descendants(vNs + "shape")
+            .FirstOrDefault(s => (string?)s.Attribute("id") == $"_x0000_s{shapeId}");
+        var anchor = shape?.Element(xNs + "ClientData")?.Element(xNs + "Anchor");
+        if (anchor == null) return;
+        anchor.Value = $"{fromCol}, 0, {fromRow}, 0, {toCol}, 0, {toRow}, 0";
+        using var writeStream = vmlPart.GetStream(System.IO.FileMode.Create, System.IO.FileAccess.Write);
+        doc.Save(writeStream);
     }
 
     private List<string> SetPictureByPath(Match m, WorksheetPart worksheet, Dictionary<string, string> properties)

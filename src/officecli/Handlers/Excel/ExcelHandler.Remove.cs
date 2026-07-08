@@ -738,6 +738,9 @@ public partial class ExcelHandler
             if (oleIdx < 1 || oleIdx > oleElements.Count)
                 throw new ArgumentException($"OLE object index {oleIdx} out of range (1..{oleElements.Count})");
             var oleToRemove = oleElements[oleIdx - 1];
+            // Capture the shapeId before removal so we can prune the matching
+            // legacy VML shape (see below).
+            var oleShapeId = oleToRemove.ShapeId?.Value;
             // Delete backing embedded payload + icon image part by rel id.
             if (oleToRemove.Id?.Value is string oleRelId && !string.IsNullOrEmpty(oleRelId))
             {
@@ -754,6 +757,39 @@ public partial class ExcelHandler
             oleToRemove.Remove();
             if (oleParent is OleObjects oleColl && !oleColl.HasChildren)
                 oleColl.Remove();
+
+            // Prune the companion legacy VML shape. Without this, add/remove
+            // cycles leave ghost <v:shape> elements accumulating in the VML
+            // part (and a dangling <legacyDrawing> when the VML empties out),
+            // mirroring the comment-remove cleanup discipline above.
+            var oleVmlPart = worksheet.VmlDrawingParts.FirstOrDefault();
+            if (oleVmlPart != null && oleShapeId.HasValue)
+            {
+                bool anyShapesLeft = true;
+                try
+                {
+                    System.Xml.Linq.XDocument vmlDoc;
+                    using (var stream = oleVmlPart.GetStream(System.IO.FileMode.Open, System.IO.FileAccess.Read))
+                        vmlDoc = System.Xml.Linq.XDocument.Load(stream);
+                    var vNs = (System.Xml.Linq.XNamespace)"urn:schemas-microsoft-com:vml";
+                    var target = vmlDoc.Descendants(vNs + "shape")
+                        .FirstOrDefault(s => (string?)s.Attribute("id") == $"_x0000_s{oleShapeId.Value}");
+                    target?.Remove();
+                    anyShapesLeft = vmlDoc.Descendants(vNs + "shape").Any();
+                    if (anyShapesLeft)
+                    {
+                        using var wstream = oleVmlPart.GetStream(System.IO.FileMode.Create, System.IO.FileAccess.Write);
+                        vmlDoc.Save(wstream);
+                    }
+                }
+                catch { anyShapesLeft = true; }
+
+                if (!anyShapesLeft)
+                {
+                    worksheet.DeletePart(oleVmlPart);
+                    GetSheet(worksheet).Elements<LegacyDrawing>().FirstOrDefault()?.Remove();
+                }
+            }
             SaveWorksheet(worksheet);
             return null;
         }
