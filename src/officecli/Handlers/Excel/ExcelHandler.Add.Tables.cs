@@ -379,9 +379,12 @@ public partial class ExcelHandler
         var dvWorksheet = FindWorksheet(dvSheetName)
             ?? throw new ArgumentException($"Sheet not found: {dvSheetName}");
 
+        // CONSISTENCY(range-alias): cf/colorscale/iconset/pivottable all take
+        // sqref/range/ref interchangeably; validation lacked `range` only.
         var dvSqref = properties.GetValueOrDefault("sqref")
+            ?? properties.GetValueOrDefault("range")
             ?? properties.GetValueOrDefault("ref")
-            ?? throw new ArgumentException("Property 'sqref' (or 'ref') is required for validation");
+            ?? throw new ArgumentException("Property 'sqref' (or 'range'/'ref') is required for validation");
 
         // NOTE: multi-region sqref ("A1:A5 C1:C5") is legal and opens fine in
         // real Excel — a fuzz report claiming otherwise was a render-service
