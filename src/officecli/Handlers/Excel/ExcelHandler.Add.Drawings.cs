@@ -137,6 +137,7 @@ public partial class ExcelHandler
             {
                 oleToCol = ColumnNameToIndex(m.Groups[3].Value) - 1;
                 oleToRow = int.Parse(m.Groups[4].Value) - 1;
+                NormalizeAnchorRect(ref oleFromCol, ref oleFromRow, ref oleToCol, ref oleToRow);
             }
             else
             {

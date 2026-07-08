@@ -1337,8 +1337,20 @@ public partial class ExcelHandler
         {
             toCol = ColumnNameToIndex(m.Groups[3].Value) - 1;
             toRow = int.Parse(m.Groups[4].Value) - 1;
+            // Inverted ranges (D4:B2) written verbatim produce a twoCellAnchor
+            // whose from exceeds to; real Excel refuses the file (0x800A03EC)
+            // while schema validation stays green. Normalize per axis, same
+            // as Excel treats a backwards drag-select.
+            NormalizeAnchorRect(ref fromCol, ref fromRow, ref toCol, ref toRow);
         }
         return true;
+    }
+
+    /// <summary>Swap anchor corners per axis so from ≤ to.</summary>
+    internal static void NormalizeAnchorRect(ref int fromCol, ref int fromRow, ref int toCol, ref int toRow)
+    {
+        if (toCol >= 0 && toCol < fromCol) (fromCol, toCol) = (toCol, fromCol);
+        if (toRow >= 0 && toRow < fromRow) (fromRow, toRow) = (toRow, fromRow);
     }
 
     /// <summary>

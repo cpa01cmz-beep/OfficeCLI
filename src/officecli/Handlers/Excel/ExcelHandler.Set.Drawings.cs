@@ -225,6 +225,7 @@ public partial class ExcelHandler
                     {
                         newToCol = ColumnNameToIndex(anchorM.Groups[3].Value) - 1;
                         newToRow = int.Parse(anchorM.Groups[4].Value) - 1;
+                        NormalizeAnchorRect(ref newFromCol, ref newFromRow, ref newToCol, ref newToRow);
                     }
                     else
                     {
