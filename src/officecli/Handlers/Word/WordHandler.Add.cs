@@ -482,7 +482,7 @@ public partial class WordHandler
         // w:tblStylePr, …) reach the generic path. CONSISTENCY(numbering-typed-decomp).
         if (parent is Numbering)
         {
-            bool prefixedGeneric = type.Contains(':');
+            bool prefixedGeneric = t.Contains(':');
             if (t != "num" && t != "abstractnum" && !prefixedGeneric)
                 throw new ArgumentException(
                     $"Cannot add '{type}' under /numbering. /numbering only holds numbering definitions — use --type num (with --prop abstractNumId=N) or --type abstractNum.");

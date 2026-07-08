@@ -82,8 +82,8 @@ public partial class WordHandler
         double scale;
         if (hasW || hasH)
         {
-            double boxW = hasW ? ParseEmu(wStr) / DiagramCmToEmu : contentCm;
-            double boxH = hasH ? ParseEmu(hStr) / DiagramCmToEmu : double.PositiveInfinity;
+            double boxW = hasW ? ParseEmu(wStr!) / DiagramCmToEmu : contentCm;
+            double boxH = hasH ? ParseEmu(hStr!) / DiagramCmToEmu : double.PositiveInfinity;
             scale = natW > 0.01 ? Math.Min(boxW / natW, boxH / natH) : 1.0;
         }
         else

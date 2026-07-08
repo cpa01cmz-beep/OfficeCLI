@@ -204,7 +204,7 @@ internal class ExcelStyleManager
                 && existingPattern.Value != PatternValues.None
                 && existingPattern.Value != PatternValues.Solid)
             {
-                fillId = GetOrCreatePatternFill(stylesheet, existingPattern.InnerText,
+                fillId = GetOrCreatePatternFill(stylesheet, existingPattern.InnerText!,
                     existingFill!.PatternFill!.ForegroundColor?.Rgb?.Value, loneBg);
                 applyFill = true;
             }

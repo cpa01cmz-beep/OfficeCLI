@@ -895,7 +895,9 @@ public partial class ExcelHandler
                 var rf = rp.GetFirstChild<RunFont>();
                 if (rf?.Val?.Value != null) o["font"] = rf.Val.Value!;
             }
-            arr.Add(o);
+            // Non-generic Add(JsonNode) — the generic Add<T> overload carries
+            // RequiresUnreferencedCode (IL2026) though it never serializes a JsonNode.
+            arr.Add((System.Text.Json.Nodes.JsonNode)o);
         }
         return arr.ToJsonString();
     }

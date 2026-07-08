@@ -836,7 +836,7 @@ public static partial class ExcelBatchEmitter
         _ => false,
     };
 
-    private static string FormatValue(object v) => v switch
+    private static string FormatValue(object? v) => v switch
     {
         bool b => b ? "true" : "false",
         double d => d.ToString("R", CultureInfo.InvariantCulture),

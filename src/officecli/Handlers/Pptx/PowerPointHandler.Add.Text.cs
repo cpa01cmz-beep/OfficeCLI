@@ -281,9 +281,9 @@ public partial class PowerPointHandler
                 var hasPBulletRaw = properties.TryGetValue("bulletRaw", out var pBulletRaw) || properties.TryGetValue("bulletraw", out pBulletRaw);
                 var hasPList = properties.TryGetValue("list", out var pList) || properties.TryGetValue("liststyle", out pList) || properties.TryGetValue("bullet", out pList);
                 if (hasPBulletRaw)
-                    ApplyBulletRaw(pProps, pBulletRaw);
+                    ApplyBulletRaw(pProps, pBulletRaw!);
                 else if (hasPList)
-                    ApplyListStyle(pProps, pList, preserveIndent: properties.ContainsKey("indent") || properties.ContainsKey("marginLeft") || properties.ContainsKey("marginleft") || properties.ContainsKey("marL") || properties.ContainsKey("marl"));
+                    ApplyListStyle(pProps, pList!, preserveIndent: properties.ContainsKey("indent") || properties.ContainsKey("marginLeft") || properties.ContainsKey("marginleft") || properties.ContainsKey("marL") || properties.ContainsKey("marl"));
                 // Paragraph-level default run properties (verbatim). Bare runs
                 // inherit size/bold/font from here; see ApplyDefRPrRaw.
                 if (properties.TryGetValue("defRPrRaw", out var pDefRPrRaw) || properties.TryGetValue("defrprraw", out pDefRPrRaw))

@@ -723,11 +723,6 @@ public partial class ExcelHandler
         if (worksheet == null) return result;
         var ws = GetSheet(worksheet);
 
-        void AddIf(bool present, string element, string reason)
-        {
-            if (present) result.Add((element, reason));
-        }
-
         // PR2-6 round-trip tables/cf/validations/comments/charts/sparklines/
         // pictures/shapes/pivots/slicers/chartEx/OLE; nothing scans here
         // today — kept as the hook for future unsupported content.

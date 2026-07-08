@@ -2765,7 +2765,7 @@ public partial class ExcelHandler
         if (col != null && (col.Min!.Value < colIdx || col.Max!.Value > colIdx))
         {
             var rangeMin = col.Min.Value;
-            var rangeMax = col.Max.Value;
+            var rangeMax = col.Max!.Value;
             if (rangeMin < colIdx)
             {
                 var left = (Column)col.CloneNode(true);

@@ -99,8 +99,8 @@ public partial class PowerPointHandler
             var (slideWEmu, slideHEmu) = GetSlideSize();
             double slideW = slideWEmu / CmToEmu, slideH = slideHEmu / CmToEmu;
             const double margin = 0.6;
-            double boxW = hasW ? ParseEmu(ws) / CmToEmu : slideW - 2 * margin;
-            double boxH = hasH ? ParseEmu(hs) / CmToEmu : slideH - 2 * margin;
+            double boxW = hasW ? ParseEmu(ws!) / CmToEmu : slideW - 2 * margin;
+            double boxH = hasH ? ParseEmu(hs!) / CmToEmu : slideH - 2 * margin;
             double fit = Math.Min(boxW / natW, boxH / natH);
             sc = (hasW || hasH) ? fit : Math.Min(1.0, fit); // explicit box fills; default shrinks-only
             // Uniform scale leaves slack on one axis; CENTRE the fitted diagram in
@@ -109,8 +109,8 @@ public partial class PowerPointHandler
             // identically, and honours the "centred" contract for the default
             // (no-position) box: boxX=margin, boxW=slideW-2margin →
             // margin+(boxW-natW*sc)/2 == (slideW-natW*sc)/2, unchanged.
-            double boxX = hasX ? ParseEmu(xs) / CmToEmu : margin;
-            double boxY = hasY ? ParseEmu(ys) / CmToEmu : margin;
+            double boxX = hasX ? ParseEmu(xs!) / CmToEmu : margin;
+            double boxY = hasY ? ParseEmu(ys!) / CmToEmu : margin;
             ox = boxX + (boxW - natW * sc) / 2;
             oy = boxY + (boxH - natH * sc) / 2;
         }
@@ -223,8 +223,8 @@ public partial class PowerPointHandler
                     double margin = 0.6 * CmToEmu;
                     bool hasX = pic.TryGetValue("x", out var xs);
                     bool hasY = pic.TryGetValue("y", out var ys);
-                    double boxX = hasX ? ParseEmu(xs) : margin;
-                    double boxY = hasY ? ParseEmu(ys) : margin;
+                    double boxX = hasX ? ParseEmu(xs!) : margin;
+                    double boxY = hasY ? ParseEmu(ys!) : margin;
                     double boxW = pic.TryGetValue("width", out var ws) ? ParseEmu(ws) : sw - 2 * margin;
                     double boxH = pic.TryGetValue("height", out var hs) ? ParseEmu(hs) : sh - 2 * margin;
                     double fit = Math.Min(boxW / d.Width, boxH / d.Height);
@@ -242,7 +242,7 @@ public partial class PowerPointHandler
         finally { try { System.IO.File.Delete(imgPath); } catch { /* best effort */ } }
     }
 
-    private Shape BuildDiagramShape(uint id, string geometry, string fill, string? line, string text,
+    private Shape BuildDiagramShape(uint id, string geometry, string? fill, string? line, string text,
                                     int fontPt, long x, long y, long cx, long cy)
     {
         var shape = new Shape

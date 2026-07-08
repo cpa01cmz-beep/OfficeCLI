@@ -830,7 +830,7 @@ public partial class PowerPointHandler
                     foreach (var para in newShape.TextBody?.Elements<Drawing.Paragraph>() ?? Enumerable.Empty<Drawing.Paragraph>())
                     {
                         var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
-                        ApplyBulletRaw(pProps, shBulletRaw);
+                        ApplyBulletRaw(pProps, shBulletRaw!);
                     }
                 }
                 else if (hasShList)
@@ -838,7 +838,7 @@ public partial class PowerPointHandler
                     foreach (var para in newShape.TextBody?.Elements<Drawing.Paragraph>() ?? Enumerable.Empty<Drawing.Paragraph>())
                     {
                         var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
-                        ApplyListStyle(pProps, listVal, preserveIndent: properties.ContainsKey("indent") || properties.ContainsKey("marginLeft") || properties.ContainsKey("marginleft") || properties.ContainsKey("marL") || properties.ContainsKey("marl"));
+                        ApplyListStyle(pProps, listVal!, preserveIndent: properties.ContainsKey("indent") || properties.ContainsKey("marginLeft") || properties.ContainsKey("marginleft") || properties.ContainsKey("marL") || properties.ContainsKey("marl"));
                     }
                 }
 

@@ -3052,7 +3052,7 @@ public partial class WordHandler
         // (alias zorder) is the stacking order (higher = front). Defaults keep the
         // legacy in-front, auto-incrementing behaviour.
         string behindDocVal = IsTruthy(properties.GetValueOrDefault("behindDoc", "")) ? "1" : "0";
-        string relHeightRaw = properties.GetValueOrDefault("relativeHeight") ?? properties.GetValueOrDefault("zorder");
+        string? relHeightRaw = properties.GetValueOrDefault("relativeHeight") ?? properties.GetValueOrDefault("zorder");
         string relHeightVal = !string.IsNullOrWhiteSpace(relHeightRaw)
             && long.TryParse(relHeightRaw.Trim(), out var rh) && rh >= 0
             ? rh.ToString()
