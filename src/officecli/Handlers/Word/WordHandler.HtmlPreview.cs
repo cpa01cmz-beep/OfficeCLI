@@ -2145,6 +2145,17 @@ public partial class WordHandler
     /// tables and image-only paragraphs.</summary>
     private void RenderHeaderFooterBody(StringBuilder sb, OpenXmlElement hf, StringBuilder? watermarkSb = null)
     {
+        // List items in a header/footer previously rendered as bare paragraphs
+        // (RenderParagraphHtml carries no list machinery) — every bullet/number
+        // marker was silently dropped while the body and table-cell paths
+        // rendered them. Reuse the cell path's per-container list state: same
+        // container-matrix defect class as the text-box display-math gap.
+        string? hfListTag = null;
+        var hfOlState = new OrderedListNumberingState();
+        void CloseHfList()
+        {
+            if (hfListTag != null) { sb.Append($"</{hfListTag}>"); hfListTag = null; }
+        }
         foreach (var child in hf.ChildElements)
         {
             // Watermark paragraphs are nested inside <w:sdt><w:sdtContent>;
@@ -2198,14 +2209,28 @@ public partial class WordHandler
                     // watermark is its only content, to avoid emitting a blank
                     // <p> in the header band (prior behaviour: bare `continue`).
                     if (ParagraphHasNonWatermarkContent(para))
+                    {
+                        CloseHfList();
                         RenderParagraphHtml(sb, para);
+                    }
                     continue;
                 }
+                var hfListStyle = GetParagraphListStyle(para);
+                if (hfListStyle != null)
+                {
+                    RenderCellListItem(sb, para, hfListStyle, ref hfListTag, hfOlState);
+                    continue;
+                }
+                CloseHfList();
                 RenderParagraphHtml(sb, para);
             }
             else if (child is Table tbl)
+            {
+                CloseHfList();
                 RenderTableHtmlPaged(sb, tbl);
+            }
         }
+        CloseHfList();
     }
 
     /// <summary>
