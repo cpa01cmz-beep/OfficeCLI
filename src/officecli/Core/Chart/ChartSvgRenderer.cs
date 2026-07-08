@@ -503,12 +503,6 @@ internal partial class ChartSvgRenderer
             }
             // Zero-baseline X coordinate within the plot (== plotOx when niceMin==0).
             var plotZeroX = ValToX(0);
-            // Tick fraction → X. Reversed flips the fraction so tick 0 sits at the
-            // right edge and the last tick at the left, keeping gridlines/labels
-            // aligned with the reversed bars.
-            double TickX(double tFrac) => isReversed
-                ? plotOx + (double)plotPw * (1 - tFrac)
-                : plotOx + (double)plotPw * tFrac;
             // Gridlines at the tick VALUES on the value scale (ValToX), matching the bars
             // — not even pixel fractions, which diverge when an explicit axisMax isn't a
             // multiple of tickStep. No-op when nTicks*tickStep==span.
@@ -757,14 +751,10 @@ internal partial class ChartSvgRenderer
                 var frac = ValFrac(v);
                 return isReversed ? oy + frac * ph : oy + ph - frac * ph;
             }
-            // Tick fraction → Y. Reversed flips so tick 0 sits at the top.
-            double TickY(double tFrac) => isReversed
-                ? oy + (double)ph * tFrac
-                : oy + ph - (double)ph * tFrac;
             // Zero-baseline Y coordinate within the plot (== oy+ph when niceMin==0).
             var plotZeroY = ValToY(0);
             // Gridlines sit at the tick VALUES on the value scale (via ValToY), not at
-            // even pixel fractions (TickY). These coincide when nTicks*tickStep == span,
+            // even pixel fractions. These coincide when nTicks*tickStep == span,
             // but an explicit axisMax that isn't a multiple of tickStep breaks that, and
             // pixel-even gridlines then diverge from the value-proportional bars (a bar
             // would overshoot its own labeled gridline). ValToY keeps gridline, label,
@@ -3421,8 +3411,12 @@ internal partial class ChartSvgRenderer
             var hasExplicitFill = ExtractFillColor(serSpPr, themeColors) != null;
             if (varyOn && !hasExplicitFill)
             {
-                var palette = new[] { "accent1", "accent2", "accent3", "accent4", "accent5", "accent6" }
-                    .Where(k => themeColors.ContainsKey(k)).Select(k => $"#{themeColors[k]}").ToArray();
+                // themeColors is null on the xlsx/docx preview paths (only pptx
+                // extracts a theme) — fall back to the static palette there.
+                var palette = themeColors == null
+                    ? FallbackColors
+                    : new[] { "accent1", "accent2", "accent3", "accent4", "accent5", "accent6" }
+                        .Where(k => themeColors.ContainsKey(k)).Select(k => $"#{themeColors[k]}").ToArray();
                 if (palette.Length == 0) palette = FallbackColors;
                 while (info.PerPointColors.Count < 1) info.PerPointColors.Add([]);
                 var catN = info.Categories.Count();
