@@ -83,6 +83,33 @@ internal static class ExcelDataFormatter
     }
 
     /// <summary>
+    /// Shared date-format-code detector for Get and the HTML preview (which
+    /// previously kept a forked contains-check that misclassified Y0.00 as a
+    /// date). A format mixing date tokens with digit placeholders is not a
+    /// date; fractional seconds (ss.00) are the one exception.
+    /// </summary>
+    public static bool LooksLikeDateFormatCode(string formatCode)
+        => IsDateFormat(0, formatCode);
+
+    /// <summary>
+    /// Excel-1900-system serial → DateTime, applying the Lotus leap-bug
+    /// alignment (serial 60 is the fictitious 1900-02-29 — mapped to
+    /// 02-28's DateTime here since .NET has no such date, callers wanting
+    /// the exact string should special-case 60; serials 1-59 run one day
+    /// ahead of the OADate scale). Shared with the HTML preview.
+    /// </summary>
+    public static DateTime FromExcelSerial(double value)
+    {
+        if (value >= 60 && value < 61)
+            // Fictitious 1900-02-29: no DateTime exists; approximate with
+            // 02-28 (+ time fraction). Callers that render a date string
+            // should special-case the day (see FormatDate / the HTML branch).
+            return new DateTime(1900, 2, 28).AddDays(value - 60);
+        if (value >= 1 && value < 60) value += 1;
+        return DateTime.FromOADate(value);
+    }
+
+    /// <summary>
     /// Format a raw numeric cell value using its number format.
     /// Returns null if no formatting is needed (raw value is fine as-is).
     /// </summary>
