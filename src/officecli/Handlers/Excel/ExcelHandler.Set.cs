@@ -1494,6 +1494,19 @@ public partial class ExcelHandler
                             // Unknown value — fall back to truthiness on hidden semantics
                             wbSheet.State = ParseHelpers.IsTruthy(v) ? SheetStateValues.Hidden : null;
                         }
+                        // Excel requires at least one visible sheet; a workbook
+                        // with none passes schema validation but real Excel
+                        // refuses the file (0x800A03EC). Reject the transition
+                        // that would hide the last visible sheet.
+                        static bool IsHiddenState(Sheet s) =>
+                            s.State?.Value == SheetStateValues.Hidden || s.State?.Value == SheetStateValues.VeryHidden;
+                        if (IsHiddenState(wbSheet) && wbSheets!.Elements<Sheet>().All(IsHiddenState))
+                        {
+                            wbSheet.State = null;
+                            throw new ArgumentException(
+                                $"Cannot hide sheet '{sheetName}': a workbook must keep at least one visible sheet, " +
+                                "or Excel refuses to open the file. Unhide another sheet first.");
+                        }
                         GetWorkbook().Save();
                     }
                     break;
