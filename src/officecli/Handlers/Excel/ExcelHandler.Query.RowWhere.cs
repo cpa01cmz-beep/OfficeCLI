@@ -152,9 +152,17 @@ public partial class ExcelHandler
         if (candidates.Count > 1)
         {
             var where = string.Join(", ", candidates.Select(c => $"{c.sheetName}!{c.label}"));
+            var sheets = candidates.Select(c => c.sheetName).Distinct().ToList();
+            // A sheet scope only disambiguates when the tables are on DIFFERENT
+            // sheets. When they share one sheet, that guidance is a dead end —
+            // there is no table-scope selector, so point at the tables' own
+            // ranges instead.
+            var suggestion = sheets.Count > 1
+                ? "Scope by sheet, e.g. /SheetName/row[...]."
+                : $"Both tables are on '{sheets[0]}', so a sheet scope cannot disambiguate — " +
+                  $"address the intended table's rows by its cell range directly (e.g. {sheets[0]}!{candidates[0].label}).";
             throw new Core.CliException(
-                $"row[col op val] is ambiguous — column(s) exist in {candidates.Count} tables ({where}). " +
-                "Scope by sheet, e.g. /SheetName/row[...].")
+                $"row[col op val] is ambiguous — column(s) exist in {candidates.Count} tables ({where}). {suggestion}")
                 { Code = "invalid_selector" };
         }
 
