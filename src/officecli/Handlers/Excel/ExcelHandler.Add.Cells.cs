@@ -443,6 +443,23 @@ public partial class ExcelHandler
                 ShiftCellsDownInColumn(cellSheetData, shiftCol, shiftRow);
         }
 
+        // Atomicity: validate a type=boolean value BEFORE FindOrCreateCell
+        // appends the cell to the sheet. A throw AFTER the cell is created
+        // used to leave a corrupt <c t="b"><v>garbage</v></c> persisted on
+        // disk (real Excel then refuses the file, 0x800A03EC) even though the
+        // Add reported an error. The later in-switch check stays as a
+        // defense-in-depth guard.
+        {
+            var upfrontType = properties.GetValueOrDefault("type")?.ToLowerInvariant();
+            var upfrontValue = (properties.GetValueOrDefault("value")
+                ?? properties.GetValueOrDefault("text"))?.Trim().ToLowerInvariant();
+            if ((upfrontType is "boolean" or "bool") && !string.IsNullOrEmpty(upfrontValue)
+                && upfrontValue is not ("true" or "false" or "yes" or "no" or "1" or "0"))
+                throw new ArgumentException(
+                    $"Cannot store '{properties.GetValueOrDefault("value") ?? properties.GetValueOrDefault("text")}' as boolean; " +
+                    "value must be true/false, yes/no, or 1/0. Use type=string to keep the literal text.");
+        }
+
         var cell = FindOrCreateCell(cellSheetData, cellRef);
 
         // CONSISTENCY(cell-value-alias): Set accepts "text" as alias for
@@ -636,6 +653,13 @@ public partial class ExcelHandler
                         cell.CellValue = new CellValue("1");
                     else if (boolText == "false" || boolText == "no" || boolText == "0")
                         cell.CellValue = new CellValue("0");
+                    else if (!string.IsNullOrEmpty(boolText))
+                        // A t="b" cell whose value isn't 0/1 makes real Excel
+                        // refuse the whole file (0x800A03EC). Reject up front,
+                        // mirroring the type=date guard.
+                        throw new ArgumentException(
+                            $"Cannot store '{cell.CellValue?.Text}' as boolean; value must be true/false, yes/no, or 1/0. " +
+                            "Use type=string to keep the literal text.");
                 }
                 // CONSISTENCY(cell-type-parity): mirror Set's value auto-detect
                 // path (ExcelHandler.Set.cs lines 1025-1033) — parse the cell

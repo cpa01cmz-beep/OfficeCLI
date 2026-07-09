@@ -2671,12 +2671,16 @@ internal static partial class ChartHelper
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
                     var doughnut = plotArea2?.GetFirstChild<C.DoughnutChart>();
                     if (doughnut == null) { unsupported.Add(key); break; }
-                    doughnut.RemoveAllChildren<C.HoleSize>();
+                    // Validate BEFORE mutating — a throw after RemoveAllChildren
+                    // used to strip the mandatory <c:holeSize> and leave a
+                    // schema-invalid doughnutChart persisted on disk despite the
+                    // reported error (atomicity bug).
                     var holeSizeInt = ParseHelpers.SafeParseInt(value, "holeSize");
                     // OOXML ST_HoleSize: MinInclusive=1, MaxInclusive=90. Pre-fix
                     // code silently clamped, masking out-of-range input.
                     if (holeSizeInt < 1 || holeSizeInt > 90)
                         throw new ArgumentException($"Invalid 'holeSize' value: '{value}'. Must be between 1 and 90 (OOXML ST_HoleSize).");
+                    doughnut.RemoveAllChildren<C.HoleSize>();
                     doughnut.AppendChild(new C.HoleSize { Val = (byte)holeSizeInt });
                     break;
                 }

@@ -295,7 +295,21 @@ public partial class ExcelHandler
                 deferredProps[dk] = dv;
         }
         if (deferredProps.Count > 0)
-            ChartHelper.SetChartProperties(chartPart, deferredProps);
+        {
+            // Atomicity: a bad deferred prop (e.g. holeSize=500) throws here,
+            // AFTER the ChartPart was created. Roll the part back on failure so
+            // a rejected Add leaves no orphaned/partial chart part behind — the
+            // reported error (exit 1) must mean nothing was added.
+            try
+            {
+                ChartHelper.SetChartProperties(chartPart, deferredProps);
+            }
+            catch
+            {
+                drawingsPart.DeletePart(chartPart);
+                throw;
+            }
+        }
 
         var anchor = new XDR.TwoCellAnchor();
         anchor.Append(new XDR.FromMarker(

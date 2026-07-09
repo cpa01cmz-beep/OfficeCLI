@@ -459,9 +459,15 @@ public partial class ExcelHandler
                     if (cell.DataType?.Value == CellValues.Boolean)
                     {
                         var bv = cellValue.Trim().ToLowerInvariant();
-                        if (bv is "true" or "yes") cell.CellValue = new CellValue("1");
-                        else if (bv is "false" or "no") cell.CellValue = new CellValue("0");
-                        else cell.CellValue = new CellValue(cellValue);
+                        if (bv is "true" or "yes" or "1") cell.CellValue = new CellValue("1");
+                        else if (bv is "false" or "no" or "0") cell.CellValue = new CellValue("0");
+                        else
+                            // A t="b" cell whose value isn't 0/1 makes Excel
+                            // refuse the whole file (0x800A03EC). Reject rather
+                            // than write garbage into the existing boolean cell.
+                            throw new ArgumentException(
+                                $"Cannot store '{cellValue}' in a boolean cell; value must be true/false, yes/no, or 1/0. " +
+                                "Set type=string first to store literal text.");
                     }
                     else
                     {
@@ -647,8 +653,12 @@ public partial class ExcelHandler
                     if (value.ToLowerInvariant() is "boolean" or "bool" && cell.CellValue != null)
                     {
                         var cv = cell.CellValue.Text.Trim().ToLowerInvariant();
-                        if (cv is "true" or "yes") cell.CellValue = new CellValue("1");
-                        else if (cv is "false" or "no") cell.CellValue = new CellValue("0");
+                        if (cv is "true" or "yes" or "1") cell.CellValue = new CellValue("1");
+                        else if (cv is "false" or "no" or "0") cell.CellValue = new CellValue("0");
+                        else if (!string.IsNullOrEmpty(cv))
+                            throw new ArgumentException(
+                                $"Cannot store '{cell.CellValue.Text}' as boolean; value must be true/false, yes/no, or 1/0. " +
+                                "Use type=string to keep the literal text.");
                     }
                     // For date type, apply a default date number format unless caller already specifies one
                     if (value.Equals("date", StringComparison.OrdinalIgnoreCase)
