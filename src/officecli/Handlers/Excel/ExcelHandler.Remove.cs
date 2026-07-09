@@ -1262,6 +1262,10 @@ public partial class ExcelHandler
             colMarkerShift: m => m >= insertColIdx - 1 ? m + 1 : m,
             crossSheetFormulaMapper: (other, f) => Core.FormulaRefShifter.Shift(
                 f, other, sheetName, Core.FormulaShiftDirection.ColumnsRight, insertColIdx));
+
+        // A column inserted inside a table's span widened its ref above; sync
+        // the tableColumns list so count matches the ref width (else 0x800A03EC).
+        SyncTableColumnsAfterColInsert(worksheet, insertColIdx);
     }
 
     private static string? ShiftRowInRefDown(string? refStr, int insertRow)
@@ -1470,8 +1474,111 @@ public partial class ExcelHandler
             {
                 cols[pos].Remove();
                 tableColumns.Count = (uint)tableColumns.Elements<TableColumn>().Count();
+                // Renumber ids and (for header-less tables) rename Column1..N —
+                // a gap or out-of-order auto name makes Excel refuse (0x800A03EC).
+                NormalizeTableColumns(tbl, tableColumns);
                 tbl.Save();
             }
+        }
+    }
+
+    /// <summary>Reassign tableColumn @id sequentially 1..N. Excel refuses a
+    /// table whose column ids have gaps or don't start at 1.</summary>
+    private static void RenumberTableColumnIds(TableColumns tableColumns)
+    {
+        uint id = 1;
+        foreach (var tc in tableColumns.Elements<TableColumn>())
+            tc.Id = id++;
+    }
+
+    /// <summary>
+    /// After a column insert/delete resync, fix up the tableColumn ids (always)
+    /// and, for a HEADER-LESS table (headerRowCount=0, auto-named columns),
+    /// rename them Column1..N in order. A header-less table with out-of-order
+    /// or gapped auto names (e.g. Column1, Column3) makes Excel refuse the file
+    /// (0x800A03EC). Header tables are left alone — their column names must
+    /// track the header-row cells (handled elsewhere).
+    /// </summary>
+    private static void NormalizeTableColumns(Table tbl, TableColumns tableColumns)
+    {
+        RenumberTableColumnIds(tableColumns);
+        bool headerLess = tbl.HeaderRowCount != null && tbl.HeaderRowCount.Value == 0;
+        if (!headerLess) return;
+        int n = 1;
+        foreach (var tc in tableColumns.Elements<TableColumn>())
+            tc.Name = $"Column{n++}";
+    }
+
+    /// <summary>
+    /// Mirror of SyncTableColumnsAfterColDelete for column INSERTION. When a
+    /// column is inserted inside a table's span, ShiftColumnsRight widens the
+    /// table ref but left tableColumns unchanged — count no longer matched the
+    /// ref width, which real Excel refuses (0x800A03EC). Insert a matching
+    /// tableColumn at the right position and renumber ids.
+    /// </summary>
+    internal void SyncTableColumnsAfterColInsert(WorksheetPart worksheet, int insertColIdx)
+    {
+        foreach (var tablePart in worksheet.TableDefinitionParts.ToList())
+        {
+            var tbl = tablePart.Table;
+            var refStr = tbl?.Reference?.Value;
+            if (tbl == null || string.IsNullOrEmpty(refStr)) continue;
+
+            var rangeParts = refStr.Split(':');
+            int startColIdx, endColIdx;
+            try
+            {
+                startColIdx = ColumnNameToIndex(ParseCellReference(rangeParts[0]).Column);
+                endColIdx = rangeParts.Length > 1
+                    ? ColumnNameToIndex(ParseCellReference(rangeParts[1]).Column)
+                    : startColIdx;
+            }
+            catch { continue; }
+
+            var tableColumns = tbl.TableColumns;
+            if (tableColumns == null) continue;
+            var cols = tableColumns.Elements<TableColumn>().ToList();
+            int width = endColIdx - startColIdx + 1;
+            // Only tables whose ref actually WIDENED (insert landed inside the
+            // span) need a new column; a table shifted wholesale to the right
+            // keeps width == count.
+            if (width <= cols.Count) continue;
+
+            int pos = insertColIdx - startColIdx;
+            if (pos < 0) pos = 0;
+            if (pos > cols.Count) pos = cols.Count;
+
+            var used = new HashSet<string>(
+                cols.Select(tc => tc.Name?.Value ?? "").Where(n => n.Length > 0),
+                StringComparer.OrdinalIgnoreCase);
+            var baseName = $"Column{cols.Count + 1}";
+            var colName = baseName;
+            int dedupeIdx = 2;
+            while (!used.Add(colName)) colName = $"{baseName}{dedupeIdx++}";
+
+            var newCol = new TableColumn { Name = colName };
+            if (pos == 0) tableColumns.PrependChild(newCol);
+            else if (pos >= cols.Count) tableColumns.AppendChild(newCol);
+            else cols[pos - 1].InsertAfterSelf(newCol);
+
+            tableColumns.Count = (uint)tableColumns.Elements<TableColumn>().Count();
+            NormalizeTableColumns(tbl, tableColumns);
+
+            // Header tables: Excel requires the header-row cell text to match
+            // the tableColumn name; an inserted column leaves its header cell
+            // empty, which Excel refuses (0x800A03EC). Write the name into it.
+            if ((tbl.HeaderRowCount?.Value ?? 1) != 0)
+            {
+                var (_, headerRow) = ParseCellReference(rangeParts[0]);
+                var headerCellRef = $"{IndexToColumnName(insertColIdx)}{headerRow}";
+                var hdrWs = GetSheet(worksheet);
+                var hdrSheetData = hdrWs.GetFirstChild<SheetData>()
+                    ?? hdrWs.AppendChild(new SheetData());
+                var hdrCell = FindOrCreateCell(hdrSheetData, headerCellRef);
+                hdrCell.CellValue = new CellValue(newCol.Name?.Value ?? colName);
+                hdrCell.DataType = CellValues.String;
+            }
+            tbl.Save();
         }
     }
 
