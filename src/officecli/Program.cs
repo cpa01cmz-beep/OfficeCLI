@@ -30,6 +30,15 @@ if (args.Length == 1 && args[0] == "__update-check__")
     return 0;
 }
 
+// Schema fingerprint: officecli crc → CRC32 of the embedded schemas/help tree.
+// Downstream automation pins this to detect property-surface drift across
+// binary upgrades (same crc → schemas identical, safe to upgrade blind).
+if (args.Length == 1 && args[0] == "crc")
+{
+    Console.WriteLine(OfficeCli.Help.SchemaCrc.Compute());
+    return 0;
+}
+
 // Unify `--help` with `help` so AI agents see one help surface, not two.
 //   officecli [--help|-h|-?]              → officecli help
 //   officecli <cmd> [--help|-h|-?] [...]  → officecli help <cmd>
