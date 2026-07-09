@@ -868,6 +868,26 @@ internal static class AttributeFilter
         string selector, Func<string, List<DocumentNode>> query, Func<string, string>? keyResolver = null,
         bool applyAll = true)
     {
+        // CSS-style comma union: `row[Dept=Sales],row[Dept=Marketing]` runs
+        // each part and unions the results (deduped by Path). Commas INSIDE
+        // brackets are value text, never separators.
+        var unionParts = SplitTopLevelCommas(selector);
+        if (unionParts.Count > 1)
+        {
+            var unionResults = new List<DocumentNode>();
+            var unionWarnings = new List<FilterDiagnostic>();
+            var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var part in unionParts)
+            {
+                var (r, w) = FilterSelector(part.Trim(), query, keyResolver, applyAll);
+                foreach (var n in r)
+                    if (n.Path == null || seenPaths.Add(n.Path))
+                        unionResults.Add(n);
+                unionWarnings.AddRange(w);
+            }
+            return (unionResults, unionWarnings);
+        }
+
         var expr = ParseExpr(selector);
         if (expr != null && keyResolver != null)
             expr = NormalizeKeysExpr(expr, keyResolver);
@@ -1004,6 +1024,30 @@ internal static class AttributeFilter
     {
         var s = Regex.Replace((selector ?? "").TrimStart(), @"^(?:[^/!\[]+!|/[^/]+/)", "");
         return Regex.IsMatch(s, @"^(?:row|col|column)\[", RegexOptions.IgnoreCase);
+    }
+
+    // Split a selector on commas at bracket depth 0 (outside quotes).
+    private static List<string> SplitTopLevelCommas(string selector)
+    {
+        var parts = new List<string>();
+        int depth = 0, start = 0;
+        bool inQuote = false;
+        char quoteChar = '"';
+        for (int i = 0; i < selector.Length; i++)
+        {
+            var c = selector[i];
+            if (inQuote) { if (c == quoteChar) inQuote = false; continue; }
+            if (c is '"' or '\'') { inQuote = true; quoteChar = c; continue; }
+            if (c == '[') depth++;
+            else if (c == ']') depth = Math.Max(0, depth - 1);
+            else if (c == ',' && depth == 0)
+            {
+                parts.Add(selector[start..i]);
+                start = i + 1;
+            }
+        }
+        parts.Add(selector[start..]);
+        return parts.Where(p => !string.IsNullOrWhiteSpace(p)).ToList();
     }
 
     /// <summary>Wrap a flat condition list as an expression (single predicate or AND).</summary>

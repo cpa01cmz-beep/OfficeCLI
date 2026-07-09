@@ -3133,17 +3133,120 @@ public partial class ExcelHandler
                         || value == "1" || value.Equals("yes", StringComparison.OrdinalIgnoreCase);
                     break;
                 default:
-                    // Long-tail Row attribute (CT_Row attrs beyond height/
-                    // hidden/outlineLevel/collapsed — e.g. spans, style, ph,
-                    // thickTop, thickBot, customFormat). Symmetric with the
-                    // row Get reader. Preserve original case.
-                    row.SetAttribute(new DocumentFormat.OpenXml.OpenXmlAttribute("", key, "", value));
+                {
+                    // Table-column write: set /Sheet1/row[N] --prop Salary=9000
+                    // resolves the key against a table whose data rows include
+                    // this row and writes the cell under that column. Header
+                    // rows never resolve (a column-name write must not clobber
+                    // the header text) and unknown keys surface as unsupported
+                    // instead of a phantom <row> attribute.
+                    var colCellRef = TryResolveRowColumnCellRef(worksheet, (int)rowIdx, key);
+                    if (colCellRef != null)
+                    {
+                        var colCell = FindOrCreateCell(sheetData, colCellRef);
+                        WriteCellLiteralWithTypeDetection(colCell, value);
+                        break;
+                    }
+                    // Long-tail CT_Row attributes (spans, style/s, ph,
+                    // thickTop, thickBot, customFormat, dyDescent) stay
+                    // settable — symmetric with the row Get reader.
+                    if (key.ToLowerInvariant() is "spans" or "s" or "style" or "ph"
+                        or "thicktop" or "thickbot" or "customformat" or "customheight" or "dydescent")
+                    {
+                        row.SetAttribute(new DocumentFormat.OpenXml.OpenXmlAttribute("", key, "", value));
+                        break;
+                    }
+                    // If this row sits inside a table's data span, surface the
+                    // available column names so the caller can fix the typo.
+                    var tblCols = GetTableColumnsForDataRow(worksheet, (int)rowIdx);
+                    unsupported.Add(tblCols.Count > 0
+                        ? $"{key} (unknown column; table has columns: {string.Join(", ", tblCols)})"
+                        : key);
                     break;
+                }
             }
         }
 
         SaveWorksheet(worksheet);
         return unsupported;
+    }
+
+    /// <summary>
+    /// Column names of the table whose data rows contain row N (empty when the
+    /// row is a header/totals row or outside every table). Used to enrich the
+    /// unsupported-key message for a mistyped column name.
+    /// </summary>
+    private List<string> GetTableColumnsForDataRow(WorksheetPart worksheet, int rowIdx)
+    {
+        foreach (var tdp in worksheet.TableDefinitionParts)
+        {
+            var tbl = tdp.Table;
+            if (tbl?.Reference?.Value == null) continue;
+            if (!TryParseRange(tbl.Reference.Value, out var rng)) continue;
+            bool headerRow = (tbl.HeaderRowCount?.Value ?? 1) != 0;
+            bool totalRow = (tbl.TotalsRowCount?.Value ?? 0) > 0 || (tbl.TotalsRowShown?.Value ?? false);
+            int dataR1 = rng.r1 + (headerRow ? 1 : 0);
+            int dataR2 = rng.r2 - (totalRow ? 1 : 0);
+            if (rowIdx < dataR1 || rowIdx > dataR2) continue;
+            return tbl.GetFirstChild<TableColumns>()?.Elements<TableColumn>()
+                .Select(c => c.Name?.Value ?? "").Where(n => n.Length > 0).ToList()
+                ?? new List<string>();
+        }
+        return new List<string>();
+    }
+
+    /// <summary>
+    /// Resolve a Set key on row[N] to a cell reference via the tables whose
+    /// data rows contain row N: a table column NAME maps to its column, and a
+    /// bare column LETTER within a table's span maps directly. Header and
+    /// totals rows never resolve. Returns null when no table claims the key.
+    /// </summary>
+    private string? TryResolveRowColumnCellRef(WorksheetPart worksheet, int rowIdx, string key)
+    {
+        foreach (var tdp in worksheet.TableDefinitionParts)
+        {
+            var tbl = tdp.Table;
+            if (tbl?.Reference?.Value == null) continue;
+            if (!TryParseRange(tbl.Reference.Value, out var rng)) continue;
+            bool headerRow = (tbl.HeaderRowCount?.Value ?? 1) != 0;
+            bool totalRow = (tbl.TotalsRowCount?.Value ?? 0) > 0 || (tbl.TotalsRowShown?.Value ?? false);
+            int dataR1 = rng.r1 + (headerRow ? 1 : 0);
+            int dataR2 = rng.r2 - (totalRow ? 1 : 0);
+            if (rowIdx < dataR1 || rowIdx > dataR2) continue;
+            var colNames = tbl.GetFirstChild<TableColumns>()?.Elements<TableColumn>()
+                .Select(c => c.Name?.Value ?? "").ToList() ?? new List<string>();
+            var nameIdx = colNames.FindIndex(n => n.Equals(key, StringComparison.OrdinalIgnoreCase));
+            if (nameIdx >= 0)
+                return $"{IndexToColumnName(rng.c1 + nameIdx)}{rowIdx}";
+            if (Regex.IsMatch(key, "^[A-Za-z]{1,3}$"))
+            {
+                var ci = ColumnNameToIndex(key.ToUpperInvariant());
+                if (ci >= rng.c1 && ci <= rng.c2)
+                    return $"{key.ToUpperInvariant()}{rowIdx}";
+            }
+        }
+        return null;
+    }
+
+    // Literal cell write with number/string type detection — small shared
+    // shim over the import-time writer for the row-column Set path.
+    private static void WriteCellLiteralWithTypeDetection(Cell cell, string value)
+    {
+        if (double.TryParse(value, System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out _))
+        {
+            cell.DataType = null;
+            cell.RemoveAllChildren<InlineString>();
+            cell.CellFormula = null;
+            cell.CellValue = new CellValue(value);
+        }
+        else
+        {
+            cell.DataType = CellValues.String;
+            cell.RemoveAllChildren<InlineString>();
+            cell.CellFormula = null;
+            cell.CellValue = new CellValue(value);
+        }
     }
 
     // ==================== AutoFilter Set ====================
