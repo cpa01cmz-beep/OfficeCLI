@@ -52,7 +52,10 @@ public partial class ExcelHandler
         var bangIdx = Core.SelectorCommaSplit.TopLevelIndexOf(selector, '!');
         if (bangIdx > 0 && (bangIdx + 1 >= selector.Length || selector[bangIdx + 1] != '='))
         {
-            sheet = selector[..bangIdx];
+            // Excel-quoted names ('My Data (2024)'!row[...]) arrive quoted —
+            // the scanner already treats the quoted span as opaque, so the
+            // top-level '!' is the real separator; strip the quotes here.
+            sheet = UnquoteSheetName(selector[..bangIdx]);
             selector = selector[(bangIdx + 1)..];
         }
 

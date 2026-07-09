@@ -1109,7 +1109,9 @@ public partial class ExcelHandler
         var nativeCellRef = Regex.Match(selector, @"^([^/!]+)!([A-Z]+\d+(:[A-Z]+\d+)?)$", RegexOptions.IgnoreCase);
         if (nativeCellRef.Success)
         {
-            var node = Get($"/{nativeCellRef.Groups[1].Value}/{nativeCellRef.Groups[2].Value}");
+            // 'My Data (2024)'!A1 — Excel requires quoting names with spaces;
+            // strip the quotes so the DOM path resolves the real sheet.
+            var node = Get($"/{UnquoteSheetName(nativeCellRef.Groups[1].Value)}/{nativeCellRef.Groups[2].Value}");
             if (node.Type == "range" && node.Children.Count > 0)
                 return node.Children;
             return [node];
