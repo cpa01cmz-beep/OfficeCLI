@@ -1055,6 +1055,7 @@ internal static class AttributeFilter
             {
                 case AndExpr:
                 case OrExpr:
+                case NotExpr:                                                // not(...) — negation is always a content filter
                     return true;                                             // boolean expression
                 case PredicateExpr p:
                     if (p.Cond.Op == FilterOp.Exists) break;                // `[A]` / `[key]` bare token → structural (Excel col[A])
