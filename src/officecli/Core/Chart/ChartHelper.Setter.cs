@@ -1437,7 +1437,10 @@ internal static partial class ChartHelper
                         break;
                     }
                     var v3dParts = value.Split(',');
-                    chart.RemoveAllChildren<C.View3D>();
+                    // Build+validate the new element BEFORE removing the old one:
+                    // a range throw mid-build used to leave the prior valid
+                    // <c:view3D> already deleted (atomicity bug). Same rule as
+                    // gapWidth/overlap/holeSize.
                     var view3d = new C.View3D();
                     if (v3dParts.Length == 1)
                     {
@@ -1477,6 +1480,8 @@ internal static partial class ChartHelper
                             view3d.AppendChild(new C.Perspective { Val = (byte)persp });
                         }
                     }
+                    // All fields validated — now safe to swap the old element.
+                    chart.RemoveAllChildren<C.View3D>();
                     // Schema order: title, autoTitleDeleted, pivotFmts, view3D, ..., plotArea
                     var v3dPlotArea = chart.GetFirstChild<C.PlotArea>();
                     if (v3dPlotArea != null) chart.InsertBefore(view3d, v3dPlotArea);
