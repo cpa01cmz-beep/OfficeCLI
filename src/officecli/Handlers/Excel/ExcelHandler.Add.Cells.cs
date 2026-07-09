@@ -110,7 +110,7 @@ public partial class ExcelHandler
             sheets.AppendChild(newSheet);
         }
 
-        // Add/Set symmetry (CLAUDE.md): apply autoFilter / tabColor / hidden
+        // Add/Set symmetry (the project conventions): apply autoFilter / tabColor / hidden
         // at creation time by funneling into the same code paths Set uses,
         // so property bags accepted by Set are also accepted by Add.
         var sheetLevelForwarded = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -1146,7 +1146,7 @@ public partial class ExcelHandler
         // IEnumerable.GetEnumerator on the Dictionary<> static type, which does
         // NOT fire TrackingPropertyDictionary's shadow GetEnumerator — so applied
         // keys like bold/italic were never marked accessed and surfaced as a
-        // false unsupported_property (exit 2). See CLAUDE.md tracking pitfalls.
+        // false unsupported_property (exit 2). See the project conventions tracking pitfalls.
         // Each helper accepts the short key plus its font.* alias.
         if ((properties.TryGetValue("bold", out var rBold) && ParseHelpers.IsTruthy(rBold)) ||
             (properties.TryGetValue("font.bold", out var rFBold) && ParseHelpers.IsTruthy(rFBold)))

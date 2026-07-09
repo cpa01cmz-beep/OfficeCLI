@@ -602,7 +602,7 @@ public partial class ExcelHandler
             };
             // CONSISTENCY(unit-qualified-readback): row height is stored in
             // points in OOXML; emit as "{n}pt" so it matches pptx's
-            // unit-qualified readback (CLAUDE.md canonical value rule).
+            // unit-qualified readback (the project conventions canonical value rule).
             if (row.Height?.Value != null)
                 rowNode.Format["height"] = $"{row.Height.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}pt";
             if (row.Hidden?.Value == true) rowNode.Format["hidden"] = true;

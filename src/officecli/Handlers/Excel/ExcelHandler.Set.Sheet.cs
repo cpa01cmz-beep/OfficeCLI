@@ -1008,7 +1008,7 @@ public partial class ExcelHandler
                 // CONSISTENCY(range-action): sort is a region action like merge.
                 // Sheet-level path auto-detects the full used range; explicit ranges
                 // go through SetRange → SortRangeRows. Keep both entry points in
-                // sync. See CLAUDE.md "Consistency > Robustness".
+                // sync. See the project conventions "Consistency > Robustness".
                 case "sort":
                 {
                     // R7-3: remove ALL sortState children (malformed files may

@@ -4011,7 +4011,7 @@ internal static partial class ChartHelper
         // after datalabels= appended after them and produced an invalid
         // CT_LineSer. The helper's marker arm already lists the full
         // schema-after set: [dPt, dLbls, trendline, errBars, cat, val,
-        // xVal, yVal, bubbleSize, smooth, extLst]. Per CLAUDE.md
+        // xVal, yVal, bubbleSize, smooth, extLst]. Per the project conventions
         // "Consistency > Robustness" — the hand-rolled list was the lone
         // outlier; every other series-child writer already routes through
         // InsertSeriesChildInOrder.

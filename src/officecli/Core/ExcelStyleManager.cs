@@ -948,7 +948,7 @@ internal class ExcelStyleManager
         string name = fontProps.GetValueOrDefault("name",
             baseFont.FontName?.Val?.Value ?? OfficeDefaultFonts.MinorLatin);
         // CONSISTENCY(scheme-color): font.color accepts scheme names
-        // ("accent1"-"accent6", "lt1"/"dk1", "hlink", etc.) per CLAUDE.md.
+        // ("accent1"-"accent6", "lt1"/"dk1", "hlink", etc.) per the project conventions.
         // When matched, store as <color theme="N"/> instead of rgb.
         string? color;
         uint? colorTheme = null;

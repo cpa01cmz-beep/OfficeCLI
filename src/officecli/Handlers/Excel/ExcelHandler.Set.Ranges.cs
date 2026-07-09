@@ -501,7 +501,7 @@ public partial class ExcelHandler
 
         // R4-1/2/3: rewrite sidecar metadata refs that live outside <sheetData> but
         // encode cell addresses. Only refs pointing into the sort rectangle are
-        // rewritten; refs outside are untouched. See CLAUDE.md "Consistency > Robustness"
+        // rewritten; refs outside are untouched. See the project conventions "Consistency > Robustness"
         // — same philosophy as formula rejection: we do not attempt to rewrite refs
         // that cross the sort boundary (e.g. dataValidation sqref spanning A1:A100 when
         // only A2:A5 sort) because that would require partial-region splitting; instead

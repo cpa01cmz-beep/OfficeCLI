@@ -1459,7 +1459,7 @@ public partial class ExcelHandler
         // TrackingPropertyDictionary marks consumed keys accessed — a plain
         // `foreach (var (rawKey, rawVal) in properties)` goes through the
         // Dictionary<,> enumerator and bypasses access tracking
-        // (CLAUDE.md handler-as-truth). N is 1-based; both `column.` and
+        // (the project conventions handler-as-truth). N is 1-based; both `column.` and
         // `columns.` prefixes are accepted, mirroring the old regex.
         var tblColList = tableColumns.Elements<TableColumn>().ToList();
         for (int n = 1; n <= tblColList.Count; n++)
@@ -1598,7 +1598,7 @@ public partial class ExcelHandler
             // Read each candidate columns.N.totalsFormula via TryGetValue so the
             // TrackingPropertyDictionary marks consumed keys accessed — a plain
             // `foreach (var (rawKey, rawVal) in properties)` bypasses access
-            // tracking (CLAUDE.md handler-as-truth). N is 1-based; accept both
+            // tracking (the project conventions handler-as-truth). N is 1-based; accept both
             // `column.` and `columns.` prefixes, mirroring the old regex.
             for (int n = 1; n <= tblCols.Count; n++)
             {

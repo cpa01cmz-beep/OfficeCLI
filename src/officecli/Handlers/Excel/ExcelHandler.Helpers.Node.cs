@@ -737,7 +737,7 @@ public partial class ExcelHandler
 
                     // Protection readback handled above via the dotted
                     // canonical form (`protection.locked` / `protection.hidden`)
-                    // — see CONSISTENCY(canonical-keys) in CLAUDE.md. Flat
+                    // — see CONSISTENCY(canonical-keys) in the project conventions. Flat
                     // `locked` / `formulahidden` Get emission was removed to
                     // avoid double-emission alongside the dotted form. The
                     // Set side still accepts both flat shorthand and dotted

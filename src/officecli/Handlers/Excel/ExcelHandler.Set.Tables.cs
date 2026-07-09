@@ -271,7 +271,7 @@ public partial class ExcelHandler
     }
 
     // Replace backing embedded part + refresh ProgID. Cleans up the old payload
-    // part (CLAUDE.md Known API Quirks rule: always delete the old part on src
+    // part (the project conventions Known API Quirks rule: always delete the old part on src
 
     private List<string> SetTableColumnByPath(Match m, WorksheetPart worksheet, Dictionary<string, string> properties)
     {

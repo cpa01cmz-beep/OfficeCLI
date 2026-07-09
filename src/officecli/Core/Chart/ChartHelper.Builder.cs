@@ -1678,7 +1678,7 @@ internal static partial class ChartHelper
         // CONSISTENCY(pt-suffix): accept the unit-qualified form (`18pt`,
         // `10.5pt`) on input — without this, `int.TryParse("18pt")` failed
         // and silently defaulted to 1000 (10pt), so `axisFont=18pt:…` ignored
-        // the size. Mirrors the root CLAUDE.md "Font size input is lenient:
+        // the size. Mirrors the project conventions "Font size input is lenient:
         // accepts `14`, `14pt`, `10.5pt`" rule.
         var sizeStr = parts.Length > 0
             ? (parts[0].EndsWith("pt", System.StringComparison.OrdinalIgnoreCase) ? parts[0][..^2] : parts[0])

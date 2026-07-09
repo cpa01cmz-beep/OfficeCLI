@@ -427,7 +427,7 @@ static partial class CommandBuilder
             // Capture PrintBatchResults output and apply the same envelope
             // here so callers see the same shape regardless of resident state.
             // JSON Envelope contract: batch is a *judgment* command (root
-            // CLAUDE.md "Judgment: any batch step failed -> outer false").
+            // the project conventions "Judgment: any batch step failed -> outer false").
             // Outer envelope.success is true only when every step succeeded;
             // a single failed step flips outer to false even if siblings
             // succeeded. Per-step verdicts still ride on

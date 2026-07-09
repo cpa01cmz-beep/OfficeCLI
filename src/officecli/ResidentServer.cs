@@ -1199,7 +1199,7 @@ public class ResidentServer : IDisposable
         deferHandler?.ReconcileGlobalIds();
 
         // Judgment contract: batch is classified as a judgment command (root
-        // CLAUDE.md "Judgment: any batch step failed -> outer false"). The
+        // the project conventions "Judgment: any batch step failed -> outer false"). The
         // verdict flips to failure as soon as ANY step is rejected. Keeps
         // envelope.success / exit code in lockstep with the non-resident
         // path.
