@@ -608,8 +608,38 @@ internal class ExcelStyleManager
 
     // ==================== NumberFormat ====================
 
+    // Friendly English keyword aliases for number formats. Consistent with
+    // the project's lenient-input convention (colors accept "red", sizes
+    // accept "14", spacing accepts "0.5cm"). Without this, a user typing the
+    // intuitive word "currency" got the literal string written as a custom
+    // format code — its unquoted letters both mis-rendered the value (the 'y'
+    // is a date token, so 100 showed as a date) and made real Excel refuse
+    // the whole file (0x800A03EC). Only a whole-string case-insensitive match
+    // is rewritten; genuine Excel codes pass through untouched.
+    private static readonly Dictionary<string, string> NumFmtKeywordAliases =
+        new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["general"] = "General",
+        ["number"] = "#,##0.00",
+        ["comma"] = "#,##0.00",
+        ["currency"] = "\"$\"#,##0.00",
+        ["accounting"] = "_(\"$\"* #,##0.00_);_(\"$\"* \\(#,##0.00\\);_(\"$\"* \"-\"??_);_(@_)",
+        ["percent"] = "0.00%",
+        ["percentage"] = "0.00%",
+        ["scientific"] = "0.00E+00",
+        ["text"] = "@",
+        ["date"] = "yyyy-mm-dd",
+        ["time"] = "h:mm:ss",
+        ["datetime"] = "yyyy-mm-dd h:mm:ss",
+    };
+
     private static uint GetOrCreateNumFmt(Stylesheet stylesheet, string formatCode)
     {
+        // Resolve friendly keyword aliases (currency, scientific, ...) to real
+        // Excel codes before any validation runs.
+        if (NumFmtKeywordAliases.TryGetValue(formatCode.Trim(), out var aliased))
+            formatCode = aliased;
+
         // R29-1 [BLOCKER]: a formatCode must never be written with an unbalanced
         // number of double-quotes — Excel text-literal delimiters come in matched
         // pairs, and an unclosed literal makes Excel refuse the whole file
