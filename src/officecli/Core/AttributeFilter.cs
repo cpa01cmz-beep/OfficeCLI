@@ -781,6 +781,7 @@ internal static class AttributeFilter
     public sealed record PredicateExpr(Condition Cond) : FilterExpr;
     public sealed record AndExpr(IReadOnlyList<FilterExpr> Parts) : FilterExpr;
     public sealed record OrExpr(IReadOnlyList<FilterExpr> Parts) : FilterExpr;
+    public sealed record NotExpr(FilterExpr Part) : FilterExpr;
 
     /// <summary>
     /// Parse a selector's bracket filters into one expression tree. Multiple
@@ -848,6 +849,7 @@ internal static class AttributeFilter
         PredicateExpr p => new PredicateExpr(new Condition(keyResolver(p.Cond.Key), p.Cond.Op, p.Cond.Value)),
         AndExpr a => new AndExpr(a.Parts.Select(x => NormalizeKeysExpr(x, keyResolver)).ToList()),
         OrExpr o => new OrExpr(o.Parts.Select(x => NormalizeKeysExpr(x, keyResolver)).ToList()),
+        NotExpr n => new NotExpr(NormalizeKeysExpr(n.Part, keyResolver)),
         _ => expr
     };
 
@@ -858,6 +860,7 @@ internal static class AttributeFilter
         PredicateExpr p => MatchOne(node, p.Cond),
         AndExpr a => a.Parts.All(x => MatchesExpr(node, x)),
         OrExpr o => o.Parts.Any(x => MatchesExpr(node, x)),
+        NotExpr n => !MatchesExpr(node, n.Part),
         _ => true
     };
 
@@ -1106,6 +1109,7 @@ internal static class AttributeFilter
         PredicateExpr p => new[] { p.Cond },
         AndExpr a => a.Parts.SelectMany(LeafConditions),
         OrExpr o => o.Parts.SelectMany(LeafConditions),
+        NotExpr n => LeafConditions(n.Part),
         _ => Enumerable.Empty<Condition>()
     };
 
@@ -1113,7 +1117,7 @@ internal static class AttributeFilter
     //   expr   := or
     //   or     := and ( 'or' and )*
     //   and    := factor ( 'and' factor )*
-    //   factor := '(' or ')' | predicate
+    //   factor := 'not' '(' or ')' | '(' or ')' | predicate
     //   pred   := key op value
     private sealed class ExprParser
     {
@@ -1146,9 +1150,20 @@ internal static class AttributeFilter
         private FilterExpr ParseFactor()
         {
             SkipWs();
-            // Only `and` / `or` are reserved. `not` is intentionally NOT a keyword
-            // — it parses as an ordinary value/identifier, leaving the word free
-            // for a future negation design.
+            // `not(...)` negates a sub-expression — the form the Err suggestion
+            // has always advertised. Word-bounded: `[not=5]` (a column named
+            // "not") still parses as a predicate because '=' breaks the keyword;
+            // an exists-check on a column literally named "not" needs quotes
+            // (["not"]).
+            if (TryKeyword("not"))
+            {
+                SkipWs();
+                Expect('(');
+                var negated = ParseOr();
+                SkipWs();
+                Expect(')');
+                return new NotExpr(negated);
+            }
             if (Peek() == '(')
             {
                 _i++;
