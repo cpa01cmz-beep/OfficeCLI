@@ -161,6 +161,149 @@ internal static class HtmlScreenshot
         return new Result(false, "", lastError ?? "no headless backend available");
     }
 
+    /// <summary>
+    /// Screenshot only the region covered by the given <c>data-path</c> targets
+    /// (a single element, or several whose union bounding box is captured —
+    /// e.g. the two corner cells of an xlsx range). Two passes, mirroring the
+    /// PAGES:N dump-dom pattern: pass 1 injects a measure script that un-hides
+    /// hidden ancestors (an inactive sheet tab's content) and writes the union
+    /// rect into the document title; pass 2 injects a crop transform at that
+    /// rect and captures at exactly the rect's size. Chrome-family only (the
+    /// injection needs a scriptable engine); returns a Result whose Error is
+    /// "clip_target_not_found" when no target matched a rendered element.
+    /// </summary>
+    public static Result CaptureClipped(string htmlPath, string outPath, IReadOnlyList<string> dataPaths,
+                                        int padPx = 2, int scale = 2)
+    {
+        if (FindChrome() == null)
+            return new Result(false, "", "clip mode requires a Chrome-family browser (Chrome/Edge/Chromium)");
+        var html = File.ReadAllText(htmlPath);
+        var pathsJs = "[" + string.Join(",", dataPaths.Select(p =>
+            "'" + p.Replace("\\", "\\\\").Replace("'", "\\'") + "'")) + "]";
+        // Shared prelude: resolve targets and force-display hidden ancestors so
+        // an inactive sheet's cells become measurable/visible.
+        // A data-path can match several nodes (the pptx sidebar thumbnails
+        // clone slide content), so pick the VISIBLE match with the largest
+        // box; only when every match is hidden (an inactive xlsx sheet tab)
+        // un-hide the first one's display:none ancestors and use it.
+        var prelude =
+            "var _clipPaths=" + pathsJs + ";" +
+            "function _clipPick(p){var cands=document.querySelectorAll('[data-path=\"'+p+'\"]');" +
+            "var best=null,bestA=0;cands.forEach(function(el){var r=el.getBoundingClientRect();" +
+            "var a=r.width*r.height;if(a>bestA){bestA=a;best=el;}});" +
+            "if(best)return best;if(cands.length===0)return null;" +
+            "var el=cands[0];for(var an=el;an&&an!==document.documentElement;an=an.parentElement){" +
+            "if(getComputedStyle(an).display==='none')an.style.display='block';}return el;}" +
+            "function _clipEls(){var els=[];_clipPaths.forEach(function(p){" +
+            "var el=_clipPick(p);if(el)els.push(el);});return els;}";
+
+        // No requestAnimationFrame here: under --virtual-time-budget headless
+        // rendering, rAF callbacks fire unreliably (no compositor frames), so
+        // the title write raced the DOM dump. getBoundingClientRect forces a
+        // synchronous reflow, so measuring directly at load is deterministic.
+        var measureScript =
+            "<script>function _clipRun(){" +
+            prelude +
+            "var els=_clipEls();if(els.length===0){document.title='CLIP:NOTFOUND';return;}" +
+            "var x1=1e9,y1=1e9,x2=-1e9,y2=-1e9;els.forEach(function(el){var r=el.getBoundingClientRect();" +
+            "var x=r.left+window.scrollX,y=r.top+window.scrollY;" +
+            "if(x<x1)x1=x;if(y<y1)y1=y;if(x+r.width>x2)x2=x+r.width;if(y+r.height>y2)y2=y+r.height;});" +
+            "document.title='CLIP:'+Math.floor(x1)+','+Math.floor(y1)+','+Math.ceil(x2-x1)+','+Math.ceil(y2-y1);}" +
+            "if(document.readyState==='complete')_clipRun();else window.addEventListener('load',_clipRun);</script>";
+
+        string Inject(string doc, string script) =>
+            doc.Contains("</body>", StringComparison.OrdinalIgnoreCase)
+                ? doc.Replace("</body>", script + "</body>")
+                : doc + script;
+
+        var measurePath = htmlPath + ".clipmeasure.html";
+        try
+        {
+            File.WriteAllText(measurePath, Inject(html, measureScript));
+            var dom = DumpDom(measurePath);
+            if (dom == null) return new Result(false, "chrome", "dump-dom failed while measuring the clip target");
+            // Match the TITLE only — the serialized DOM also contains the
+            // injected script's source, so a bare Contains() would match the
+            // literals inside it.
+            if (System.Text.RegularExpressions.Regex.IsMatch(dom, @"<title>CLIP:NOTFOUND</title>"))
+                return new Result(false, "chrome", "clip_target_not_found");
+            var m = System.Text.RegularExpressions.Regex.Match(dom, @"<title>CLIP:(-?\d+),(-?\d+),(\d+),(\d+)</title>");
+            if (!m.Success) return new Result(false, "chrome", "clip rect not reported (page may have replaced the title)");
+            var x = Math.Max(0, int.Parse(m.Groups[1].Value) - padPx);
+            var y = Math.Max(0, int.Parse(m.Groups[2].Value) - padPx);
+            var w = int.Parse(m.Groups[3].Value) + 2 * padPx;
+            var h = int.Parse(m.Groups[4].Value) + 2 * padPx;
+            if (w <= 0 || h <= 0) return new Result(false, "chrome", "clip target has an empty bounding box");
+            // The viewport must stay the rect's CSS size (shrinking would
+            // truncate, not scale), so large targets drop the HiDPI factor
+            // instead to keep the PNG within the multi-image LLM ceiling.
+            if (Math.Max(w, h) * scale > 1920) scale = 1;
+
+            // Pass 2: capture at a viewport of the measured rect's size. The
+            // crop script re-measures the target LIVE inside that viewport —
+            // responsive previews (pptx scales slides to the viewport width)
+            // lay out differently at the small capture window, so pass-1
+            // coordinates cannot be reused. It then applies scale(k) to fill
+            // the viewport plus a translate to the live origin; for static
+            // previews (xlsx/docx) the live rect equals the measured one and
+            // k ≈ 1. The transform goes on <html> so nested page/sheet
+            // transforms compose underneath it.
+            var cropScript =
+                "<script>function _clipCrop(){" +
+                prelude +
+                "var els=_clipEls();if(els.length===0)return;" +
+                "var x1=1e9,y1=1e9,x2=-1e9,y2=-1e9;els.forEach(function(el){var r=el.getBoundingClientRect();" +
+                "var x=r.left+window.scrollX,y=r.top+window.scrollY;" +
+                "if(x<x1)x1=x;if(y<y1)y1=y;if(x+r.width>x2)x2=x+r.width;if(y+r.height>y2)y2=y+r.height;});" +
+                $"var pad={padPx};x1-=pad;y1-=pad;" +
+                // The intended viewport is interpolated, NOT window.innerWidth:
+                // Chrome clamps small windows to a ~500px minimum, so innerWidth
+                // can exceed the requested size and would over-zoom the crop.
+                $"var k=Math.min({w}/(x2-x1+pad),{h}/(y2-y1+pad));" +
+                "var st=document.documentElement.style;st.overflow='hidden';" +
+                "st.transform='scale('+k+') translate('+(-x1)+'px,'+(-y1)+'px)';st.transformOrigin='0 0';" +
+                "document.title='CLIPPED';}" +
+                "if(document.readyState==='complete')_clipCrop();else window.addEventListener('load',_clipCrop);</script>";
+            var cropPath = htmlPath + ".clipcrop.html";
+            try
+            {
+                File.WriteAllText(cropPath, Inject(html, cropScript));
+                var ok = CaptureChromeSized(cropPath, outPath, w, h, scale);
+                return ok
+                    ? new Result(true, "chrome", null)
+                    : new Result(false, "chrome", "clipped capture produced no image");
+            }
+            finally { try { File.Delete(cropPath); } catch { /* ignore */ } }
+        }
+        finally { try { File.Delete(measurePath); } catch { /* ignore */ } }
+    }
+
+    /// <summary>
+    /// Parse a `--clip` target into the data-path list CaptureClipped consumes.
+    /// Two forms: an xlsx range `/Sheet1/A1:C3` (also `Sheet1!A1:C3`) resolves
+    /// to its two corner cell paths; anything else is a single element
+    /// data-path used verbatim (`/slide[1]/shape[2]`, `/body/table[1]`, …).
+    /// </summary>
+    public static List<string> ResolveClipDataPaths(string clip)
+    {
+        var c = clip.Trim();
+        // Sheet1!A1:C3 → /Sheet1/A1:C3
+        var bang = c.IndexOf('!');
+        if (bang > 0 && !c.StartsWith('/'))
+            c = "/" + c[..bang] + "/" + c[(bang + 1)..];
+        var m = System.Text.RegularExpressions.Regex.Match(
+            c, @"^(/[^/]+)/([A-Za-z]{1,3}\d+):([A-Za-z]{1,3}\d+)$");
+        if (m.Success)
+        {
+            return
+            [
+                $"{m.Groups[1].Value}/{m.Groups[2].Value.ToUpperInvariant()}",
+                $"{m.Groups[1].Value}/{m.Groups[3].Value.ToUpperInvariant()}",
+            ];
+        }
+        return [c];
+    }
+
     private static IEnumerable<(string, Func<string, string, int, int, (bool, string?)>)> Backends()
     {
         yield return ("playwright", TryPlaywright);

@@ -1400,6 +1400,10 @@ public class ResidentServer : IDisposable
             byte[]? directPng = null;
             var gridCols = req.GetIntArg("grid") ?? 0;
             var renderMode = (req.GetArgOrNull("render") ?? "auto").ToLowerInvariant();
+            // --range clips a data-path region out of the HTML preview — mirrors
+            // CommandBuilder.View.cs: native/direct-PNG backends are bypassed.
+            var rangeArg = req.GetArgOrNull("range");
+            if (rangeArg != null) renderMode = "html";
             var sw = req.GetIntArg("screenshot-width") ?? 1600;
             var sh = req.GetIntArg("screenshot-height") ?? 1200;
             // CONSISTENCY(screenshot-default-first-page): mirror CommandBuilder.View.cs —
@@ -1410,6 +1414,9 @@ public class ResidentServer : IDisposable
             if (_handler is OfficeCli.Handlers.PowerPointHandler pptShotHandler)
             {
                 var effectiveFilter = pageFilter;
+                if (rangeArg != null && string.IsNullOrEmpty(effectiveFilter)
+                    && System.Text.RegularExpressions.Regex.Match(rangeArg, @"^/slide\[(\d+)\]") is { Success: true } slideM)
+                    effectiveFilter = slideM.Groups[1].Value;
                 if (string.IsNullOrEmpty(effectiveFilter) && start is null && end is null && gridCols == 0)
                     effectiveFilter = "1";
                 var (pStart, pEnd) = ResolvePptHtmlPage(effectiveFilter, start, end, pptShotHandler);
@@ -1535,13 +1542,17 @@ public class ResidentServer : IDisposable
             }
             else if (_handler is OfficeCli.Handlers.WordHandler wordShotHandler)
             {
-                var effectiveFilter = string.IsNullOrEmpty(pageFilter) ? "1" : pageFilter;
+                var effectiveFilter = rangeArg != null
+                    ? pageFilter
+                    : (string.IsNullOrEmpty(pageFilter) ? "1" : pageFilter);
                 if (renderMode != "html" && OperatingSystem.IsWindows())
                 {
                     // See the pptx branch: only an editable handler must be released
                     // (its write handle blocks Word); a read-only handler coexists.
                     if (_editable) _handler.Dispose();
-                    try { directPng = OfficeCli.Core.WordPdfBackend.Render(_filePath, effectiveFilter); } catch { directPng = null; }
+                    // effectiveFilter is only null under --range, which forces
+                    // renderMode=html — this native branch is then unreachable.
+                    try { directPng = OfficeCli.Core.WordPdfBackend.Render(_filePath, effectiveFilter!); } catch { directPng = null; }
                     if (_editable)
                     {
                         _handler = OfficeCli.Handlers.DocumentHandlerFactory.Open(_filePath, _editable);
@@ -1570,7 +1581,10 @@ public class ResidentServer : IDisposable
             {
                 var tmpHtml = Path.Combine(Path.GetTempPath(), $"officecli_preview_{Path.GetFileNameWithoutExtension(_filePath)}_{DateTime.Now:HHmmss}_{Guid.NewGuid():N}.html");
                 File.WriteAllText(tmpHtml, html!);
-                var rs = OfficeCli.Core.HtmlScreenshot.Capture(tmpHtml, pngPath, sw, sh);
+                var rs = rangeArg != null
+                    ? OfficeCli.Core.HtmlScreenshot.CaptureClipped(tmpHtml, pngPath,
+                        OfficeCli.Core.HtmlScreenshot.ResolveClipDataPaths(rangeArg))
+                    : OfficeCli.Core.HtmlScreenshot.Capture(tmpHtml, pngPath, sw, sh);
                 try { File.Delete(tmpHtml); } catch { /* ignore */ }
                 if (!rs.Ok)
                 {
